@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <array>
 
 enum class ZoneType {
     URBAN_CORE,
@@ -14,12 +15,15 @@ enum class RoadType {
     PRIMARY,
     SECONDARY,
     ALLEY,
-    PEDESTRIAN_PATH
+    PEDESTRIAN_PATH,
+    MAGLIFT_TRACK
 };
 
 struct WorldConfigComponent {
-    int macro_cell_size = 40; // World Units (WU)
-    int chunk_size = 80;      // World Units (WU)
+    int macro_cell_size = 40;      // World Units (WU)
+    int chunk_size = 80;           // World Units (WU)
+    float world_min = -1000.0f;    // World boundary minimum (WU)
+    float world_max =  1000.0f;    // World boundary maximum (WU)
 };
 
 struct TransformComponent {
@@ -44,13 +48,45 @@ struct RoadComponent {
     float traffic_density = 0.0f;
 };
 
+enum class Facing { UP, DOWN, LEFT, RIGHT };
+
 struct TrafficLightComponent {
     enum State { RED, YELLOW, GREEN } state;
     float timer = 0.0f;
+    Facing facing = Facing::DOWN;
 };
 
 struct StopSignComponent {
     // FIFO logic is handled by intersection management system
+};
+
+// Represents a road intersection; holds a FIFO queue of up to 8 waiting vehicles.
+// The front-of-queue vehicle gets the right-of-way; it must dequeue itself once clear.
+struct IntersectionComponent {
+    static constexpr int QUEUE_CAP = 8;
+    std::array<Entity, QUEUE_CAP> queue{};
+    int head = 0; // index of the front waiting vehicle
+    int size = 0; // number of vehicles in queue
+
+    // Returns MAX_ENTITIES if queue empty, else the entity at the front.
+    Entity front() const { return (size > 0) ? queue[head % QUEUE_CAP] : MAX_ENTITIES; }
+
+    bool enqueue(Entity e) {
+        if (size >= QUEUE_CAP) return false;
+        queue[(head + size) % QUEUE_CAP] = e;
+        ++size;
+        return true;
+    }
+
+    void dequeue() {
+        if (size > 0) { ++head; --size; }
+    }
+
+    bool contains(Entity e) const {
+        for (int i = 0; i < size; ++i)
+            if (queue[(head + i) % QUEUE_CAP] == e) return true;
+        return false;
+    }
 };
 
 struct VehicleComponent {
@@ -81,8 +117,6 @@ struct CameraComponent {
     Entity target_entity; // Entity to follow
 };
 
-enum class Facing { UP, DOWN, LEFT, RIGHT };
-
 struct PlayerComponent {
     float speed = 50.0f; // WU per second
     Facing facing = Facing::DOWN;
@@ -94,6 +128,12 @@ struct GoalComponent {
 
 struct SolidComponent {
     bool is_solid = true;
+};
+
+struct CitizenComponent {
+    Facing facing = Facing::DOWN;
+    float speed = 30.0f;
+    float wander_timer = 0.0f;
 };
 
 struct MovementComponent {
