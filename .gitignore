@@ -1,0 +1,45 @@
+# Build output
+build/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# User-specific files
+*.swp
+*.swo
+*.DS_Store
+
+# Compiled binaries
+NeonOubliette
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.code-workspace
+
+# MacOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Asset pipeline cache (if any)
+assets/sprites/*/cache/
+
+# Ignore by pattern (expand as needed)
+*.o
+*.obj
+*.d
+*.exe
+*.out
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
