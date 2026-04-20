@@ -128,6 +128,7 @@ public:
             uint64_t stable_id = std::hash<float>{}(transform.x) ^ (std::hash<float>{}(transform.y) << 1);
 
             registry.assign<BuildingComponent>(e, stable_id, floors, true);
+            registry.assign<BuildingAtmosphereComponent>(e, 20.0f, 100.0f);
         }
     }
 };

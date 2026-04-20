@@ -61,6 +61,13 @@ public:
         return get_array<T>()->has(entity);
     }
 
+    template<typename T>
+    void remove(Entity entity) {
+        auto type = std::type_index(typeid(T));
+        if (components.find(type) == components.end()) return;
+        get_array<T>()->remove(entity);
+    }
+
     // Returns all live entities that have every listed component type.
     // Iterates the smallest matching component array — O(m * k) where
     // m = size of smallest set, k = number of queried types.

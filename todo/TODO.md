@@ -1,322 +1,332 @@
-# Neon Oubliette — Master TODO
+# Neon Oubliette - Triaged TODO
 
-## Phase 1: Foundation (Complete)
-- [x] Basic C++ / SDL2 Setup
-- [x] Lightweight ECS implementation
-- [x] Basic Playable Area with Grid
-- [x] Player Movement (WASD)
-- [x] Basic AABB Collision & Obstacles
-- [x] Asset pipeline preparation (stb_image, Player PNG)
-- [x] Art Direction & Asset List documented
+This backlog is ordered by game-development dependency, not by simulation layer. The current goal is to turn the existing city simulation into a readable playable loop: scan, learn, trade or steal, trigger consequences, and survive.
 
-## Phase 2: World Navigation & Camera (Complete)
-- [x] Implement Camera System to follow the player
-- [x] Render world relative to camera position
-- [x] Expand the playable grid area to be larger than the screen
-- [x] Layered rendering for depth (ground vs elevated)
+Audit source: `todo/TODO_AUDIT_2026-04-18.md`.
 
-## Phase 3: Infrastructure & Stateful Vehicles (Complete)
-- [x] Define Road segments and rendering (Primary, Secondary, Alleys)
-- [x] Implement Stateful Vehicles (owner, home location, type)
-- [x] Implement Vehicle Interaction (Enter/Exit vehicles, player driving)
-- [x] Vehicle movement logic (Player controlled vs basic velocity)
-- [x] Implement simple Traffic Lights (RED/YELLOW/GREEN cycles)
+## Completed Foundation
 
-## Phase 4: City Generation & Urban Planning (Complete)
-- [x] Procedural block and lot subdivision (Chicago-style)
-- [x] Procedural building placement and rendering
-- [x] Distance-based building height gradients
-- [x] Unique building IDs (64-bit stable IDs)
-- [x] Super-block building clusters (zero-gap adjacencies)
-- [x] Pedestrian alleys and narrow paths
-- [x] Scale separation for transit infrastructure (Mag-tracks)
+- [x] C++ / SDL2 project setup
+- [x] Lightweight ECS with entity deletion and optimized views
+- [x] Spatial hash grid collision
+- [x] Simulation coordinator with staggered L0-L4 tick rates
+- [x] Camera-following world renderer
+- [x] Chicago-style procedural city blocks, roads, alleys, sidewalks, buildings
+- [x] Traffic lights, stop-sign FIFO intersections, ambient vehicles, traffic density
+- [x] Automated maglift transit with stations, boarding, stops, and terminal ping-pong
+- [x] Pedestrian spawning, goal movement, transit waits, congestion avoidance
+- [x] Day/night phases, weather states, ambient tint, spawn-rate modulation
+- [x] ASCII/glyph renderer and on-screen debug/survival HUD
+- [x] L0 environment: temperature, atmosphere, structural decay, power grid, hazards
+- [x] L1 biology: needs, vitals, injuries, pathogens, survival items, inventory counters
+- [x] L2 cognition/social: PAD, memory ring, GDI goals, relationships, schedules, social rank, rumors
+- [x] L3 baseline economy: wallets, employers, wages, local markets
 
 ---
 
-## Phase 5: ECS Infrastructure & Scale (Current — Blockers)
-*Must be done before Phase 6+ work. Without these, entity counts will stall performance.*
+## Milestone 1 - Make The Simulation Visible
 
-- [x] **Entity Deletion** (`ecs.h`)
-    - [x] Add `virtual remove(Entity)` to `IComponentArray` interface
-    - [x] Add `free_list` + `live` set to `Registry`
-    - [x] Implement `Registry::destroy(Entity)` — removes from all arrays, recycles ID
-    - [x] Modify `Registry::create()` to pull from free list first
-    - [x] `Registry::alive(Entity)` and `entity_count()` helpers
-- [x] **View Optimization** (`ecs.h`)
-    - [x] Expose `size()` and `keys()` on `ComponentArray<T>` via `IComponentArray`
-    - [x] Rewrite `view<ComponentTypes...>()` to iterate smallest component set
-- [x] **Spatial Hash Grid for Collision** (`spatial_grid.h`, `simulation_systems.h`)
-    - [x] `SpatialGrid` with cell size = `macro_cell_size` (40 WU)
-    - [x] `rebuild()` from SolidComponent entities at start of each `MovementSystem::update()`
-    - [x] `checkCollision()` queries grid candidates, then does exact AABB check
-- [x] **Simulation Coordinator** (`simulation_coordinator.h`, `main.cpp`)
-    - [x] Tick-rate gates: L0 (60 Hz), L2 (2 Hz), L3 (1 Hz), L4 (0.2 Hz)
-    - [x] `coordinator.advance()` in game loop; citizens gated at L2
-- [x] **Debug HUD** (`main.cpp`)
-    - [x] FPS, entity count, camera position, frame number via window title (updates at 1 Hz)
-- [x] **Extract World Bounds** (`components.h`, `simulation_systems.h`)
-    - [x] Add `world_min` / `world_max` fields to `WorldConfigComponent`
-    - [x] Replace hardcoded `-1000 to 1000` in `simulation_systems.h` world boundary clamp
-
----
-
-## Phase 6: Ambient Traffic & Transit Systems
-- [ ] **Ambient Traffic System**
-    - [x] Real-time vehicle dimensions and rigid body collision (EMMVs, Transports with SolidComponent)
-    - [x] Wire `despawnVehicles()` now that entity deletion exists
-    - [x] Camera-radius spawn/despawn with configurable radius
-    - [x] Intersection turn queuing (FIFO logic for unprotected intersections)
-    - [x] Stop-sign FIFO intersection management system
-    - [x] Traffic density propagation along road segments
-- [ ] **Transit & Elevated Rails**
-    - [ ] Automated transit vehicle schedules and station stops
-    - [ ] Player boarding/disembarking from automated transit
-    - [ ] Magnetic track switching logic for Maglifts
-    - [ ] Maglift Monorail pathfinding along track graph
-- [ ] **Pedestrian Flow**
-    - [ ] NPC citizen spawning on sidewalks/pedestrian paths
-    - [ ] Simple goal-based walking (wandering + nearest destination)
-    - [ ] Stop clustering for public transit waits
-    - [ ] Sidewalk congestion and flow avoidance
-- [ ] **Time of Day**
-    - [ ] Basic DAWN/DAY/DUSK/NIGHT cycle
-    - [ ] Visual color shift per time state (ambient tint)
-    - [ ] Spawn rate modulation by time of day (vehicles, pedestrians)
-
----
-
-## Phase 7: Deep Simulation Layers (L0 – L4)
-
-### L0: Physics & Environment
-- [ ] Cell-based temperature simulation (heat island near URBAN_CORE)
-- [ ] Pressure and ventilation modeling (interior vs. exterior zones)
-- [ ] Structural integrity and material decay rates
-- [ ] Acid rain acceleration of structural decay
-- [ ] Power grid simulation (Nodes, conduits, arterial supply lines)
-- [ ] Environmental hazard events (flooding placeholder, smog, acid rain)
-
-### L1: Biology & Metabolism
-- [ ] `BiologyComponent` — health, hunger, thirst, fatigue fields
-- [ ] NPC metabolic decay over time (hunger/thirst)
-- [ ] Injury statuses (Internal Bleeding, Broken Limb, etc.)
-- [ ] Organ health and vital signs
-- [ ] Pathogen/infection propagation via proximity and shared spaces
-- [ ] Pathogen upward cascade to L2 (trauma, mood impact)
-- [ ] FOOD, WATER, MEDICAL item categories with L1 status effects
-- [ ] Inventory UI for survival items
-
-### L2: Cognitive & Social (BDI)
-- [ ] `CognitiveComponent` — PAD axes (Pleasure, Arousal, Dominance)
-- [ ] BDI memory ring buffer (fixed `std::array<MemoryRecord, 16>` per NPC)
-- [ ] Goal-Desire-Intention agent architecture
-- [ ] NPC memory formation from witnessed events
-- [ ] Relationship graph between agents (affinity, trust)
-- [ ] Social hierarchy positioning
-- [ ] Emotional state influence on behavior choices
-- [ ] NPC schedule state machine: SLEEPING / WORKING / LEISURE / TRANSIT
-- [ ] Witness trauma propagation to other NPCs (rumor seeding)
-
-### L3: Economic & Market
-- [ ] `EconomicComponent` — credits, employer entity, daily wage
-- [ ] Individual NPC wallets and credit balances
-- [ ] Local supply/demand markets per district
-- [ ] Item provenance tracking (high-value goods only)
-- [ ] Supply chain flows: Extraction → Production → Market
-- [ ] Property ownership and rent/mortgage logic
-- [ ] Wage payment loop (L4 employer directives → L3 credits)
-
-### L4: Political & Factional
-- [ ] Territorial ownership maps (Ownership Lines per zone)
-- [ ] Faction Directive system — zone-wide policy changes
-- [ ] Reputation system: personal standing (-100 to +100) per faction
-- [ ] Wanted level (0–5 star escalating guard response)
-- [ ] Faction patrol routes driven by directives
-- [ ] Political directives cascade to L3 (economic foreknowledge)
-- [ ] Level 1 Sedition trigger (ignoring directives in restricted zones)
-
----
-
-## Phase 8: Simulation Coherence — Sparse-Set Storage
-*Conditional: profile first after Phase 7 NPC work reveals cache pressure.*
-- [ ] Replace `unordered_map<Entity, T>` in `ComponentArray<T>` with sparse-set (dense array + sparse index)
-- [ ] Verify all insert/get/has/remove operations maintain O(1)
-- [ ] Benchmark `view<CognitiveComponent>()` before/after
-- [ ] Ensure entity deletion still works correctly with new storage
-
----
-
-## Phase 9: Interaction & Gameplay Systems
-
-### Dialogue & Information
-- [ ] Audibility model — Glitch-Text HUD (missing letters resolved by proximity)
-- [ ] NPC eavesdropping — real-time dialogue reveals free intelligence/lore
-- [ ] Hearing augments (Tier 1–3, passive vs. neural drain)
-- [ ] Neural-Audio Recorder (fragment capture)
-- [ ] Grammar-based dialogue engine (6 speech profiles)
-- [ ] Ink scripting integration for Gold Path (Leaders, Fixers)
-- [ ] Information type system: RUMOR, PROPAGANDA, INTELLIGENCE, PRICE_TIP
-- [ ] Organic information propagation (NPC-to-NPC rumor spread)
-- [ ] Knowledge trading and secrets (information as currency)
-
-### Trade & Barter
-- [ ] Leverage-and-greed trade model
-- [ ] Inventory management (Pick up, Drop, Use items)
-- [ ] NPC greed margins and social pressure mechanics
-
-### Crime & Law Enforcement
-- [ ] Simulated crime economy (Theft, Mugging, Contraband)
-- [ ] Guard NPC patrol and response system (CrimeReportEvents)
-- [ ] Pursuit and arrest task chain
-- [ ] Corruption: bribery, favors, backroom deals
-- [ ] Clandestine drug labs with raid mechanics
-- [ ] Notoriety/Wanted level visuals and escalation
-
-### Urban Decay
-- [ ] Structural health degradation over time (L0 cascade)
-- [ ] Graffiti, waste accumulation, abandoned zone state
-- [ ] Squatting and rebuilding systems
-
----
-
-## Phase 10: Lore & Narrative Systems
-
-### Player: The Engineer's Legacy
-- [ ] Engineer's Diary lore item (found at spawn point)
-- [ ] Five investigative "Legacy Firmware" tools — initialized at game start (Tier 1 / Baseline)
-- [ ] Neural Battery resource meter and Signal Heat detection risk
-- [ ] Tool signature visibility increase on repeated death (passive Heat ramp)
-- [ ] Neural Scrub action to reset Heat signature
-
-### The Death Cascade
-- [ ] L0: Corpse entity spawned; battery capacity permanent reduction (5%) if high-tier tools equipped
-- [ ] L1: Respawn in random Slum Squat / Safe House at 10% health
-- [ ] L2: 25% of accumulated information (Rumors/Intelligence) lost on death
-- [ ] L3: All physical items + 50% on-hand credits dropped as lootable corpse entity
-- [ ] L4: Wanted level spike if died in restricted zone; increased tool Heat
-- [ ] ReclamationDrones — retrieve corpses and transport to CREMATORIUM
-- [ ] Scavenger Thieves prioritize lootable corpse entities
-
-### Tool Masteries
-- [ ] Tier 1 (Legacy Firmware) — all five tools functional at baseline
-- [ ] Tier 2 (Enhanced Diagnostics) — deeper layer reads, wider scan radius
-- [ ] Tier 3 (Direct Actions) — ability to influence simulation state, not just observe
-- [ ] Firmware module upgrades (purchasable, lootable)
-
----
-
-## Phase 11: World Scaling & City Generation
-
-### Full City
-- [ ] Full 256×256 WU procedural generation with all 14 zone types
-- [ ] Chicago-style height gradients per zone
-- [ ] Zone type: AERODROME (VTOL, hover vessel platforms)
-- [ ] Zone type: TRANSIT HUB
-- [ ] Zone type: CREMATORIUM district
-
-### Interiors
-- [ ] High-fidelity interior generation with architectural adjacency rules
-- [ ] Functional prop sets (Desks, Racks, Containers, Terminals)
-- [ ] Enterable building state (door interaction)
-
-### Vertical Traversal
-- [ ] Staircase / elevator entities with Z-axis transition
-- [ ] Vertical layer system for multi-floor buildings
-
-### Futuristic Infrastructure
-- [ ] VTOL Hover Vessels at Aerodrome zones
-- [ ] EMMV Auto-Pods (driverless)
-- [ ] Maglift Monorail graph with station stops
-- [ ] Maglift switching logic
-
----
-
-## Phase 12: Factions, Xenos & AGI
-
-### Factions
-- [ ] Five faction entities (AGI-aligned) with territory maps
-- [ ] Faction aesthetic differentiation in rendering
-- [ ] Faction leader NPCs (Gold Path Ink scripted dialogue)
-- [ ] Faction standing effects on shop prices, guard behavior
-
-### Xeno System
-- [ ] Archon xeno type — behavior + radius-based layer warping
-- [ ] Aborrax xeno type
-- [ ] Behedicci xeno type
-- [ ] Post-Human xeno type
-- [ ] Life stage system (7 stages affecting xeno stats/behavior)
-
-### AGI Cores
-- [ ] Five AGI Throne Room locations (one per faction territory)
-- [ ] 5-layer security gauntlet per Throne Room
-- [ ] AGI encounter scripted via Ink
-
----
-
-## Phase 13: Crisis & Emergence
-- [ ] Crisis type: Collapse (structural cascade)
-- [ ] Crisis type: Outbreak (L1 pathogen mass spread)
-- [ ] Crisis type: Market Crash (L3 economic failure)
-- [ ] Crisis type: Coup (L4 faction power shift)
-- [ ] Crisis type: Power Blackout (L0 grid failure)
-- [ ] Crisis type: Information War (L2/L4 propaganda flood)
-- [ ] Crisis type: Xenomorphic Bloom (xeno population spike)
-- [ ] Cross-layer cascade logic for each crisis type
-- [ ] Crisis Dashboard (`V`) — city-wide threat monitoring
-- [ ] Directive Markets — economic foreknowledge from scouted laws
-
----
-
-## Phase 14: Interface & Meta Systems
-
-### God Mode (`G`)
-- [ ] Detached camera cursor for free world exploration
-- [ ] Entity inspection at any distance
-- [ ] Simulation speed control (+/-)
-- [ ] Layer visibility toggle (show/hide L0-L4 overlays)
+Priority: highest. Most existing systems are currently too invisible to drive player decisions.
 
 ### Inspection Panels
-- [ ] Surface Scan (`i`) — basic info (name, zone, entity type)
-- [ ] Biological Audit (`I`) — vitals, needs, injury status
-- [ ] Cognitive Profile (`c`) — current goal, emotional state, memory summary
-- [ ] Financial Forensics (`f`) — credit balance, employer, transaction history
-- [ ] Structural Analysis (`t`) — building health, material, decay rate
 
-### History & Logs
-- [ ] Dialogue Log (`L`) — recent overheard conversations
-- [ ] Intel Log (`n`) — player's personal history and milestones
-- [ ] Crisis Dashboard (`V`) — city-wide threat monitoring
+- [x] Surface Scan (`i`)
+  - [x] Select nearest entity near the player
+  - [x] Show entity id, type, glyph, distance, position, zone, and core tags
+  - [x] Make the selected entity visually obvious while the panel is open
+  - [x] Improve targeting to prefer entities in the player's facing direction
+- [x] Biological Audit (`Shift+i`)
+  - [x] Show health, hunger, thirst, fatigue, heart rate, oxygen, infection state, injury summary
+  - [x] Fall back clearly when the target has no biological data
+- [x] Cognitive Profile (`c`)
+  - [x] Show PAD values, current desire/goal, schedule state, social rank, recent memory count
+  - [x] Fall back clearly when the target has no cognitive data
+- [x] Financial Forensics (`f`)
+  - [x] Show wallet, employer, wage, market stock/prices, and power/economic tags
+  - [x] Fall back clearly when the target has no financial data
+- [x] Structural Analysis (`t`)
+  - [x] Show building id, floors, material, integrity, collapse state, power supply/demand/powered state
+  - [x] Fall back clearly when the target has no structural data
 
-### The Routine (Gameplay Loop Anchor)
-- [ ] Box Sorting mini-game (intro directive task)
-- [ ] L4 Political risk trigger for ignoring directives (Level 1 Sedition)
+### Layer Readability
+
+- [x] Layer visibility toggle
+  - [x] Cycle overlays for Surface, L0 Environment, L1 Biology, L2 Social, L3 Economy, L4 Faction
+  - [x] Use cheap glyph/color overlays only; no expensive full-screen per-pixel effects
+- [x] Existing-system alerts
+  - [x] On-screen notification when weather changes, flooding toggles, infection worsens, or a building collapses
+  - [x] Keep a short recent-event stack for later Intel Log integration
+- [x] Visual feedback polish
+  - [x] Small screen shake or flash for impacts/collisions/hazard damage
+  - [x] Simple sound hooks for pickup, consume, scan, warning, and denied action
+
+---
+
+## Milestone 2 - Build The Core Playable Loop
+
+Priority: high. These turn visibility into decisions and consequences.
+
+- [x] Tools are currently triggered by a key press, but should be equipped from the inventory (ie move cerebral scan to main equipped item)
+  - [x] Items need a "range" depending on what they are.
+  - [x] Players can use arrow keys to move their selection cursor to different entities before triggering an action.
+  - [x] Ability to set hotkeys for items (e.g. 1-9 for items, 0 for nothing equipped)
+  - [x] Items like water and food can be triggered directly from the inventory or set to a hotkey
+  - [x] See planning documentation for more info.
+
+### Inventory, Trade, And Items
+
+- [ ] Inventory management beyond survival counters
+  - [x] Pick up, drop, inspect, and use discrete items [requires inventory UI]
+  - [x] Preserve current food/water/medical hotkeys as quick-use actions
+  - [x] Add item tags for legal/illegal, unique/high-value, and faction relevance
+- [x] Trade UI and simple barter
+  - [x] Buy/sell at market entities
+  - [x] Price affected by scarcity, reputation, and simple greed margin
+  - [x] Expose trade result clearly before confirmation
+- [ ] High-value item provenance
+  - [ ] Track ownership/source only for stolen, unique, quest, or high-value goods
+  - [ ] Expose provenance through Surface Scan and Financial Forensics
+- [ ] Remove 'flash' effect when selecting an item
+- [ ] The tool radius appears to be missing
+- [ ] We need a navigable inventory modal that shows the hotkey number next to the relevant item
+
+### Information Gameplay
+
+- [ ] Audibility model - Glitch-Text HUD
+  - [ ] Nearby NPC speech appears as partial text resolved by distance
+  - [ ] Important fragments are color-coded by information type
+  - [ ] Scope to active-region NPCs only
+- [ ] NPC eavesdropping
+  - [ ] Generate useful overheard fragments from schedule, market, rumor, faction, or danger state
+  - [ ] Let overheard information seed the Intel Log
+- [ ] Information type system
+  - [ ] `RUMOR`, `PROPAGANDA`, `INTELLIGENCE`, `PRICE_TIP`
+  - [ ] Store source, confidence, timestamp, and optional target entity/zone
+- [ ] Dialogue Log (`L`)
+  - [ ] Show recent overheard lines and captured fragments
+- [ ] Intel Log (`n`)
+  - [ ] Show stable discoveries, price tips, faction warnings, and player milestones
+- [ ] Neural-Audio Recorder
+  - [ ] Capture selected fragments into the Dialogue Log/Intel Log
+  - [ ] Avoid recording every ambient line
+
+### Housing And Interiors
+
+- [ ] Enterable buildings with visible interiors and exits
+  - [ ] Current `InteriorComponent` toggle exists; add actual interior view/play space
+- [ ] Lazy template-based interiors
+  - [ ] Generate only when entered
+  - [ ] Use templates plus small random variation
+- [ ] Functional prop set
+  - [ ] Containers, terminals, beds, doors, storage
+- [ ] Claimable housing
+  - [ ] Squat -> Safe House -> Sanctuary tiers
+- [ ] Housing broker NPC
+  - [ ] Defer until dialogue/trade exists
+- [ ] Basic staircase/elevator floor transitions
+  - [ ] Use discrete floor index before any full vertical simulation
+
+### Factions, Law, And Risk
+
+- [ ] Faction territories
+  - [ ] Start with 2-3 factions if five is too noisy
+  - [ ] Show borders via overlay or district coloring
+- [ ] Faction aesthetic differentiation
+  - [ ] Distinct glyph colors/patrol markers/territory colors
+- [ ] Reputation system
+  - [ ] Personal standing per faction
+  - [ ] Visible reputation deltas after crimes, trades, faction help, and restricted-zone behavior
+- [ ] Wanted level
+  - [ ] 0-5 escalating risk state
+  - [ ] HUD-visible warning and escalation feedback
+  - [ ] Merge notoriety visuals here
+- [ ] Guard patrol and response
+  - [ ] Active-region waypoint patrols
+  - [ ] Respond to visible crimes and sedition triggers
+  - [ ] Avoid city-wide continuous pathfinding
+- [ ] Minimal pursuit/arrest loop
+  - [ ] Chase, lose line/range, arrest/capture consequence
+- [ ] Level 1 Sedition trigger
+  - [ ] Ignoring directives in restricted zones raises warning, reputation loss, or wanted level
+  - [ ] Single canonical TODO; no duplicate routine item
+- [ ] Faction directives
+  - [ ] Start with 3-5 directive types affecting patrols, access, market prices, or wages
+  - [ ] Make L3 cascade visible in Financial Forensics and Intel Log
+
+### Intro Routine
+
+- [ ] Box Sorting mini-game only if it teaches core systems
+  - [ ] Teaches scan, inventory, directive compliance, and sedition risk
+  - [ ] Cut or replace if it becomes isolated busywork
+
+---
+
+## Milestone 3 - Consequences And Player Persistence
+
+Priority: medium. Add once the core loop can produce meaningful losses and recoveries.
+
+### Engineer's Legacy Tools
+
+- [ ] Engineer's Diary lore item at spawn
+  - [ ] Introduces scanning, signal heat, and why the player reads city layers
+- [ ] Five Legacy Firmware tools
+  - [ ] Define the five baseline tools before implementation
+  - [ ] Tier 1 baseline is included here, not a separate TODO
+- [ ] Neural Battery and Signal Heat
+  - [ ] HUD-visible resource and detection risk
+  - [ ] Scan/actions consume battery or raise heat
+- [ ] Hearing augment Tier 1
+  - [ ] One initial upgrade for audibility range/clarity
+  - [ ] Later tiers deferred until baseline is fun
+
+### Death And Recovery
+
+- [ ] Corpse entity on death
+  - [ ] Drop physical items and 50% on-hand credits
+  - [ ] Make retrieval tension visible on map/log
+  - [ ] Battery capacity reduction only when high heat or high-tier tools justify it
+- [ ] Respawn in Slum Squat or Safe House
+  - [ ] Respawn at low health with visible recovery goals
+- [ ] Information loss
+  - [ ] Lose unstable tips/fragments before permanent lore
+  - [ ] Requires Intel Log first
+- [ ] Restricted-zone death consequence
+  - [ ] Wanted spike and signal heat increase when relevant
+- [ ] Storage across deaths
+  - [ ] Stash items/equipment in claimed housing or safe houses
 
 ### Persistence
-- [ ] Binary serialization using Cereal
-- [ ] Save/Load world state and entity registry
-- [ ] Entity free-list and destroyed-set persisted correctly
+
+- [ ] Choose persistence format after save surface stabilizes
+  - [ ] Do not commit to Cereal until the saved state is known
+- [ ] Save/load initial player-facing state
+  - [ ] Player location, health, inventory, discovered intel, faction standing, wanted level, world seed
+- [ ] Save/load ECS registry only after initial persistence works
+  - [ ] Include free-list and destroyed-set correctness as acceptance criteria
 
 ---
 
-## Phase 15: The Sanctuary
-- [ ] Claimable player housing (Squat → Safe House → Sanctuary tiers)
-- [ ] 5-layer defenses: Jammers, DNA-locks, guard NPCs, false walls, L4 shell companies
-- [ ] Housing Broker NPC interaction
-- [ ] Storage for items/equipment across deaths
+## Milestone 4 - Expand Systems After The Loop Works
+
+Priority: lower. These should be implemented only when they create visible gameplay.
+
+### Economy
+
+- [ ] Aggregate supply chain flows
+  - [ ] District-level extraction -> production -> market stock pulses
+  - [ ] Create shortages and price changes the player can exploit
+- [ ] Property ownership/rent
+  - [ ] Defer until housing and faction territory matter
+- [ ] Directive markets
+  - [ ] Forecast policy/price changes from scouted directives
+
+### World Scale
+
+- [ ] Clarify full-city scale target
+  - [ ] Replace ambiguous "256x256 WU" with macro-cell or world-unit target
+- [ ] Larger procedural city with active-region simulation and offscreen aggregation
+- [ ] Extend zone roster only when each zone has a gameplay purpose
+  - [ ] Transit Hub: useful soon because transit exists
+  - [ ] Crematorium: depends on death/corpse loop
+  - [ ] Aerodrome: depends on VTOL gameplay
+- [ ] Chicago-style height gradients per expanded zone
+- [ ] EMMV Auto-Pods
+  - [ ] Add only if the player can hail, avoid, steal, or inspect them
+- [ ] Branched maglift graph/switching
+  - [ ] Current linear stations and terminal switching are complete; expand only for route choice
+
+### Crisis Events
+
+- [ ] Outbreak crisis
+  - [ ] First crisis candidate because pathogens already exist
+  - [ ] Needs warnings, counterplay, and Crisis Dashboard
+- [ ] Power blackout crisis
+  - [ ] Power grid exists; make effects visible on lighting, doors, markets, and patrols
+- [ ] Collapse crisis
+  - [ ] Requires structural consequences and inspection support
+- [ ] Crisis Dashboard (`V`)
+  - [ ] Single canonical dashboard TODO
+  - [ ] Show active threats, trend, affected zones, and recommended player action
+- [ ] Add other crises only after their base systems are fun
+  - [ ] Market Crash
+  - [ ] Coup
+  - [ ] Information War
+  - [ ] Xenomorphic Bloom
+- [ ] Cross-layer cascade logic per crisis
+  - [ ] Avoid building a generic cascade framework first
+
+### Social And Dialogue Depth
+
+- [ ] Template-based dialogue profiles
+  - [ ] Start with rank/faction/mood templates before grammar engine
+- [ ] Organic information propagation
+  - [ ] Active-region or social-chunk propagation only
+  - [ ] Must produce discoverable leads
+- [ ] Knowledge trading and secrets
+  - [ ] Requires barter, logs, and information types
+- [ ] Ink integration for leaders/fixers
+  - [ ] Defer until dialogue UI and faction leaders exist
+
+### Crime Depth
+
+- [ ] Simulated crime economy
+  - [ ] Start with theft/contraband near player and markets
+  - [ ] Avoid autonomous city-wide crime until profiling supports it
+- [ ] Corruption: bribery, favors, backroom deals
+  - [ ] Depends on dialogue, reputation, and guards
+- [ ] Clandestine labs and raids
+  - [ ] Depends on interiors, crime, factions, patrols
+- [ ] Graffiti, waste, abandoned zone state
+  - [ ] Use as visible faction/decay feedback
+  - [ ] Avoid simulating individual waste objects at scale
 
 ---
 
-## Phase 16: Endgame Scenarios
-- [ ] **Purge** — eliminate the five AGIs; city devolves to chaos
-- [ ] **Avatar** — merge with the dominant AGI; become the new Oubliette god
-- [ ] **Synthesis** — broker peace between factions via the five Throne Rooms
-- [ ] **Reset** — find mother's Root Code and wipe the AGI substrate
+## Milestone 5 - Endgame, Xenos, And Large-Scope Content
 
----
+Priority: deferred. Keep as direction, not near-term implementation.
 
-## Phase 17: Polish & Aesthetics
-- [ ] Day/Night cycle with dynamic lighting (street lights, neon signs)
-- [ ] Weather systems (acid rain, smog, fog)
-- [ ] Rich ASCII/glyph-based entity representation per entity type
-- [ ] Interactive feedback (screen shake, sound effects, particles)
-- [ ] Open-source thin-stroke icon library integration (Lucide / Phosphor) for HUD diagnostics
-- [ ] "Neon Noir" color palette enforced across all rendering (#0A0A0F background)
+### Xenos
+
+- [ ] Define one xeno gameplay role before adding multiple types
+- [ ] Archon radius-based layer warping
+- [ ] Aborrax type
+- [ ] Behedicci type
+- [ ] Post-Human type
+- [ ] Life stages only after one xeno is fun
+
+### AGI And Endings
+
+- [ ] Five faction/AGI throne room locations
+- [ ] 5-layer security gauntlet per throne room
+- [ ] AGI encounters scripted after Ink pipeline exists
+- [ ] Endings
+  - [ ] Purge
+  - [ ] Avatar
+  - [ ] Synthesis
+  - [ ] Reset
+
+### Sanctuary Depth
+
+- [ ] 5-layer Sanctuary defenses
+  - [ ] Jammers, DNA locks, guard NPCs, false walls, L4 shell companies
+  - [ ] Defer until basic housing/storage is fun
+
+### Conditional Performance Work
+
+- [ ] Profile before sparse-set storage replacement
+- [ ] Replace `unordered_map<Entity, T>` with sparse-set only if profiling justifies it
+- [ ] Benchmark `view<CognitiveComponent>()` before/after
+- [ ] Verify entity deletion/free-list behavior under the new storage
+
+### Deferred Polish
+
+- [ ] Dynamic lighting via cheap overlays/tints for street lights and neon signs
+- [ ] Weather presentation: visible acid rain, smog, fog overlays and gameplay cues
+- [ ] Neural Scrub action after signal heat creates real pressure
+- [ ] Tier 2/Tier 3 tool upgrades after baseline tools are fun
+- [ ] Firmware modules after inventory/economy reward loops exist
+- [ ] Reclamation drones after corpse retrieval exists
+- [ ] Scavenger thieves after corpse loot exists
+- [ ] Cut thin-stroke external icon library unless the renderer moves beyond ASCII/glyph HUD
+- [ ] Keep "Neon Noir" color palette as style guidance, not a gameplay blocker

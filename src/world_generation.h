@@ -27,6 +27,7 @@ inline void generateChicagoCity(Registry& registry, int numCols, int numRows) {
         
         registry.assign<TransformComponent>(road, cx, cy, width, height);
         registry.assign<RoadComponent>(road, col % 2 == 0 ? RoadType::PRIMARY : RoadType::SECONDARY, 1.0f);
+        registry.assign<PowerConduitComponent>(road, 10000.0f);
     }
 
     // Generate Horizontal Roads
@@ -39,6 +40,7 @@ inline void generateChicagoCity(Registry& registry, int numCols, int numRows) {
         
         registry.assign<TransformComponent>(road, cx, cy, width, height);
         registry.assign<RoadComponent>(road, row % 2 == 0 ? RoadType::PRIMARY : RoadType::SECONDARY, 1.0f);
+        registry.assign<PowerConduitComponent>(road, 10000.0f);
     }
 
     // Generate Continuous Transit Track (Vertical)
@@ -52,7 +54,71 @@ inline void generateChicagoCity(Registry& registry, int numCols, int numRows) {
     registry.assign<TransformComponent>(longTrack, trackX, trackY, 40.0f, totalCityHeight);
     registry.assign<RoadComponent>(longTrack, RoadType::MAGLIFT_TRACK, 0.0f);
 
+    // Stations at each horizontal road crossing the maglift track (one per row boundary).
+    for (int row = 0; row <= numRows; ++row) {
+        float stationY = row * (blockHeight + roadWidth) - roadWidth / 2.0f + offsetY;
+        Entity station = registry.create();
+        registry.assign<TransformComponent>(station, trackX, stationY, 60.0f, 40.0f);
+        registry.assign<StationComponent>(station, row, 4.0f);
+        registry.assign<GlyphComponent>(station, std::string("[S]"),
+            (uint8_t)80, (uint8_t)220, (uint8_t)210, (uint8_t)255, 1.0f, true);
+
+        // Staircase connecting ground to the elevated platform (right side of track).
+        Entity stair = registry.create();
+        registry.assign<TransformComponent>(stair, trackX + 30.0f, stationY, 20.0f, 40.0f);
+        registry.assign<StaircaseComponent>(stair, row);
+        registry.assign<RoadComponent>(stair, RoadType::PEDESTRIAN_PATH, 0.0f);
+
+        // Ground-level waiting area where pedestrians queue for the maglift.
+        Entity waitArea = registry.create();
+        registry.assign<TransformComponent>(waitArea, trackX + 75.0f, stationY, 70.0f, 50.0f);
+        registry.assign<WaitingAreaComponent>(waitArea, row);
+        registry.assign<RoadComponent>(waitArea, RoadType::PEDESTRIAN_PATH, 0.0f);
+    }
+
+    // Two automated transit MAGLIFT vehicles — TransitSystem drives them directly (no MovementComponent).
+    // Vehicle A: starts stopped at station 0 (top terminus), heading toward station 1.
+    {
+        float startY = 0 * (blockHeight + roadWidth) - roadWidth / 2.0f + offsetY;
+        Entity ta = registry.create();
+        registry.assign<TransformComponent>(ta, trackX, startY, 80.0f, 28.0f);
+        registry.assign<VehicleComponent>(ta, VehicleComponent::MAGLIFT, MAX_ENTITIES, 140.0f);
+        registry.assign<GlyphComponent>(ta, std::string("M"),
+            (uint8_t)255, (uint8_t)80, (uint8_t)140, (uint8_t)255, 0.5f, true, true);
+        TransitVehicleComponent tvc{};
+        tvc.state            = TransitVehicleComponent::STOPPED;
+        tvc.current_station  = 0;
+        tvc.next_station     = 1;
+        tvc.direction        = 1;
+        tvc.stop_timer       = 2.0f;
+        tvc.speed            = 140.0f;
+        tvc.track_x          = trackX;
+        registry.assign<TransitVehicleComponent>(ta, tvc);
+    }
+
+    // Vehicle B: starts stopped at station 2 (midpoint), heading toward station 3.
+    {
+        float startY = 2 * (blockHeight + roadWidth) - roadWidth / 2.0f + offsetY;
+        Entity tb = registry.create();
+        registry.assign<TransformComponent>(tb, trackX, startY, 80.0f, 28.0f);
+        registry.assign<VehicleComponent>(tb, VehicleComponent::MAGLIFT, MAX_ENTITIES, 140.0f);
+        registry.assign<GlyphComponent>(tb, std::string("MMMM"),
+            (uint8_t)255, (uint8_t)80, (uint8_t)140, (uint8_t)255, 1.0f, true);
+        TransitVehicleComponent tvc{};
+        tvc.state            = TransitVehicleComponent::STOPPED;
+        tvc.current_station  = 2;
+        tvc.next_station     = 3;
+        tvc.direction        = 1;
+        tvc.stop_timer       = 5.0f; // offset so vehicles aren't synchronized
+        tvc.speed            = 140.0f;
+        tvc.track_x          = trackX;
+        registry.assign<TransitVehicleComponent>(tb, tvc);
+    }
+
     std::mt19937 rng(std::random_device{}());
+
+    // Market cluster counter: one market per block cluster
+    int marketClusterIndex = 0;
 
     // Generate Blocks and lots
     for (int col = 0; col < numCols; ++col) {
@@ -78,8 +144,12 @@ inline void generateChicagoCity(Registry& registry, int numCols, int numRows) {
             bool isSuperBlock = (std::uniform_int_distribution<int>(0, 9)(rng) < 4); // 40% chance
             bool isTransitHub = (col == transitCol); // Transit line column
             float gapY = isSuperBlock ? 0.0f : 20.0f;
-            int numLotsY = isSuperBlock ? 4 : 8; 
+            int numLotsY = isSuperBlock ? 4 : 8;
             float lotHeight = (buildableHeight - (numLotsY - 1) * gapY) / numLotsY;
+
+            // One market per block cluster; first eligible building gets it.
+            // MarketComponent carries all three commodity types (food/water/medical).
+            bool blockMarketPlaced = false;
 
             for (int lx = 0; lx < 2; ++lx) {
                 for (int ly = 0; ly < numLotsY; ++ly) {
@@ -120,7 +190,58 @@ inline void generateChicagoCity(Registry& registry, int numCols, int numRows) {
                     
                     registry.assign<TransformComponent>(building, bx, by, lotWidth, lotHeight);
                     registry.assign<SolidComponent>(building);
-                    registry.assign<BuildingComponent>(building, stable_id, floors, false);
+                    registry.assign<BuildingComponent>(building, stable_id, floors, true); // Make it enterable for atmosphere logic
+                    registry.assign<BuildingAtmosphereComponent>(building, 20.0f, 100.0f);
+
+                    ZoneType zType = ZoneType::RESIDENTIAL;
+                    if (dist < 500.0f) zType = ZoneType::URBAN_CORE;
+                    else if (dist < 1000.0f) zType = ZoneType::COMMERCIAL;
+                    else zType = ZoneType::INDUSTRIAL;
+                    registry.assign<ZoningComponent>(building, zType);
+
+                    // Add StructuralComponent based on zone
+                    StructuralComponent sc;
+                    sc.integrity = 100.0f;
+                    sc.is_exposed = true;
+                    if (zType == ZoneType::URBAN_CORE) sc.material_type = MaterialType::STEEL;
+                    else if (zType == ZoneType::INDUSTRIAL) sc.material_type = MaterialType::REINFORCED_CONCRETE;
+                    else if (zType == ZoneType::COMMERCIAL) sc.material_type = MaterialType::COMPOSITE;
+                    else sc.material_type = MaterialType::SCRAP;
+                    registry.assign<StructuralComponent>(building, sc);
+
+                    // ~30% of buildings are employers
+                    {
+                        std::uniform_real_distribution<float> chance(0.0f, 1.0f);
+                        if (chance(rng) < 0.30f) {
+                            std::uniform_int_distribution<int> capDist(3, 8);
+                            registry.assign<EmployerComponent>(building, capDist(rng), 0);
+                        }
+                    }
+
+                    float power_supply = 0.0f;
+                    float power_demand = 10.0f * floors;
+                    if (zType == ZoneType::INDUSTRIAL && std::uniform_real_distribution<float>(0.0f, 1.0f)(rng) < 0.20f) {
+                        power_supply = 100000.0f; 
+                        power_demand = 0.0f;
+                        registry.assign<GlyphComponent>(building, std::string("G"),
+                            (uint8_t)255, (uint8_t)200, (uint8_t)50, (uint8_t)255, 1.0f, true, true);
+                    } else {
+                        registry.assign<GlyphComponent>(building, std::string("#"),
+                            (uint8_t)80, (uint8_t)82, (uint8_t)90, (uint8_t)255, 1.0f, true, true);
+                    }
+                    registry.assign<PowerNodeComponent>(building, power_supply, power_demand, false);
+
+                    // First building per block cluster becomes a market (all three commodities).
+                    if (!blockMarketPlaced) {
+                        auto& market = registry.assign<MarketComponent>(building);
+                        market.greed_margin = 0.05f + 0.05f * static_cast<float>(marketClusterIndex % 4);
+                        // Override glyph to amber-gold '$'
+                        registry.get<GlyphComponent>(building).chars = "$";
+                        registry.get<GlyphComponent>(building).r = 255;
+                        registry.get<GlyphComponent>(building).g = 210;
+                        registry.get<GlyphComponent>(building).b = 50;
+                        blockMarketPlaced = true;
+                    }
 
                     // Add a horizontal pedestrian path in the gap if not a super-block
                     if (!isSuperBlock && ly < numLotsY - 1) {
@@ -135,6 +256,8 @@ inline void generateChicagoCity(Registry& registry, int numCols, int numRows) {
                 }
             }
             
+            if (blockMarketPlaced) ++marketClusterIndex;
+
             // Add traffic lights and intersection entity at each road crossing
             float ix = col * (blockWidth + roadWidth) - roadWidth / 2.0f + offsetX;
             float iy = row * (blockHeight + roadWidth) - roadWidth / 2.0f + offsetY;
