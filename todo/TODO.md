@@ -83,10 +83,10 @@ Priority: high. These turn visibility into decisions and consequences.
   - [x] Buy/sell at market entities
   - [x] Price affected by scarcity, reputation, and simple greed margin
   - [x] Expose trade result clearly before confirmation
-- [ ] High-value item provenance
-  - [ ] Track ownership/source only for stolen, unique, quest, or high-value goods
-  - [ ] Expose provenance through Surface Scan and Financial Forensics
-- [ ] Move tools to 1-5 keys, 6-9 for items, 0 for nothing equipped
+- [x] High-value item provenance
+  - [x] Track ownership/source only for stolen, unique, quest, or high-value goods
+  - [x] Expose provenance through Surface Scan and Financial Forensics
+- [x] Move tools to 1-5 keys, 6-9 for items, 0 for nothing equipped
 - [ ] We need a navigable inventory modal that shows icons of the items, a cursor, and the hotkey number next to the relevant item (if assigned)
 - [ ] npcs should not spawn randomly, but should be born in housing units or at hospital
 

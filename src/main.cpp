@@ -410,6 +410,8 @@ static std::vector<std::string> buildScanLines(Registry& registry, Entity target
         if (registry.has<ItemComponent>(target)) {
             auto& item = registry.get<ItemComponent>(target);
             pushLine(lines, "FLAGS:%s", itemFlagSummary(item.flags).c_str());
+            if (itemProvenanceTracked(item.flags, item.provenance))
+                pushLine(lines, "PROV:%s", itemProvenanceSummary(item.flags, item.provenance).c_str());
         }
     } else if (mode == ScanPanelMode::BIOLOGY) {
         if (!registry.has<BiologyComponent>(target)) {
@@ -490,6 +492,8 @@ static std::vector<std::string> buildScanLines(Registry& registry, Entity target
             auto& item = registry.get<ItemComponent>(target);
             pushLine(lines, "ITEM:%s RESTORE:%.0f", itemName(item.type), item.restore_value);
             pushLine(lines, "FLAGS:%s", itemFlagSummary(item.flags).c_str());
+            if (itemProvenanceTracked(item.flags, item.provenance))
+                pushLine(lines, "PROV:%s", itemProvenanceSummary(item.flags, item.provenance).c_str());
         }
         if (!any) lines.emplace_back("NO FINANCIAL DATA");
     } else if (mode == ScanPanelMode::STRUCTURAL) {
@@ -1758,17 +1762,19 @@ int main(int argc, char* argv[]) {
                 if (inspected.present) {
                     EquipmentSlot inspectedEquipment = equipmentFromInventoryType(inspected.type);
                     if (isScanEquipment(inspectedEquipment)) {
-                        std::snprintf(hudBuf, sizeof(hudBuf), "BAG %zu/%zu:%s RNG:%d",
+                        std::snprintf(hudBuf, sizeof(hudBuf), "BAG %zu/%zu:%s RNG:%d%s",
                             inventory.selected + 1,
                             DiscreteInventoryComponent::CAPACITY,
                             itemTypeName(inspected.type),
-                            static_cast<int>(equipmentRange(inspectedEquipment)));
+                            static_cast<int>(equipmentRange(inspectedEquipment)),
+                            itemProvenanceTracked(inspected.flags, inspected.provenance) ? " PROV" : "");
                     } else {
-                        std::snprintf(hudBuf, sizeof(hudBuf), "BAG %zu/%zu:%s R:%d",
+                        std::snprintf(hudBuf, sizeof(hudBuf), "BAG %zu/%zu:%s R:%d%s",
                             inventory.selected + 1,
                             DiscreteInventoryComponent::CAPACITY,
                             itemTypeName(inspected.type),
-                            static_cast<int>(inspected.restore_value));
+                            static_cast<int>(inspected.restore_value),
+                            itemProvenanceTracked(inspected.flags, inspected.provenance) ? " PROV" : "");
                     }
                 } else {
                     std::snprintf(hudBuf, sizeof(hudBuf), "BAG %zu/%zu:EMPTY",

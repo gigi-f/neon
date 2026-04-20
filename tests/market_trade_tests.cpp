@@ -136,6 +136,43 @@ static void testConfirmRepricesCurrentMarketTerms() {
     assert(std::fabs(registry.get<MarketComponent>(market).food_stock - 10.0f) < 0.001f);
 }
 
+static void testFailedTrackedSalePreservesInventoryProvenance() {
+    Registry registry;
+    Entity player = makePlayer(registry);
+    auto& inventory = registry.get<DiscreteInventoryComponent>(player);
+    ItemProvenance provenance;
+    provenance.tracked = true;
+    provenance.stolen = true;
+    provenance.owner = registry.create();
+    provenance.source = provenance.owner;
+    assert(storeInventoryItem(inventory, ItemComponent::WATER, 40.0f,
+                              ITEM_FLAG_HIGH_VALUE, provenance.source, provenance));
+
+    auto preview = previewPlayerMarketSell(registry, player);
+    bool traded = executePlayerMarketTrade(registry, player, preview);
+
+    assert(!preview.available);
+    assert(!traded);
+    auto inspected = inspectSelectedInventoryItem(inventory);
+    assert(inspected.present);
+    assert(inspected.provenance.tracked);
+    assert(inspected.provenance.stolen);
+    assert(inspected.provenance.owner == provenance.owner);
+}
+
+static void testMarketPurchaseProvenanceHelperTracksImportantGoods() {
+    Registry registry;
+    Entity player = makePlayer(registry);
+    Entity market = makeMarket(registry);
+
+    ItemProvenance provenance = provenanceForMarketPurchase(ITEM_FLAG_HIGH_VALUE, player, market);
+
+    assert(provenance.tracked);
+    assert(!provenance.stolen);
+    assert(provenance.owner == player);
+    assert(provenance.source == market);
+}
+
 int main() {
     testPlayerBuyAddsInventoryAndConsumesStock();
     testPlayerBuyFailsWhenInventoryFull();
@@ -143,5 +180,7 @@ int main() {
     testPlayerBuyPriceIncludesGreedAndReputation();
     testPlayerSellPayoutIncludesGreedAndReputation();
     testConfirmRepricesCurrentMarketTerms();
+    testFailedTrackedSalePreservesInventoryProvenance();
+    testMarketPurchaseProvenanceHelperTracksImportantGoods();
     return 0;
 }

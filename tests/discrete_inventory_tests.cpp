@@ -168,12 +168,83 @@ static void testDropSelectedItemCreatesWorldItemAndClearsSlot() {
 
 static void testItemFlagSummaryLabelsRiskAndValue() {
     std::string summary = itemFlagSummary(
-        ITEM_FLAG_ILLEGAL | ITEM_FLAG_UNIQUE | ITEM_FLAG_HIGH_VALUE | ITEM_FLAG_FACTION_RELEVANT);
+        ITEM_FLAG_ILLEGAL | ITEM_FLAG_UNIQUE | ITEM_FLAG_HIGH_VALUE |
+        ITEM_FLAG_FACTION_RELEVANT | ITEM_FLAG_QUEST);
 
     assert(summary.find("ILLEGAL") != std::string::npos);
     assert(summary.find("UNIQUE") != std::string::npos);
     assert(summary.find("HIGH") != std::string::npos);
     assert(summary.find("FACTION") != std::string::npos);
+    assert(summary.find("QUEST") != std::string::npos);
+}
+
+static void testOwnedTrackedPickupKeepsCleanProvenance() {
+    Registry registry;
+    Entity player = makePlayer(registry);
+    ItemProvenance provenance;
+    provenance.tracked = true;
+    provenance.owner = player;
+    provenance.source = player;
+
+    Entity item = makeItem(registry, ItemComponent::MEDICAL, 6.0f, 0.0f, 40.0f,
+                           ITEM_FLAG_UNIQUE);
+    registry.get<ItemComponent>(item).provenance = provenance;
+
+    auto result = collectNearestInventoryItem(registry, player);
+    auto inspected = inspectSelectedInventoryItem(registry.get<DiscreteInventoryComponent>(player));
+
+    assert(result.picked_up);
+    assert(inspected.present);
+    assert(inspected.provenance.tracked);
+    assert(!inspected.provenance.stolen);
+    assert(inspected.provenance.owner == player);
+    assert(inspected.provenance.source == player);
+}
+
+static void testForeignOwnedTrackedPickupBecomesStolen() {
+    Registry registry;
+    Entity player = makePlayer(registry);
+    Entity owner = registry.create();
+    ItemProvenance provenance;
+    provenance.tracked = true;
+    provenance.owner = owner;
+    provenance.source = owner;
+
+    Entity item = makeItem(registry, ItemComponent::FOOD, 6.0f, 0.0f, 40.0f,
+                           ITEM_FLAG_HIGH_VALUE);
+    registry.get<ItemComponent>(item).provenance = provenance;
+
+    auto result = collectNearestInventoryItem(registry, player);
+    auto inspected = inspectSelectedInventoryItem(registry.get<DiscreteInventoryComponent>(player));
+
+    assert(result.picked_up);
+    assert(inspected.present);
+    assert(inspected.provenance.tracked);
+    assert(inspected.provenance.stolen);
+    assert(inspected.provenance.owner == owner);
+    assert(itemProvenanceSummary(inspected.flags, inspected.provenance).find("STOLEN") != std::string::npos);
+}
+
+static void testDropPreservesTrackedProvenance() {
+    Registry registry;
+    Entity player = makePlayer(registry);
+    auto& inventory = registry.get<DiscreteInventoryComponent>(player);
+    ItemProvenance provenance;
+    provenance.tracked = true;
+    provenance.stolen = true;
+    provenance.owner = registry.create();
+    provenance.source = provenance.owner;
+    assert(storeInventoryItem(inventory, ItemComponent::WATER, 40.0f,
+                              ITEM_FLAG_HIGH_VALUE, provenance.source, provenance));
+
+    Entity dropped = dropSelectedInventoryItem(registry, player);
+
+    assert(dropped != MAX_ENTITIES);
+    const auto& item = registry.get<ItemComponent>(dropped);
+    assert(item.provenance.tracked);
+    assert(item.provenance.stolen);
+    assert(item.provenance.owner == provenance.owner);
+    assert(item.provenance.source == provenance.source);
 }
 
 int main() {
@@ -186,5 +257,8 @@ int main() {
     testQuickUseConsumesFirstMatchingDiscreteItem();
     testDropSelectedItemCreatesWorldItemAndClearsSlot();
     testItemFlagSummaryLabelsRiskAndValue();
+    testOwnedTrackedPickupKeepsCleanProvenance();
+    testForeignOwnedTrackedPickupBecomesStolen();
+    testDropPreservesTrackedProvenance();
     return 0;
 }

@@ -11,6 +11,7 @@ struct InventoryInspection {
     ItemComponent::Type type = ItemComponent::FOOD;
     float restore_value = 0.0f;
     uint32_t flags = 0;
+    ItemProvenance provenance;
 };
 
 struct InventoryPickupResult {
@@ -52,6 +53,70 @@ inline bool itemHasFlag(const CarriedItem& item, ItemFlag flag) {
     return (item.flags & static_cast<uint32_t>(flag)) != 0;
 }
 
+inline bool itemFlagsRequireProvenance(uint32_t flags) {
+    return (flags & (ITEM_FLAG_ILLEGAL |
+                     ITEM_FLAG_UNIQUE |
+                     ITEM_FLAG_HIGH_VALUE |
+                     ITEM_FLAG_FACTION_RELEVANT |
+                     ITEM_FLAG_QUEST)) != 0;
+}
+
+inline bool itemProvenanceTracked(uint32_t flags, const ItemProvenance& provenance) {
+    return provenance.tracked || provenance.stolen || itemFlagsRequireProvenance(flags);
+}
+
+inline ItemProvenance normalizeItemProvenance(
+    uint32_t flags,
+    ItemProvenance provenance,
+    Entity fallbackSource = MAX_ENTITIES
+) {
+    if (!itemProvenanceTracked(flags, provenance)) return {};
+
+    provenance.tracked = true;
+    if (provenance.source == MAX_ENTITIES) provenance.source = fallbackSource;
+    return provenance;
+}
+
+inline ItemProvenance provenanceForPickup(
+    uint32_t flags,
+    ItemProvenance provenance,
+    Entity player,
+    Entity sourceEntity
+) {
+    provenance = normalizeItemProvenance(flags, provenance, sourceEntity);
+    if (!provenance.tracked) return provenance;
+
+    if (provenance.owner != MAX_ENTITIES && provenance.owner != player) {
+        provenance.stolen = true;
+    }
+    return provenance;
+}
+
+inline ItemProvenance provenanceForMarketPurchase(uint32_t flags, Entity player, Entity market) {
+    ItemProvenance provenance = normalizeItemProvenance(flags, {}, market);
+    if (provenance.tracked) {
+        provenance.owner = player;
+        provenance.source = market;
+    }
+    return provenance;
+}
+
+inline std::string itemProvenanceSummary(uint32_t flags, const ItemProvenance& provenance) {
+    ItemProvenance normalized = normalizeItemProvenance(flags, provenance);
+    if (!normalized.tracked) return "UNTRACKED";
+
+    std::string summary = normalized.stolen ? "STOLEN" : "TRACKED";
+    if (normalized.owner != MAX_ENTITIES) {
+        summary += " OWNER:";
+        summary += std::to_string(normalized.owner);
+    }
+    if (normalized.source != MAX_ENTITIES) {
+        summary += " SOURCE:";
+        summary += std::to_string(normalized.source);
+    }
+    return summary;
+}
+
 inline std::string itemFlagSummary(uint32_t flags) {
     std::string summary;
     auto append = [&](const char* label) {
@@ -64,6 +129,7 @@ inline std::string itemFlagSummary(uint32_t flags) {
     if ((flags & ITEM_FLAG_UNIQUE) != 0) append("UNIQUE");
     if ((flags & ITEM_FLAG_HIGH_VALUE) != 0) append("HIGH");
     if ((flags & ITEM_FLAG_FACTION_RELEVANT) != 0) append("FACTION");
+    if ((flags & ITEM_FLAG_QUEST) != 0) append("QUEST");
     return summary.empty() ? "NONE" : summary;
 }
 
@@ -123,7 +189,7 @@ inline InventoryInspection inspectSelectedInventoryItem(const DiscreteInventoryC
     const auto& item = inventory.slots[static_cast<size_t>(selected)];
     if (!item.occupied) return {};
 
-    return {true, item.type, item.restore_value, item.flags};
+    return {true, item.type, item.restore_value, item.flags, item.provenance};
 }
 
 inline void applyInventoryMedical(Registry& registry, Entity player, BiologyComponent& bio, float restore_value) {
@@ -164,7 +230,8 @@ inline bool storeInventoryItem(
     ItemComponent::Type type,
     float restore_value = 0.0f,
     uint32_t flags = ITEM_FLAG_LEGAL,
-    Entity source = MAX_ENTITIES
+    Entity source = MAX_ENTITIES,
+    ItemProvenance provenance = {}
 ) {
     int emptySlot = firstEmptyInventorySlot(inventory);
     if (emptySlot < 0) return false;
@@ -175,6 +242,7 @@ inline bool storeInventoryItem(
     slot.restore_value = restore_value;
     slot.flags = flags;
     slot.source = source;
+    slot.provenance = normalizeItemProvenance(flags, provenance, source);
     return true;
 }
 
@@ -261,6 +329,7 @@ inline InventoryPickupResult collectNearestInventoryItem(
     slot.restore_value = item.restore_value;
     slot.flags = item.flags;
     slot.source = best;
+    slot.provenance = provenanceForPickup(item.flags, item.provenance, player, best);
     inventory.selected = static_cast<size_t>(emptySlot);
 
     if (registry.has<SurvivalInventoryComponent>(player)) {
@@ -323,7 +392,7 @@ inline Entity dropSelectedInventoryItem(Registry& registry, Entity player) {
     const auto& pt = registry.get<TransformComponent>(player);
     Entity dropped = registry.create();
     registry.assign<TransformComponent>(dropped, pt.x + 12.0f, pt.y, 8.0f, 8.0f);
-    registry.assign<ItemComponent>(dropped, slot.type, slot.restore_value, slot.flags);
+    registry.assign<ItemComponent>(dropped, slot.type, slot.restore_value, slot.flags, slot.provenance);
 
     if (registry.has<SurvivalInventoryComponent>(player)) {
         decrementSurvivalCounter(registry.get<SurvivalInventoryComponent>(player), slot.type);

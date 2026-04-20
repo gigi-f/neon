@@ -20,15 +20,16 @@ Movement updates the player's facing direction. Arrow keys steer scan focus when
 | Input | Action |
 | --- | --- |
 | 0 | Equip nothing and clear scan focus. |
-| 1 | Equip/use food. |
-| 2 | Equip/use water. |
-| 3 | Equip/use medical. |
-| 4 | Equip surface scan. |
-| 5 | Equip biology audit. |
-| 6 | Equip cognitive profile. |
-| 7 | Equip financial forensics. |
-| 8 | Equip structural analysis. |
-| Ctrl + 1-9 | Bind the current equipped slot to that number. |
+| 1 | Equip surface scan. |
+| 2 | Equip biology audit. |
+| 3 | Equip cognitive profile. |
+| 4 | Equip financial forensics. |
+| 5 | Equip structural analysis. |
+| 6 | Equip/use food. |
+| 7 | Equip/use water. |
+| 8 | Equip/use medical. |
+| 9 | Reserved item hotkey. |
+| Ctrl + 1-9 | Bind the current equipped slot to that number, using 1-5 for tools and 6-9 for items. |
 
 Food, water, and medical hotkeys quick-use a matching discrete inventory item first. If no matching discrete item is carried, they fall back to the survival inventory counter.
 
@@ -44,7 +45,9 @@ Scan tool hotkeys equip the tool but do not fire it. Press Space after equipping
 | U | Use the selected discrete inventory item. Scan tools equip; consumables are consumed. |
 | G | Drop the selected discrete inventory item. |
 
-The inventory can carry consumables and scan tools. Discrete inventory slots preserve item flags such as legal status, value, uniqueness, and market category when those details are available.
+The inventory can carry consumables and scan tools. Discrete inventory slots preserve item flags such as legal status, value, uniqueness, quest relevance, faction relevance, and market category when those details are available.
+
+Important goods can also carry provenance. Unique, high-value, quest, faction-relevant, illegal, or stolen items show tracked ownership/source details in inventory and scan readouts.
 
 If the player is near a boardable vehicle, E enters it after item pickup checks. Press E again to exit. Transit vehicles can only be boarded or exited while stopped and are automated while riding.
 
@@ -116,6 +119,8 @@ Layer overlays let the player inspect simulation layers from the world view. The
 ### District Markets
 
 Markets expose stock, price, and transaction behavior. Player buy/sell interactions use nearby market entities, available wallet balance, market stock, inventory space, and eligible carried items.
+
+Tracked item provenance is preserved when important goods move through inventory or market actions. Common legal commodities remain untracked unless they receive a provenance-relevant flag.
 
 ## Manual Maintenance
 

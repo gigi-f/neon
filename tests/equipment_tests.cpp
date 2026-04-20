@@ -5,11 +5,15 @@ static void testDefaultHotkeysEquipToolsAndSupplies() {
     EquipmentComponent equipment;
 
     assert(equipment.hotkeys[0] == EquipmentSlot::NONE);
-    assert(equipment.hotkeys[1] == EquipmentSlot::FOOD);
-    assert(equipment.hotkeys[2] == EquipmentSlot::WATER);
-    assert(equipment.hotkeys[3] == EquipmentSlot::MEDICAL);
-    assert(equipment.hotkeys[4] == EquipmentSlot::SURFACE_SCAN);
-    assert(equipment.hotkeys[8] == EquipmentSlot::STRUCTURAL_ANALYSIS);
+    assert(equipment.hotkeys[1] == EquipmentSlot::SURFACE_SCAN);
+    assert(equipment.hotkeys[2] == EquipmentSlot::BIOLOGY_AUDIT);
+    assert(equipment.hotkeys[3] == EquipmentSlot::COGNITIVE_PROFILE);
+    assert(equipment.hotkeys[4] == EquipmentSlot::FINANCIAL_FORENSICS);
+    assert(equipment.hotkeys[5] == EquipmentSlot::STRUCTURAL_ANALYSIS);
+    assert(equipment.hotkeys[6] == EquipmentSlot::FOOD);
+    assert(equipment.hotkeys[7] == EquipmentSlot::WATER);
+    assert(equipment.hotkeys[8] == EquipmentSlot::MEDICAL);
+    assert(equipment.hotkeys[9] == EquipmentSlot::NONE);
 }
 
 static void testConsumableSlotsMapToItemTypes() {
@@ -37,14 +41,24 @@ static void testScanToolsHaveDistinctPositiveRanges() {
     assert(equipmentRange(EquipmentSlot::NONE) == 0.0f);
 }
 
-static void testHotkeyAssignmentRebindsOneThroughNine() {
+static void testHotkeyAssignmentRespectsToolAndItemRanges() {
     EquipmentComponent equipment;
 
-    assert(assignEquipmentHotkey(equipment, 4, EquipmentSlot::WATER));
-    assert(equipment.hotkeys[4] == EquipmentSlot::WATER);
+    assert(assignEquipmentHotkey(equipment, 4, EquipmentSlot::SURFACE_SCAN));
+    assert(equipment.hotkeys[4] == EquipmentSlot::SURFACE_SCAN);
 
-    assert(assignEquipmentHotkey(equipment, 9, EquipmentSlot::STRUCTURAL_ANALYSIS));
-    assert(equipment.hotkeys[9] == EquipmentSlot::STRUCTURAL_ANALYSIS);
+    assert(assignEquipmentHotkey(equipment, 9, EquipmentSlot::WATER));
+    assert(equipment.hotkeys[9] == EquipmentSlot::WATER);
+}
+
+static void testHotkeyAssignmentRejectsWrongRanges() {
+    EquipmentComponent equipment;
+
+    assert(!assignEquipmentHotkey(equipment, 4, EquipmentSlot::WATER));
+    assert(equipment.hotkeys[4] == EquipmentSlot::FINANCIAL_FORENSICS);
+
+    assert(!assignEquipmentHotkey(equipment, 9, EquipmentSlot::STRUCTURAL_ANALYSIS));
+    assert(equipment.hotkeys[9] == EquipmentSlot::NONE);
 }
 
 static void testHotkeyAssignmentKeepsZeroReserved() {
@@ -61,7 +75,8 @@ int main() {
     testConsumableSlotsMapToItemTypes();
     testScanSlotsMapToInventoryToolTypes();
     testScanToolsHaveDistinctPositiveRanges();
-    testHotkeyAssignmentRebindsOneThroughNine();
+    testHotkeyAssignmentRespectsToolAndItemRanges();
+    testHotkeyAssignmentRejectsWrongRanges();
     testHotkeyAssignmentKeepsZeroReserved();
     return 0;
 }

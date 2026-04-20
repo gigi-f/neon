@@ -2474,7 +2474,9 @@ inline bool executePlayerMarketTrade(Registry& registry, Entity player,
     if (preview.mode == PlayerTradeMode::BUY) {
         PlayerMarketTradePreview current = previewPlayerMarketBuy(registry, player, preview.type);
         if (!current.available) return false;
-        if (!storeInventoryItem(inventory, preview.type, 40.0f, ITEM_FLAG_LEGAL, preview.market)) {
+        uint32_t flags = ITEM_FLAG_LEGAL;
+        ItemProvenance provenance = provenanceForMarketPurchase(flags, player, preview.market);
+        if (!storeInventoryItem(inventory, preview.type, 40.0f, flags, preview.market, provenance)) {
             return false;
         }
         eco.credits -= current.price;

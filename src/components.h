@@ -334,7 +334,15 @@ enum ItemFlag : uint32_t {
     ITEM_FLAG_ILLEGAL          = 1u << 1,
     ITEM_FLAG_UNIQUE           = 1u << 2,
     ITEM_FLAG_HIGH_VALUE       = 1u << 3,
-    ITEM_FLAG_FACTION_RELEVANT = 1u << 4
+    ITEM_FLAG_FACTION_RELEVANT = 1u << 4,
+    ITEM_FLAG_QUEST            = 1u << 5
+};
+
+struct ItemProvenance {
+    bool tracked = false;
+    bool stolen = false;
+    Entity owner = MAX_ENTITIES;
+    Entity source = MAX_ENTITIES;
 };
 
 // Collectible item that restores a biological stat when consumed.
@@ -351,6 +359,7 @@ struct ItemComponent {
     } type = FOOD;
     float restore_value = 40.0f;
     uint32_t flags = ITEM_FLAG_LEGAL;
+    ItemProvenance provenance;
 };
 
 // Player-carried survival supplies. Full inventory management remains future work;
@@ -367,6 +376,7 @@ struct CarriedItem {
     float restore_value = 40.0f;
     uint32_t flags = ITEM_FLAG_LEGAL;
     Entity source = MAX_ENTITIES;
+    ItemProvenance provenance;
 };
 
 struct DiscreteInventoryComponent {

@@ -20,25 +20,17 @@ struct EquipmentComponent {
     EquipmentSlot equipped = EquipmentSlot::NONE;
     std::array<EquipmentSlot, 10> hotkeys = {
         EquipmentSlot::NONE,
-        EquipmentSlot::FOOD,
-        EquipmentSlot::WATER,
-        EquipmentSlot::MEDICAL,
         EquipmentSlot::SURFACE_SCAN,
         EquipmentSlot::BIOLOGY_AUDIT,
         EquipmentSlot::COGNITIVE_PROFILE,
         EquipmentSlot::FINANCIAL_FORENSICS,
         EquipmentSlot::STRUCTURAL_ANALYSIS,
+        EquipmentSlot::FOOD,
+        EquipmentSlot::WATER,
+        EquipmentSlot::MEDICAL,
         EquipmentSlot::NONE
     };
 };
-
-inline bool assignEquipmentHotkey(EquipmentComponent& equipment, std::size_t index, EquipmentSlot slot) {
-    if (index == 0 || index >= equipment.hotkeys.size()) {
-        return false;
-    }
-    equipment.hotkeys[index] = slot;
-    return true;
-}
 
 inline const char* equipmentName(EquipmentSlot slot) {
     switch (slot) {
@@ -67,6 +59,38 @@ inline bool isScanEquipment(EquipmentSlot slot) {
            slot == EquipmentSlot::COGNITIVE_PROFILE ||
            slot == EquipmentSlot::FINANCIAL_FORENSICS ||
            slot == EquipmentSlot::STRUCTURAL_ANALYSIS;
+}
+
+inline bool isToolHotkeyIndex(std::size_t index) {
+    return index >= 1 && index <= 5;
+}
+
+inline bool isItemHotkeyIndex(std::size_t index) {
+    return index >= 6 && index <= 9;
+}
+
+inline bool canAssignEquipmentHotkey(std::size_t index, EquipmentSlot slot) {
+    if (index == 0 || index >= 10) {
+        return false;
+    }
+    if (slot == EquipmentSlot::NONE) {
+        return true;
+    }
+    if (isScanEquipment(slot)) {
+        return isToolHotkeyIndex(index);
+    }
+    if (isConsumableEquipment(slot)) {
+        return isItemHotkeyIndex(index);
+    }
+    return false;
+}
+
+inline bool assignEquipmentHotkey(EquipmentComponent& equipment, std::size_t index, EquipmentSlot slot) {
+    if (!canAssignEquipmentHotkey(index, slot)) {
+        return false;
+    }
+    equipment.hotkeys[index] = slot;
+    return true;
 }
 
 inline ItemComponent::Type equipmentItemType(EquipmentSlot slot) {
