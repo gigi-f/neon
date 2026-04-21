@@ -128,6 +128,16 @@ inline EquipmentSlot equipmentFromInventoryType(ItemComponent::Type type) {
     return EquipmentSlot::NONE;
 }
 
+inline int hotkeyIndexForInventoryType(const EquipmentComponent& equipment, ItemComponent::Type type) {
+    EquipmentSlot slot = equipmentFromInventoryType(type);
+    for (std::size_t i = 1; i < equipment.hotkeys.size(); ++i) {
+        if (equipment.hotkeys[i] == slot) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
 inline float equipmentRange(EquipmentSlot slot) {
     switch (slot) {
         case EquipmentSlot::SURFACE_SCAN:        return 150.0f;

@@ -70,6 +70,25 @@ static void testHotkeyAssignmentKeepsZeroReserved() {
     assert(!assignEquipmentHotkey(equipment, equipment.hotkeys.size(), EquipmentSlot::FOOD));
 }
 
+static void testHotkeyLookupReturnsAssignedIndex() {
+    EquipmentComponent equipment;
+
+    assert(hotkeyIndexForInventoryType(equipment, ItemComponent::SURFACE_SCAN_TOOL) == 1);
+    assert(hotkeyIndexForInventoryType(equipment, ItemComponent::BIOLOGY_AUDIT_TOOL) == 2);
+    assert(hotkeyIndexForInventoryType(equipment, ItemComponent::FOOD) == 6);
+
+    assert(assignEquipmentHotkey(equipment, 1, EquipmentSlot::NONE));
+    assert(assignEquipmentHotkey(equipment, 5, EquipmentSlot::SURFACE_SCAN));
+    assert(hotkeyIndexForInventoryType(equipment, ItemComponent::SURFACE_SCAN_TOOL) == 5);
+}
+
+static void testHotkeyLookupReturnsMissingWhenUnassigned() {
+    EquipmentComponent equipment;
+
+    assert(assignEquipmentHotkey(equipment, 8, EquipmentSlot::NONE));
+    assert(hotkeyIndexForInventoryType(equipment, ItemComponent::MEDICAL) == -1);
+}
+
 int main() {
     testDefaultHotkeysEquipToolsAndSupplies();
     testConsumableSlotsMapToItemTypes();
@@ -78,5 +97,7 @@ int main() {
     testHotkeyAssignmentRespectsToolAndItemRanges();
     testHotkeyAssignmentRejectsWrongRanges();
     testHotkeyAssignmentKeepsZeroReserved();
+    testHotkeyLookupReturnsAssignedIndex();
+    testHotkeyLookupReturnsMissingWhenUnassigned();
     return 0;
 }

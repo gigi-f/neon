@@ -327,6 +327,16 @@ struct RelationshipComponent {
     }
 };
 
+struct ConversationComponent {
+    float cooldown = 0.0f;
+    Entity last_partner = MAX_ENTITIES;
+};
+
+struct SpeechBubbleComponent {
+    std::string text;
+    float ttl = 0.0f;
+};
+
 // ── L1 Biology ────────────────────────────────────────────────────────────────
 
 enum ItemFlag : uint32_t {

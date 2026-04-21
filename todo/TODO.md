@@ -4,6 +4,25 @@ This backlog is ordered by game-development dependency, not by simulation layer.
 
 Audit source: `todo/TODO_AUDIT_2026-04-18.md`.
 
+## Milestone 0 - Sandbox Microcity Pivot
+
+Priority: immediate. Replace broad procedural generation with a deterministic sandbox map that is a microcosm of the future city.
+
+- [ ] Remove procedural city generation and replace it with a hand-authored sandbox layout profile
+- [ ] Include required districts in the sandbox:
+  - [x] Housing
+  - [ ] Workplace
+  - [ ] Market
+  - [ ] Leisure area
+  - [ ] Upper-class quarters
+- [ ] Connect all required districts with transit so NPC routing is deterministic and observable
+- [ ] Add startup validation (tests and/or assertions) that required districts and transit reachability exist
+- [ ] Next phase: implement NPC routine loop on sandbox map
+  - [ ] `sleep => transit => work => transit => leisure => home => repeat`
+- [ ] After loop validation, tune player role interactions against this sandbox flow
+
+---
+
 ## Completed Foundation
 
 - [x] C++ / SDL2 project setup
@@ -87,7 +106,7 @@ Priority: high. These turn visibility into decisions and consequences.
   - [x] Track ownership/source only for stolen, unique, quest, or high-value goods
   - [x] Expose provenance through Surface Scan and Financial Forensics
 - [x] Move tools to 1-5 keys, 6-9 for items, 0 for nothing equipped
-- [ ] We need a navigable inventory modal that shows icons of the items, a cursor, and the hotkey number next to the relevant item (if assigned)
+- [x] We need a navigable inventory modal that shows icons of the items, a cursor, and the hotkey number next to the relevant item (if assigned)
 - [ ] npcs should not spawn randomly, but should be born in housing units or at hospital
 
 ### Information Gameplay

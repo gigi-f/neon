@@ -37,7 +37,7 @@ inline std::string glyphForRank(SocialRank r) {
 }
 
 enum class SimulationAlertSeverity { INFO, WARNING, DANGER };
-enum class SimulationAlertCategory { WEATHER, FLOOD, INFECTION, STRUCTURE };
+enum class SimulationAlertCategory { WEATHER, FLOOD, INFECTION, STRUCTURE, INTEL };
 
 struct SimulationAlert {
     SimulationAlertSeverity severity = SimulationAlertSeverity::INFO;
@@ -304,6 +304,11 @@ public:
     }
 
     void spawnCitizens(Registry& registry, float camX, float camY, float spawnRadius, float spawnMultiplier = 1.0f) {
+        constexpr size_t kMaxCitizens = 400;
+        auto existingCitizens = registry.view<CitizenComponent>();
+        if (existingCitizens.size() >= kMaxCitizens) return;
+
+        size_t citizenCount = existingCitizens.size();
         initialize(registry);
         std::mt19937 rng(std::random_device{}());
         std::uniform_real_distribution<float> dist(0.0f, 1.0f);
@@ -318,7 +323,9 @@ public:
             if (dx * dx + dy * dy > spawnRadius * spawnRadius) continue;
 
             if (road.type == RoadType::PEDESTRIAN_PATH && dist(rng) < 0.2f * spawnMultiplier) {
+                if (citizenCount >= kMaxCitizens) break;
                 Entity citizen = registry.create();
+                citizenCount++;
 
                 std::uniform_real_distribution<float> xDist(transform.x - transform.width / 2.0f, transform.x + transform.width / 2.0f);
                 std::uniform_real_distribution<float> yDist(transform.y - transform.height / 2.0f, transform.y + transform.height / 2.0f);
@@ -331,6 +338,7 @@ public:
                 registry.assign<BiologyComponent>(citizen);
                 registry.assign<CognitiveComponent>(citizen);
                 registry.assign<RelationshipComponent>(citizen);
+                registry.assign<ConversationComponent>(citizen);
                 if (dist(rng) < 0.02f) {
                     registry.assign<PathogenComponent>(citizen);
                 }
@@ -453,15 +461,6 @@ public:
             auto& v = registry.get<VehicleComponent>(e);
             if (v.driver != MAX_ENTITIES) continue;
 
-            auto& t = registry.get<TransformComponent>(e);
-            float d = std::sqrt(std::pow(t.x - cameraX, 2) + std::pow(t.y - cameraY, 2));
-            if (d > maxRadius) {
-                toDestroy.push_back(e);
-            }
-        }
-
-        auto citizenView = registry.view<TransformComponent, CitizenComponent>();
-        for (Entity e : citizenView) {
             auto& t = registry.get<TransformComponent>(e);
             float d = std::sqrt(std::pow(t.x - cameraX, 2) + std::pow(t.y - cameraY, 2));
             if (d > maxRadius) {
@@ -1709,11 +1708,13 @@ public:
             // Critical organ failure (Brain/Heart) or zero overall health triggers death.
             bool is_dead = (b.health <= 0.0f || b.organs.brain <= 0.0f || b.organs.heart <= 0.0f);
             if (is_dead && registry.has<CitizenComponent>(e)) {
-                if (registry.has<TransformComponent>(e)) {
-                    auto& t = registry.get<TransformComponent>(e);
-                    outEvents.push_back({t.x, t.y});
-                }
-                dead.push_back(e);
+                // Sandbox fixed-pop mode: citizens persist instead of being destroyed.
+                b.health = 20.0f;
+                b.hunger = std::max(20.0f, b.hunger);
+                b.thirst = std::max(20.0f, b.thirst);
+                b.fatigue = std::max(20.0f, b.fatigue);
+                b.organs.heart = std::max(20.0f, b.organs.heart);
+                b.organs.brain = std::max(20.0f, b.organs.brain);
             }
         }
 
@@ -1927,6 +1928,277 @@ public:
                 cog.pleasure = std::max(-1.0f, cog.pleasure - 0.3f);
                 cog.arousal  = std::min( 1.0f, cog.arousal  + 0.4f);
             }
+        }
+    }
+};
+
+// ── L2 Conversation System ────────────────────────────────────────────────────
+// Pairs nearby citizens for one short conversation turn at L2 cadence.
+// Conversations are template-based, write HEARD_RUMOR memories, and can emit
+// player eavesdrop intel alerts.
+class ConversationSystem {
+    enum class Topic { SCHEDULE, MARKET, DANGER, STATUS };
+    struct ConversationLine {
+        std::string speech;
+        std::string intel;
+    };
+
+    static float relationshipAffinity(const RelationshipComponent& rel, Entity other, bool& found) {
+        int idx = rel.find(other);
+        if (idx < 0) {
+            found = false;
+            return 0.0f;
+        }
+        found = true;
+        return rel.entries[idx].affinity;
+    }
+
+    static bool hasRecentMemory(const CognitiveComponent& cog, MemoryEventType event,
+                                float game_hour, float window) {
+        for (int i = 0; i < cog.mem_size; ++i) {
+            const auto& r = cog.memory[i];
+            if (r.event != event) continue;
+            float diff = std::abs(game_hour - r.timestamp);
+            if (diff > 12.0f) diff = 24.0f - diff;
+            if (diff <= window) return true;
+        }
+        return false;
+    }
+
+    static Topic pickTopic(Registry& registry, Entity a, Entity b, float game_hour) {
+        auto dangerFor = [&](Entity e) {
+            if (registry.has<BiologyComponent>(e)) {
+                const auto& bio = registry.get<BiologyComponent>(e);
+                if (bio.health < 45.0f || bio.thirst < 25.0f || bio.hunger < 25.0f) return true;
+            }
+            if (registry.has<PathogenComponent>(e) &&
+                registry.get<PathogenComponent>(e).severity >= 0.35f) {
+                return true;
+            }
+            if (registry.has<CognitiveComponent>(e) &&
+                hasRecentMemory(registry.get<CognitiveComponent>(e),
+                                MemoryEventType::SAW_VIOLENCE, game_hour, 2.0f)) {
+                return true;
+            }
+            return false;
+        };
+
+        if (dangerFor(a) || dangerFor(b)) return Topic::DANGER;
+
+        if (registry.has<EconomicComponent>(a) || registry.has<EconomicComponent>(b)) {
+            Entity speaker = registry.has<EconomicComponent>(a) ? a : b;
+            Entity market = MAX_ENTITIES;
+            if (registry.has<TransformComponent>(speaker)) {
+                const auto& st = registry.get<TransformComponent>(speaker);
+                float bestDist = 60.0f * 60.0f;
+                auto markets = registry.view<MarketComponent, TransformComponent>();
+                for (Entity m : markets) {
+                    const auto& mt = registry.get<TransformComponent>(m);
+                    float dx = mt.x - st.x;
+                    float dy = mt.y - st.y;
+                    float d = dx * dx + dy * dy;
+                    if (d < bestDist) {
+                        bestDist = d;
+                        market = m;
+                    }
+                }
+            }
+            if (market != MAX_ENTITIES && registry.has<MarketComponent>(market)) {
+                const auto& mc = registry.get<MarketComponent>(market);
+                float minStock = std::min(mc.food_stock, std::min(mc.water_stock, mc.medical_stock));
+                if (minStock < 6.0f || mc.greed_margin > 0.15f) return Topic::MARKET;
+            }
+        }
+
+        if (registry.has<ScheduleComponent>(a) && registry.has<ScheduleComponent>(b)) {
+            const auto sa = registry.get<ScheduleComponent>(a).state;
+            const auto sb = registry.get<ScheduleComponent>(b).state;
+            if (sa == ScheduleState::TRANSIT || sb == ScheduleState::TRANSIT ||
+                sa != sb) {
+                return Topic::SCHEDULE;
+            }
+        }
+
+        return Topic::STATUS;
+    }
+
+    static ConversationLine fragmentFor(Registry& registry, Entity a, Entity b, Topic topic) {
+        switch (topic) {
+            case Topic::DANGER:
+                return {"Stay clear of hot zones.", "DANGER TALK: STAY CLEAR OF HOT ZONES"};
+            case Topic::MARKET:
+                return {"Prices are shifting nearby.", "MARKET TALK: PRICES SHIFTING NEARBY"};
+            case Topic::SCHEDULE:
+                return {"Transit timing is off.", "ROUTE TALK: TRANSIT TIMING IS OFF"};
+            case Topic::STATUS:
+            default: {
+                int rankA = registry.has<SocialRankComponent>(a)
+                    ? static_cast<int>(registry.get<SocialRankComponent>(a).rank)
+                    : 2;
+                int rankB = registry.has<SocialRankComponent>(b)
+                    ? static_cast<int>(registry.get<SocialRankComponent>(b).rank)
+                    : 2;
+                if (rankA == rankB) {
+                    return {"Same tier, same stress.", "STATUS TALK: SAME TIER, SAME STRESS"};
+                }
+                return rankA > rankB
+                    ? ConversationLine{"Elites are watching the streets.", "STATUS TALK: ELITES WATCHING THE STREETS"}
+                    : ConversationLine{"Workers feel the squeeze.", "STATUS TALK: WORKERS FEEL THE SQUEEZE"};
+            }
+        }
+    }
+
+    static void applyConversationPad(CognitiveComponent& cog, Topic topic) {
+        switch (topic) {
+            case Topic::DANGER:
+                cog.pleasure = std::max(-1.0f, cog.pleasure - 0.08f);
+                cog.arousal = std::min(1.0f, cog.arousal + 0.10f);
+                break;
+            case Topic::MARKET:
+                cog.pleasure = std::max(-1.0f, cog.pleasure - 0.03f);
+                cog.arousal = std::min(1.0f, cog.arousal + 0.04f);
+                break;
+            case Topic::SCHEDULE:
+                cog.arousal = std::min(1.0f, cog.arousal + 0.03f);
+                break;
+            case Topic::STATUS:
+                cog.dominance = std::clamp(cog.dominance + 0.01f, -1.0f, 1.0f);
+                break;
+        }
+    }
+
+    static float deterministicCooldown(Entity a, Entity b, float game_hour) {
+        int seed = static_cast<int>(a) * 31 + static_cast<int>(b) * 17 +
+                   static_cast<int>(game_hour * 10.0f);
+        int bucket = std::abs(seed % 5); // [0,4]
+        return 6.0f + static_cast<float>(bucket);
+    }
+
+public:
+    void update(Registry& registry, Entity player, float dt, float game_hour,
+                SimulationAlertStack* alerts = nullptr) {
+        auto cooldownView = registry.view<ConversationComponent>();
+        for (Entity e : cooldownView) {
+            auto& convo = registry.get<ConversationComponent>(e);
+            convo.cooldown = std::max(0.0f, convo.cooldown - dt);
+        }
+        auto bubbleView = registry.view<SpeechBubbleComponent>();
+        for (Entity e : bubbleView) {
+            auto& bubble = registry.get<SpeechBubbleComponent>(e);
+            bubble.ttl = std::max(0.0f, bubble.ttl - dt);
+            if (bubble.ttl <= 0.0f) {
+                bubble.text.clear();
+            }
+        }
+
+        constexpr float PAIR_RADIUS_SQ = 35.0f * 35.0f;
+        constexpr float LISTEN_RADIUS_SQ = 70.0f * 70.0f;
+        constexpr float MIN_AFFINITY = 0.10f;
+        std::vector<Entity> list;
+        auto view = registry.view<CitizenComponent, TransformComponent, CognitiveComponent,
+                                  RelationshipComponent, ConversationComponent>();
+        for (Entity e : view) list.push_back(e);
+
+        std::vector<Entity> used;
+        used.reserve(list.size());
+        auto isUsed = [&](Entity e) {
+            return std::find(used.begin(), used.end(), e) != used.end();
+        };
+
+        const bool playerHasTransform =
+            player != MAX_ENTITIES && registry.alive(player) && registry.has<TransformComponent>(player);
+        const TransformComponent* playerTransform =
+            playerHasTransform ? &registry.get<TransformComponent>(player) : nullptr;
+
+        for (Entity speaker : list) {
+            if (isUsed(speaker)) continue;
+            auto& speakerConvo = registry.get<ConversationComponent>(speaker);
+            if (speakerConvo.cooldown > 0.0f) continue;
+
+            const auto& ta = registry.get<TransformComponent>(speaker);
+            const auto& relA = registry.get<RelationshipComponent>(speaker);
+
+            Entity bestAlt = MAX_ENTITIES;
+            Entity bestRepeat = MAX_ENTITIES;
+            float bestAltScore = -1e9f;
+            float bestRepeatScore = -1e9f;
+
+            for (Entity other : list) {
+                if (other == speaker || isUsed(other)) continue;
+                auto& otherConvo = registry.get<ConversationComponent>(other);
+                if (otherConvo.cooldown > 0.0f) continue;
+
+                const auto& tb = registry.get<TransformComponent>(other);
+                float dx = ta.x - tb.x;
+                float dy = ta.y - tb.y;
+                float distSq = dx * dx + dy * dy;
+                if (distSq > PAIR_RADIUS_SQ) continue;
+
+                bool affinityFound = false;
+                float affinity = relationshipAffinity(relA, other, affinityFound);
+                if (affinityFound && affinity < MIN_AFFINITY) continue;
+
+                float score = affinity * 10.0f - distSq / PAIR_RADIUS_SQ;
+                if (speakerConvo.last_partner == other) {
+                    if (score > bestRepeatScore) {
+                        bestRepeatScore = score;
+                        bestRepeat = other;
+                    }
+                } else {
+                    if (score > bestAltScore) {
+                        bestAltScore = score;
+                        bestAlt = other;
+                    }
+                }
+            }
+
+            Entity partner = (bestAlt != MAX_ENTITIES) ? bestAlt : bestRepeat;
+            if (partner == MAX_ENTITIES) continue;
+
+            auto& partnerConvo = registry.get<ConversationComponent>(partner);
+            auto& cogA = registry.get<CognitiveComponent>(speaker);
+            auto& cogB = registry.get<CognitiveComponent>(partner);
+            Topic topic = pickTopic(registry, speaker, partner, game_hour);
+            ConversationLine line = fragmentFor(registry, speaker, partner, topic);
+
+            cogA.record({MemoryEventType::HEARD_RUMOR, game_hour, 0.45f, partner});
+            cogB.record({MemoryEventType::HEARD_RUMOR, game_hour, 0.45f, speaker});
+            applyConversationPad(cogA, topic);
+            applyConversationPad(cogB, topic);
+
+            float cooldown = deterministicCooldown(speaker, partner, game_hour);
+            speakerConvo.cooldown = cooldown;
+            partnerConvo.cooldown = cooldown;
+            speakerConvo.last_partner = partner;
+            partnerConvo.last_partner = speaker;
+
+            auto setBubble = [&](Entity e) {
+                if (!registry.has<SpeechBubbleComponent>(e)) {
+                    registry.assign<SpeechBubbleComponent>(e);
+                }
+                auto& bubble = registry.get<SpeechBubbleComponent>(e);
+                bubble.text = line.speech;
+                bubble.ttl = 2.5f;
+            };
+            setBubble(speaker);
+            setBubble(partner);
+
+            if (alerts && playerTransform) {
+                const auto& tb = registry.get<TransformComponent>(partner);
+                float dax = ta.x - playerTransform->x;
+                float day = ta.y - playerTransform->y;
+                float dbx = tb.x - playerTransform->x;
+                float dby = tb.y - playerTransform->y;
+                if (dax * dax + day * day <= LISTEN_RADIUS_SQ ||
+                    dbx * dbx + dby * dby <= LISTEN_RADIUS_SQ) {
+                    alerts->push(SimulationAlertSeverity::INFO, SimulationAlertCategory::INTEL,
+                                 std::string("EAVESDROP: ") + line.intel,
+                                 game_hour, 8.0f);
+                }
+            }
+
+            used.push_back(speaker);
+            used.push_back(partner);
         }
     }
 };

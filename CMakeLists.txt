@@ -81,6 +81,20 @@ target_include_directories(market_trade_tests PRIVATE src)
 target_link_libraries(market_trade_tests PRIVATE SDL2::SDL2)
 add_test(NAME market_trade_tests COMMAND market_trade_tests)
 
+add_executable(conversation_system_tests
+    tests/conversation_system_tests.cpp
+)
+target_include_directories(conversation_system_tests PRIVATE src)
+target_link_libraries(conversation_system_tests PRIVATE SDL2::SDL2)
+add_test(NAME conversation_system_tests COMMAND conversation_system_tests)
+
+add_executable(world_generation_tests
+    tests/world_generation_tests.cpp
+)
+target_include_directories(world_generation_tests PRIVATE src)
+target_link_libraries(world_generation_tests PRIVATE SDL2::SDL2)
+add_test(NAME world_generation_tests COMMAND world_generation_tests)
+
 # Copy assets to build directory
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

@@ -1,10 +1,12 @@
 #include <SDL.h>
 #include <iostream>
 #include <algorithm>
+#include <cctype>
 #include <cstdarg>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 #include "ecs.h"
@@ -297,6 +299,20 @@ static const char* itemName(ItemComponent::Type type) {
     return "UNKNOWN";
 }
 
+static char itemIcon(ItemComponent::Type type) {
+    switch (type) {
+        case ItemComponent::FOOD:                     return 'F';
+        case ItemComponent::WATER:                    return 'W';
+        case ItemComponent::MEDICAL:                  return 'M';
+        case ItemComponent::SURFACE_SCAN_TOOL:        return 'S';
+        case ItemComponent::BIOLOGY_AUDIT_TOOL:       return 'B';
+        case ItemComponent::COGNITIVE_PROFILE_TOOL:   return 'C';
+        case ItemComponent::FINANCIAL_FORENSICS_TOOL: return '$';
+        case ItemComponent::STRUCTURAL_ANALYSIS_TOOL: return 'T';
+    }
+    return '?';
+}
+
 static ItemComponent::Type nextMarketTradeType(ItemComponent::Type type) {
     if (type == ItemComponent::FOOD) return ItemComponent::WATER;
     if (type == ItemComponent::WATER) return ItemComponent::MEDICAL;
@@ -548,6 +564,133 @@ static void drawScanPanel(SDL_Renderer* renderer, SDL_Texture* font, Registry& r
     }
 }
 
+static const char* alertCategoryName(SimulationAlertCategory category) {
+    switch (category) {
+        case SimulationAlertCategory::WEATHER:   return "WEATHER";
+        case SimulationAlertCategory::FLOOD:     return "FLOOD";
+        case SimulationAlertCategory::INFECTION: return "INFECTION";
+        case SimulationAlertCategory::STRUCTURE: return "STRUCTURE";
+        case SimulationAlertCategory::INTEL:     return "INTEL";
+    }
+    return "ALERT";
+}
+
+static void drawIntelLogPanel(SDL_Renderer* renderer, SDL_Texture* font,
+                              const SimulationAlertStack& alertStack,
+                              int screenW) {
+    if (!font) return;
+
+    SDL_Rect panel = {screenW - 360, 196, 348, 206};
+    SDL_SetRenderDrawColor(renderer, 8, 12, 18, 235);
+    SDL_RenderFillRect(renderer, &panel);
+    SDL_SetRenderDrawColor(renderer, 120, 210, 245, 230);
+    SDL_RenderDrawRect(renderer, &panel);
+
+    SDL_Color titleCol = {140, 230, 250, 245};
+    SDL_Color textCol = {220, 235, 230, 235};
+    SDL_Color mutedCol = {150, 170, 175, 220};
+    drawText(renderer, font, "INTEL LOG", panel.x + 8, panel.y + 8, titleCol, 0.75f);
+    drawText(renderer, font, "J:TOGGLE  ESC:CLOSE", panel.x + 8, panel.y + 22, mutedCol, 0.55f);
+
+    auto alerts = alertStack.visible(10);
+    int y = panel.y + 40;
+    if (alerts.empty()) {
+        drawText(renderer, font, "NO RECENT INTEL", panel.x + 8, y, mutedCol, 0.62f);
+        return;
+    }
+
+    for (const auto& alert : alerts) {
+        if (y > panel.y + panel.h - 16) break;
+        char line[176];
+        std::snprintf(line, sizeof(line), "%s %s",
+                      alertCategoryName(alert.category), alert.message.c_str());
+        drawText(renderer, font, line, panel.x + 8, y, textCol, 0.58f);
+        y += 12;
+    }
+}
+
+static void drawInventoryModal(SDL_Renderer* renderer, SDL_Texture* font, Registry& registry,
+                               Entity player, int screenW, int screenH) {
+    if (!font || !registry.has<DiscreteInventoryComponent>(player)) return;
+
+    const auto& inventory = registry.get<DiscreteInventoryComponent>(player);
+    const EquipmentComponent* equipment = registry.has<EquipmentComponent>(player)
+        ? &registry.get<EquipmentComponent>(player)
+        : nullptr;
+
+    SDL_Rect panel = {screenW / 2 - 212, screenH / 2 - 128, 424, 256};
+    SDL_SetRenderDrawColor(renderer, 8, 12, 18, 240);
+    SDL_RenderFillRect(renderer, &panel);
+    SDL_SetRenderDrawColor(renderer, 120, 220, 245, 230);
+    SDL_RenderDrawRect(renderer, &panel);
+
+    SDL_Color titleCol = {140, 235, 250, 245};
+    SDL_Color textCol = {220, 235, 230, 235};
+    drawText(renderer, font, "INVENTORY", panel.x + 10, panel.y + 8, titleCol, 0.8f);
+    drawText(renderer, font, "ARROWS:MOVE  U:USE/EQUIP  G:DROP  TAB/ESC:CLOSE",
+             panel.x + 10, panel.y + 24, textCol, 0.55f);
+
+    constexpr int cols = 4;
+    constexpr int rows = 3;
+    constexpr int slotW = 96;
+    constexpr int slotH = 62;
+    const int gridX = panel.x + 12;
+    const int gridY = panel.y + 44;
+
+    for (int row = 0; row < rows; ++row) {
+        for (int col = 0; col < cols; ++col) {
+            size_t index = static_cast<size_t>(row * cols + col);
+            if (index >= DiscreteInventoryComponent::CAPACITY) continue;
+
+            SDL_Rect slotRect = {
+                gridX + col * (slotW + 6),
+                gridY + row * (slotH + 6),
+                slotW,
+                slotH
+            };
+            bool selected = inventory.selected == index;
+            SDL_SetRenderDrawColor(renderer,
+                                   selected ? 25 : 14,
+                                   selected ? 58 : 24,
+                                   selected ? 70 : 30,
+                                   selected ? 240 : 210);
+            SDL_RenderFillRect(renderer, &slotRect);
+            SDL_SetRenderDrawColor(renderer,
+                                   selected ? 120 : 78,
+                                   selected ? 245 : 160,
+                                   selected ? 220 : 185,
+                                   selected ? 245 : 210);
+            SDL_RenderDrawRect(renderer, &slotRect);
+
+            char line[96];
+            std::snprintf(line, sizeof(line), "%zu", index + 1);
+            drawText(renderer, font, line, slotRect.x + 4, slotRect.y + 4,
+                     SDL_Color{160, 220, 235, 230}, 0.55f);
+
+            const auto& item = inventory.slots[index];
+            if (!item.occupied) {
+                drawText(renderer, font, "EMPTY", slotRect.x + 6, slotRect.y + 22,
+                         SDL_Color{120, 140, 150, 220}, 0.6f);
+                continue;
+            }
+
+            std::snprintf(line, sizeof(line), "[%c] %s", itemIcon(item.type), itemName(item.type));
+            drawText(renderer, font, line, slotRect.x + 6, slotRect.y + 20,
+                     SDL_Color{220, 235, 230, 235}, 0.58f);
+
+            int assignedHotkey = equipment ? hotkeyIndexForInventoryType(*equipment, item.type) : -1;
+            if (assignedHotkey > 0) {
+                std::snprintf(line, sizeof(line), "HK:%d", assignedHotkey);
+                drawText(renderer, font, line, slotRect.x + 6, slotRect.y + 38,
+                         SDL_Color{120, 245, 200, 235}, 0.58f);
+            } else {
+                drawText(renderer, font, "HK:-", slotRect.x + 6, slotRect.y + 38,
+                         SDL_Color{175, 185, 190, 220}, 0.58f);
+            }
+        }
+    }
+}
+
 static bool visibleWorldRect(const TransformComponent& t, float viewLeft, float viewRight,
                              float viewTop, float viewBottom) {
     return !(t.x + t.width/2.0f < viewLeft || t.x - t.width/2.0f > viewRight ||
@@ -561,6 +704,170 @@ static SDL_Rect screenRectFor(const TransformComponent& t, float camX, float cam
     int x = static_cast<int>(centerX + (t.x - camX) * scale - w / 2.0f);
     int y = static_cast<int>(centerY + (t.y - camY) * scale - h / 2.0f);
     return {x, y, w, h};
+}
+
+static uint32_t bubbleNoise(uint32_t seed) {
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return seed;
+}
+
+static std::string glitchMaskText(const std::string& text, float clarity, uint32_t seed) {
+    std::string out = text;
+    clarity = std::clamp(clarity, 0.05f, 1.0f);
+    for (size_t i = 0; i < out.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(out[i]);
+        if (!std::isalpha(c)) continue;
+        uint32_t n = bubbleNoise(seed + static_cast<uint32_t>(i * 131));
+        float keep = static_cast<float>(n % 1000) / 1000.0f;
+        if (keep > clarity) {
+            out[i] = (n % 3 == 0) ? '#' : '?';
+        }
+    }
+    return out;
+}
+
+static void drawSpeechBubbles(SDL_Renderer* renderer, SDL_Texture* font, Registry& registry,
+                              Entity player, float camX, float camY,
+                              float centerX, float centerY, float scale,
+                              float viewLeft, float viewRight,
+                              float viewTop, float viewBottom) {
+    if (!font) return;
+
+    const bool hasPlayerTransform =
+        registry.alive(player) && registry.has<TransformComponent>(player);
+    const TransformComponent* playerTransform =
+        hasPlayerTransform ? &registry.get<TransformComponent>(player) : nullptr;
+    const uint32_t frameSeed = SDL_GetTicks() / 90;
+
+    auto view = registry.view<SpeechBubbleComponent, TransformComponent>();
+    for (Entity e : view) {
+        const auto& bubble = registry.get<SpeechBubbleComponent>(e);
+        if (bubble.ttl <= 0.0f || bubble.text.empty()) continue;
+        const auto& t = registry.get<TransformComponent>(e);
+        if (!visibleWorldRect(t, viewLeft, viewRight, viewTop, viewBottom)) continue;
+
+        float clarity = 1.0f;
+        if (playerTransform) {
+            float dx = t.x - playerTransform->x;
+            float dy = t.y - playerTransform->y;
+            float dist = std::sqrt(dx * dx + dy * dy);
+            clarity = 1.0f - std::clamp((dist - 16.0f) / 90.0f, 0.0f, 0.92f);
+        }
+
+        std::string glitched = glitchMaskText(
+            bubble.text,
+            clarity,
+            frameSeed + static_cast<uint32_t>(e * 97)
+        );
+
+        int sx = static_cast<int>(centerX + (t.x - camX) * scale);
+        int sy = static_cast<int>(centerY + (t.y - camY) * scale - (t.height * scale) * 0.85f) - 10;
+        SDL_Color col = {
+            static_cast<uint8_t>(120 + clarity * 90.0f),
+            static_cast<uint8_t>(205 + clarity * 45.0f),
+            static_cast<uint8_t>(160 + clarity * 70.0f),
+            230
+        };
+        drawTextCentered(renderer, font, glitched.c_str(), sx, sy, col, 0.5f);
+    }
+}
+
+static void drawPowerGridOverlay(SDL_Renderer* renderer, Registry& registry,
+                                 float camX, float camY, float centerX, float centerY, float scale,
+                                 float viewLeft, float viewRight,
+                                 float viewTop, float viewBottom) {
+    auto conduits = registry.view<TransformComponent, PowerConduitComponent>();
+    std::vector<Entity> conduitEntities;
+    conduitEntities.reserve(conduits.size());
+
+    SDL_SetRenderDrawColor(renderer, 232, 190, 72, 210); // trunk lines
+
+    for (Entity e : conduits) {
+        conduitEntities.push_back(e);
+        const auto& t = registry.get<TransformComponent>(e);
+        if (!visibleWorldRect(t, viewLeft, viewRight, viewTop, viewBottom)) continue;
+
+        const int left   = static_cast<int>(centerX + (t.x - t.width * 0.5f - camX) * scale);
+        const int right  = static_cast<int>(centerX + (t.x + t.width * 0.5f - camX) * scale);
+        const int top    = static_cast<int>(centerY + (t.y - t.height * 0.5f - camY) * scale);
+        const int bottom = static_cast<int>(centerY + (t.y + t.height * 0.5f - camY) * scale);
+        const int cx     = static_cast<int>(centerX + (t.x - camX) * scale);
+        const int cy     = static_cast<int>(centerY + (t.y - camY) * scale);
+
+        if (t.width >= t.height) {
+            SDL_RenderDrawLine(renderer, left, cy, right, cy);
+        } else {
+            SDL_RenderDrawLine(renderer, cx, top, cx, bottom);
+        }
+    }
+
+    if (conduitEntities.empty()) return;
+
+    auto nearestConduitAnchor = [&](float wx, float wy, float& outX, float& outY) {
+        float bestD2 = std::numeric_limits<float>::max();
+        outX = wx;
+        outY = wy;
+
+        for (Entity conduit : conduitEntities) {
+            const auto& ct = registry.get<TransformComponent>(conduit);
+            const float halfW = ct.width * 0.5f;
+            const float halfH = ct.height * 0.5f;
+            const float cx = std::clamp(wx, ct.x - halfW, ct.x + halfW);
+            const float cy = std::clamp(wy, ct.y - halfH, ct.y + halfH);
+            const float dx = wx - cx;
+            const float dy = wy - cy;
+            const float d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) {
+                bestD2 = d2;
+                outX = cx;
+                outY = cy;
+            }
+        }
+    };
+
+    auto drawBranchAt = [&](float wx, float wy) {
+        float anchorX = wx, anchorY = wy;
+        nearestConduitAnchor(wx, wy, anchorX, anchorY);
+        const int sx = static_cast<int>(centerX + (wx - camX) * scale);
+        const int sy = static_cast<int>(centerY + (wy - camY) * scale);
+        const int ex = static_cast<int>(centerX + (anchorX - camX) * scale);
+        const int ey = static_cast<int>(centerY + (anchorY - camY) * scale);
+        SDL_RenderDrawLine(renderer, sx, sy, ex, ey);
+    };
+
+    SDL_SetRenderDrawColor(renderer, 244, 206, 96, 165); // branch feeders
+
+    auto drawBranchesForView = [&](const auto& view) {
+        for (Entity e : view) {
+            if (!registry.has<TransformComponent>(e)) continue;
+            const auto& t = registry.get<TransformComponent>(e);
+            if (!visibleWorldRect(t, viewLeft, viewRight, viewTop, viewBottom)) continue;
+            drawBranchAt(t.x, t.y);
+        }
+    };
+
+    // All buildings are treated as powered consumers.
+    drawBranchesForView(registry.view<TransformComponent, BuildingComponent>());
+
+    // Transit system feeder branches: stations, waiting areas, staircases, vehicles, and track.
+    drawBranchesForView(registry.view<TransformComponent, StationComponent>());
+    drawBranchesForView(registry.view<TransformComponent, WaitingAreaComponent>());
+    drawBranchesForView(registry.view<TransformComponent, StaircaseComponent>());
+    drawBranchesForView(registry.view<TransformComponent, TransitVehicleComponent>());
+
+    auto transitTrackView = registry.view<TransformComponent, RoadComponent>();
+    for (Entity e : transitTrackView) {
+        const auto& road = registry.get<RoadComponent>(e);
+        if (road.type != RoadType::MAGLIFT_TRACK) continue;
+        const auto& t = registry.get<TransformComponent>(e);
+        if (!visibleWorldRect(t, viewLeft, viewRight, viewTop, viewBottom)) continue;
+        drawBranchAt(t.x, t.y);
+    }
+
+    // Traffic lights.
+    drawBranchesForView(registry.view<TransformComponent, TrafficLightComponent>());
 }
 
 static void drawEquippedToolRange(SDL_Renderer* renderer, Registry& registry, Entity player,
@@ -785,6 +1092,7 @@ int main(int argc, char* argv[]) {
     ScheduleSystem scheduleSystem;
     GDISystem gdiSystem;
     RelationshipSystem relationshipSystem;
+    ConversationSystem conversationSystem;
     RumorSystem rumorSystem;
     WageSystem  wageSystem;
     MarketSystem marketSystem;
@@ -813,14 +1121,14 @@ int main(int argc, char* argv[]) {
 
     // ... vehicle creation ...
     Entity pVehicle = registry.create();
-    registry.assign<TransformComponent>(pVehicle, -50.0f, -20.0f, 60.0f, 30.0f);
+    registry.assign<TransformComponent>(pVehicle, 120.0f, 140.0f, 60.0f, 30.0f);
     registry.assign<MovementComponent>(pVehicle, 0.0f, 0.0f, MovementComponent::NORMAL);
-    registry.assign<VehicleComponent>(pVehicle, VehicleComponent::MAGLIFT, MAX_ENTITIES, 250.0f);
+    registry.assign<VehicleComponent>(pVehicle, VehicleComponent::EMMV, MAX_ENTITIES, 250.0f);
     registry.assign<SolidComponent>(pVehicle); // Vehicles are solid
-    registry.assign<GlyphComponent>(pVehicle, std::string("M"),
-        (uint8_t)255, (uint8_t)80, (uint8_t)140, (uint8_t)255, 0.5f, true, true);
+    registry.assign<GlyphComponent>(pVehicle, std::string("o"),
+        (uint8_t)255, (uint8_t)90, (uint8_t)90, (uint8_t)255, 0.5f, true, true);
     registry.assign<OwnershipComponent>(pVehicle, player);
-    registry.assign<HomeLocationComponent>(pVehicle, -50.0f, -20.0f);
+    registry.assign<HomeLocationComponent>(pVehicle, 120.0f, 140.0f);
 
     Entity worldConfig = registry.create();
     auto& config = registry.assign<WorldConfigComponent>(worldConfig);
@@ -840,7 +1148,11 @@ int main(int argc, char* argv[]) {
     atmoGrid.grid.assign(atmoGrid.cols * atmoGrid.rows, 100.0f); // default 100 air quality
     atmoGrid.back.assign(atmoGrid.cols * atmoGrid.rows, 100.0f);
 
-    generateChicagoCity(registry, 4, 4);
+    generateSandboxMicrocity(registry);
+    if (!validateSandboxMicrocity(registry)) {
+        std::cerr << "Sandbox microcity validation failed during startup." << std::endl;
+        return 1;
+    }
 
     char* basePath = SDL_GetBasePath();
     std::string base(basePath ? basePath : "");
@@ -862,6 +1174,8 @@ int main(int argc, char* argv[]) {
     WeatherState lastWeather = registry.get<TimeOfDayComponent>(worldConfig).weather;
     PlayerMarketTradePreview tradePreview;
     ItemComponent::Type selectedBuyType = ItemComponent::MEDICAL;
+    bool inventoryModalOpen = false;
+    bool intelLogOpen = false;
 
     while (isRunning) {
         Uint32 currentTime = SDL_GetTicks();
@@ -932,6 +1246,52 @@ int main(int argc, char* argv[]) {
                     }
                     return true;
                 };
+                auto moveInventoryCursor = [&](int dx, int dy) {
+                    if (!registry.has<DiscreteInventoryComponent>(player)) {
+                        feedback.push(FeedbackCue::DENIED);
+                        return;
+                    }
+                    auto& inventory = registry.get<DiscreteInventoryComponent>(player);
+                    constexpr int cols = 4;
+                    constexpr int rows = 3;
+                    int index = static_cast<int>(inventory.selected);
+                    int row = index / cols;
+                    int col = index % cols;
+                    row = (row + dy + rows) % rows;
+                    col = (col + dx + cols) % cols;
+                    inventory.selected = static_cast<size_t>(row * cols + col);
+                };
+
+                if (event.key.keysym.scancode == SDL_SCANCODE_TAB) {
+                    inventoryModalOpen = !inventoryModalOpen;
+                    continue;
+                }
+
+                if (inventoryModalOpen) {
+                    if (event.key.keysym.scancode == SDL_SCANCODE_UP) {
+                        moveInventoryCursor(0, -1);
+                    } else if (event.key.keysym.scancode == SDL_SCANCODE_DOWN) {
+                        moveInventoryCursor(0, 1);
+                    } else if (event.key.keysym.scancode == SDL_SCANCODE_LEFT) {
+                        moveInventoryCursor(-1, 0);
+                    } else if (event.key.keysym.scancode == SDL_SCANCODE_RIGHT) {
+                        moveInventoryCursor(1, 0);
+                    } else if (event.key.keysym.scancode == SDL_SCANCODE_U ||
+                               event.key.keysym.scancode == SDL_SCANCODE_RETURN) {
+                        EquipmentSlot equippedTool = equipSelectedInventoryTool(registry, player);
+                        if (equippedTool == EquipmentSlot::NONE) {
+                            useDiscreteInventoryPressed = true;
+                        }
+                    } else if (event.key.keysym.scancode == SDL_SCANCODE_G ||
+                               event.key.keysym.scancode == SDL_SCANCODE_BACKSPACE ||
+                               event.key.keysym.scancode == SDL_SCANCODE_DELETE) {
+                        dropDiscreteInventoryPressed = true;
+                    } else if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+                        inventoryModalOpen = false;
+                    }
+                    continue;
+                }
+
                 if (event.key.keysym.scancode == SDL_SCANCODE_UP) {
                     moveScanCursor(Facing::UP);
                 } else if (event.key.keysym.scancode == SDL_SCANCODE_DOWN) {
@@ -956,6 +1316,10 @@ int main(int argc, char* argv[]) {
                         if (isConsumableEquipment(slot)) {
                             selectEquipment(slot);
                             useEquipment(slot);
+                        } else if (isScanEquipment(slot)) {
+                            if (selectEquipment(slot)) {
+                                useEquipment(slot);
+                            }
                         } else {
                             selectEquipment(slot);
                         }
@@ -1000,12 +1364,15 @@ int main(int argc, char* argv[]) {
                     }
                     tradePreview = previewPlayerMarketSell(registry, player);
                     if (!tradePreview.available) feedback.push(FeedbackCue::DENIED);
+                } else if (event.key.keysym.scancode == SDL_SCANCODE_J) {
+                    intelLogOpen = !intelLogOpen;
                 } else if (event.key.keysym.scancode == SDL_SCANCODE_Y) {
                     confirmTradePressed = true;
                 } else if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
                     scanMode = ScanPanelMode::NONE;
                     scanTarget = MAX_ENTITIES;
                     tradePreview = {};
+                    intelLogOpen = false;
                 } else if (event.key.keysym.scancode == SDL_SCANCODE_F && shiftHeld) {
                     auto tv = registry.view<TimeOfDayComponent>();
                     for (Entity te : tv) {
@@ -1069,7 +1436,6 @@ int main(int argc, char* argv[]) {
         ambientTimer -= dt;
         if (ambientTimer <= 0.0f) {
             ambient.spawnVehicles(registry, frameCamX, frameCamY, 800.0f, todSpawnMult);
-            ambient.spawnCitizens(registry, frameCamX, frameCamY, 600.0f, todSpawnMult);
             ambient.spawnItems(registry, frameCamX, frameCamY, 600.0f);
             ambientTimer = 2.0f;
         }
@@ -1146,7 +1512,9 @@ int main(int argc, char* argv[]) {
             playerBeforeX = pt.x;
             playerBeforeY = pt.y;
         }
-        playerInput.handleInput(registry, state, interactPressed);
+        std::array<Uint8, SDL_NUM_SCANCODES> blockedInput{};
+        const Uint8* playerInputState = inventoryModalOpen ? blockedInput.data() : state;
+        playerInput.handleInput(registry, playerInputState, interactPressed);
 
         if (useDiscreteInventoryPressed) {
             bool used = useSelectedInventoryItem(registry, player);
@@ -1251,6 +1619,7 @@ int main(int argc, char* argv[]) {
             gdiSystem.update(registry, dt, todScale);
             citizenAI.update(registry, dt);
             relationshipSystem.update(registry);
+            conversationSystem.update(registry, player, 0.5f, todHour, &alertStack);
             rumorSystem.update(registry, todHour);
             socialHierarchySystem.update(registry);
             consumables.update(registry, todHour);
@@ -1424,6 +1793,10 @@ int main(int argc, char* argv[]) {
                 SDL_RenderFillRect(renderer, &destRect);
             }
         }
+
+        // Render Power Grid (thin gold conduit lines)
+        drawPowerGridOverlay(renderer, registry, camX, camY, centerX, centerY, scale,
+                             viewLeft, viewRight, viewTop, viewBottom);
 
         // Render Waiting Areas (ground-level transit stop pads — light teal)
         auto waitView = registry.view<TransformComponent, WaitingAreaComponent>();
@@ -1654,6 +2027,9 @@ int main(int argc, char* argv[]) {
             SDL_RenderFillRect(renderer, &indicatorRect);
         }
 
+        drawSpeechBubbles(renderer, fontTex, registry, player, camX, camY, centerX, centerY, scale,
+                          viewLeft, viewRight, viewTop, viewBottom);
+
         drawLayerOverlay(renderer, fontTex, registry, layerOverlay, camX, camY,
                          centerX, centerY, scale, viewLeft, viewRight, viewTop, viewBottom);
         drawEquippedToolRange(renderer, registry, player, camX, camY, centerX, centerY, scale);
@@ -1718,6 +2094,8 @@ int main(int argc, char* argv[]) {
             drawText(renderer, fontTex, hudBuf, 4, 28, hudCol, hs);
             std::snprintf(hudBuf, sizeof(hudBuf), "LAYER:%s", layerOverlayName(layerOverlay));
             drawText(renderer, fontTex, hudBuf, 4, 40, hudCol, hs);
+            drawText(renderer, fontTex, inventoryModalOpen ? "TAB:BAG OPEN" : "TAB:BAG", 4, 52, hudCol, 0.6f);
+            drawText(renderer, fontTex, intelLogOpen ? "J:INTEL OPEN" : "J:INTEL", 96, 52, hudCol, 0.6f);
 
             // Player bio stats
             auto pbv = registry.view<PlayerComponent, BiologyComponent>();
@@ -1732,7 +2110,7 @@ int main(int argc, char* argv[]) {
                     static_cast<int>(bio.health), static_cast<int>(bio.hunger),
                     static_cast<int>(bio.thirst), static_cast<int>(bio.fatigue),
                     static_cast<int>(bio.vitals.heart_rate), static_cast<int>(bio.vitals.oxygen_sat * 100.0f));
-                drawText(renderer, fontTex, hudBuf, 4, 52, bioCol, hs);
+                drawText(renderer, fontTex, hudBuf, 4, 64, bioCol, hs);
             }
 
             auto invView = registry.view<PlayerComponent, SurvivalInventoryComponent>();
@@ -1741,7 +2119,7 @@ int main(int argc, char* argv[]) {
                 SDL_Color invCol = {230, 230, 210, 220};
                 std::snprintf(hudBuf, sizeof(hudBuf), "INV 1F:%d 2W:%d 3M:%d",
                     inv.food_count, inv.water_count, inv.medical_count);
-                drawText(renderer, fontTex, hudBuf, 4, 64, invCol, hs);
+                drawText(renderer, fontTex, hudBuf, 4, 76, invCol, hs);
             }
 
             auto equipView = registry.view<PlayerComponent, EquipmentComponent>();
@@ -1751,7 +2129,7 @@ int main(int argc, char* argv[]) {
                 std::snprintf(hudBuf, sizeof(hudBuf), "EQ:%s RNG:%d",
                     equipmentName(equipment.equipped),
                     static_cast<int>(equipmentRange(equipment.equipped)));
-                drawText(renderer, fontTex, hudBuf, 4, 76, equipCol, hs);
+                drawText(renderer, fontTex, hudBuf, 4, 88, equipCol, hs);
             }
 
             auto discreteInvView = registry.view<PlayerComponent, DiscreteInventoryComponent>();
@@ -1781,7 +2159,7 @@ int main(int argc, char* argv[]) {
                         inventory.selected + 1,
                         DiscreteInventoryComponent::CAPACITY);
                 }
-                drawText(renderer, fontTex, hudBuf, 4, 88, invCol, hs);
+                drawText(renderer, fontTex, hudBuf, 4, 100, invCol, hs);
             }
 
             if (tradePreview.active) {
@@ -1798,11 +2176,11 @@ int main(int argc, char* argv[]) {
                     static_cast<int>(tradePreview.credits),
                     static_cast<int>(tradePreview.stock),
                     tradePreview.reason);
-                drawText(renderer, fontTex, hudBuf, 4, 100, tradeCol, hs);
+                drawText(renderer, fontTex, hudBuf, 4, 112, tradeCol, hs);
             }
 
             auto visibleAlerts = alertStack.visible(4);
-            int alertY = tradePreview.active ? 116 : 104;
+            int alertY = tradePreview.active ? 128 : 116;
             for (const auto& alert : visibleAlerts) {
                 drawText(renderer, fontTex, alert.message.c_str(), 4, alertY,
                          alertColor(alert.severity), 0.65f);
@@ -1812,6 +2190,13 @@ int main(int argc, char* argv[]) {
 
         drawScanPanel(renderer, fontTex, registry, scanTarget, player, scanMode,
                       static_cast<int>(screenW), static_cast<int>(screenH));
+        if (intelLogOpen) {
+            drawIntelLogPanel(renderer, fontTex, alertStack, static_cast<int>(screenW));
+        }
+        if (inventoryModalOpen) {
+            drawInventoryModal(renderer, fontTex, registry, player,
+                               static_cast<int>(screenW), static_cast<int>(screenH));
+        }
 
         SDL_RenderPresent(renderer);
     }
