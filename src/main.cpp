@@ -187,24 +187,11 @@ static void performInspection(Registry& registry, Entity player, float range_wu)
     }
 
     auto& inspection = registry.get<InspectionComponent>(player);
-    inspection.target_entity = MAX_ENTITIES;
-    inspection.target_type = InspectionTargetType::NONE;
-    inspection.has_result = true;
-
-    if (registry.has<BuildingInteractionComponent>(player)) {
-        const auto& interaction = registry.get<BuildingInteractionComponent>(player);
-        if (interaction.inside_building && registry.alive(interaction.building_entity)) {
-            inspection.target_entity = interaction.building_entity;
-            inspection.target_type = inspectionTypeForRole(interaction.building_role);
-            return;
-        }
-    }
-
-    const InspectionTarget target = nearestInspectionTargetInRange(registry,
-        registry.get<TransformComponent>(player),
-        range_wu);
+    const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
+    
     inspection.target_entity = target.entity;
     inspection.target_type = target.type;
+    inspection.has_result = true;
 }
 
 static const char* locationStateName(PlayerLocationState state) {
@@ -236,6 +223,7 @@ static const char* inspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::WORKPLACE: return "WORKPLACE";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
         case InspectionTargetType::WORKER: return "WORKER";
+        case InspectionTargetType::HOUSING_INTERIOR: return "HOUSING INTERIOR";
     }
     return "NO TARGET";
 }
@@ -252,6 +240,8 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "Foot path. Non-solid access between buildings.";
         case InspectionTargetType::WORKER:
             return "Fixed worker. Path route. Count locked at one.";
+        case InspectionTargetType::HOUSING_INTERIOR:
+            return "SLEEPING MAT: Tattered synthetic weave.";
     }
     return "";
 }
@@ -473,9 +463,7 @@ int main(int, char**) {
                               locationPrompt(location_state));
             }
             drawText(renderer, font, line, 6, 34, SDL_Color{245, 205, 120, 230}, 0.65f);
-            const bool can_inspect = playerCanInspect(registry,
-                registry.get<TransformComponent>(player),
-                INSPECTION_RANGE_WU);
+            const bool can_inspect = playerInspectionTarget(registry, player, INSPECTION_RANGE_WU).entity != MAX_ENTITIES;
             std::snprintf(line, sizeof(line), "INSPECT:%s",
                           can_inspect ? "SPACE READ NEARBY" : "NO NEARBY TARGET");
             drawText(renderer, font, line, 6, 48, SDL_Color{180, 220, 190, 220}, 0.65f);

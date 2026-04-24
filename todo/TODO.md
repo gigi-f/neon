@@ -21,21 +21,6 @@ Supersedes all previous TODO files, copied OpenSpec artifacts, archived specs, a
 - The player can inspect nearby housing, workplace, and path targets with `SPACE`.
 - The fixed worker is config-driven and moves on the derived pedestrian path.
 
-## Phase 8: Housing Interior Placeholder
-
-Goal: make entering housing more meaningful without doors, furniture systems, or pathfinding.
-
-- [ ] Add a minimal interior readout shown only while inside housing.
-- [ ] Add one authored housing detail, such as `SLEEPING MAT`, as text state rather than a spawned furniture system.
-- [ ] Let `SPACE` inspect the current housing interior state while inside housing.
-- [ ] Add tests for inside-housing inspection output selection.
-
-Acceptance:
-
-- [ ] Entering housing changes what the player can inspect.
-- [ ] No door graph, room graph, furniture component hierarchy, or pathfinding is introduced.
-- [ ] The outside housing building remains unchanged.
-
 ## Phase 9: Workplace Interior Placeholder
 
 Goal: make entering workplace distinct from housing before adding jobs or schedules.

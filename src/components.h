@@ -22,7 +22,8 @@ enum class InspectionTargetType {
     HOUSING,
     WORKPLACE,
     PEDESTRIAN_PATH,
-    WORKER
+    WORKER,
+    HOUSING_INTERIOR
 };
 
 enum class FixedActorKind {

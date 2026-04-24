@@ -372,6 +372,30 @@ inline bool playerCanInspect(Registry& registry,
     return nearestInspectionTargetInRange(registry, player_transform, range_wu).entity != MAX_ENTITIES;
 }
 
+inline InspectionTarget playerInspectionTarget(Registry& registry,
+                                               Entity player,
+                                               float range_wu) {
+    InspectionTarget target;
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player)) {
+        return target;
+    }
+
+    if (registry.has<BuildingInteractionComponent>(player)) {
+        const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+        if (interaction.inside_building && registry.alive(interaction.building_entity)) {
+            target.entity = interaction.building_entity;
+            if (interaction.building_role == MicroZoneRole::HOUSING) {
+                target.type = InspectionTargetType::HOUSING_INTERIOR;
+            } else {
+                target.type = inspectionTypeForRole(interaction.building_role);
+            }
+            return target;
+        }
+    }
+
+    return nearestInspectionTargetInRange(registry, registry.get<TransformComponent>(player), range_wu);
+}
+
 inline PlayerLocationState locationStateForRole(MicroZoneRole role, bool inside) {
     switch (role) {
         case MicroZoneRole::HOUSING:

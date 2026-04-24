@@ -336,6 +336,27 @@ static void testWorkerAcknowledgementToggle() {
     assert(far_worker == MAX_ENTITIES);
 }
 
+static void testInsideHousingInspectionTarget() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    buildWorld(registry, config);
+
+    Entity building = registry.view<BuildingComponent, TransformComponent>().front();
+    const auto& building_transform = registry.get<TransformComponent>(building);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, building_transform);
+    auto& interaction = registry.assign<BuildingInteractionComponent>(player);
+    interaction.building_entity = building;
+    interaction.building_role = MicroZoneRole::HOUSING;
+    interaction.inside_building = true;
+
+    InspectionTarget target = playerInspectionTarget(registry, player, 22.0f);
+    assert(target.entity == building);
+    assert(target.type == InspectionTargetType::HOUSING_INTERIOR);
+}
+
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
@@ -346,6 +367,7 @@ int main() {
     testPlayerSpawnValidationRejectsSolids();
     testBuildingInteractionRangeHelpers();
     testInspectionTargetHelpers();
+    testInsideHousingInspectionTarget();
     testWorkerInspectionRangeAndPriority();
     testFixedWorkerCountIsConfigDriven();
     testFixedWorkerMovesOnAssignedPath();

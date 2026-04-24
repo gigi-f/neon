@@ -122,3 +122,18 @@ Acceptance:
 - [x] The player has exactly one intentional interaction with the worker.
 - [x] The interaction has a visible HUD symptom.
 - [x] The worker count and movement behavior remain unchanged.
+
+## Phase 8: Housing Interior Placeholder
+
+Goal: make entering housing more meaningful without doors, furniture systems, or pathfinding.
+
+- [x] Add a minimal interior readout shown only while inside housing.
+- [x] Add one authored housing detail, such as `SLEEPING MAT`, as text state rather than a spawned furniture system.
+- [x] Let `SPACE` inspect the current housing interior state while inside housing.
+- [x] Add tests for inside-housing inspection output selection.
+
+Acceptance:
+
+- [x] Entering housing changes what the player can inspect.
+- [x] No door graph, room graph, furniture component hierarchy, or pathfinding is introduced.
+- [x] The outside housing building remains unchanged.
