@@ -8,6 +8,7 @@
 #include <string>
 #include "components.h"
 #include "ecs.h"
+#include "infrastructure_solver.h"
 #include "stb_image.h"
 #include "world_builder.h"
 #include "world_generation.h"
@@ -16,7 +17,8 @@ static constexpr int FONT_GLYPH_W = 16;
 static constexpr int FONT_GLYPH_H = 16;
 static constexpr int FONT_COLS = 16;
 static constexpr int FONT_FIRST_CHAR = 32;
-static constexpr float HOUSING_INTERACTION_RANGE_WU = 18.0f;
+static constexpr float BUILDING_INTERACTION_RANGE_WU = 18.0f;
+static constexpr float INSPECTION_RANGE_WU = 22.0f;
 
 static SDL_Texture* loadFontTexture(SDL_Renderer* renderer, const char* path) {
     int w = 0, h = 0, ch = 0;
@@ -119,8 +121,8 @@ static void drawTextCentered(SDL_Renderer* renderer, SDL_Texture* font, const ch
 
 static void updatePlayer(Registry& registry, Entity player, float dt, const uint8_t* keys) {
     if (!registry.has<PlayerComponent>(player) || !registry.has<TransformComponent>(player)) return;
-    if (registry.has<HousingInteractionComponent>(player) &&
-        registry.get<HousingInteractionComponent>(player).inside_housing) {
+    if (registry.has<BuildingInteractionComponent>(player) &&
+        registry.get<BuildingInteractionComponent>(player).inside_building) {
         return;
     }
 
@@ -155,25 +157,53 @@ static void updatePlayer(Registry& registry, Entity player, float dt, const uint
     }
 }
 
-static void toggleHousingInteraction(Registry& registry, Entity player, float range_wu) {
+static void toggleBuildingInteraction(Registry& registry, Entity player, float range_wu) {
     if (!registry.alive(player) || !registry.has<TransformComponent>(player) ||
-        !registry.has<HousingInteractionComponent>(player)) {
+        !registry.has<BuildingInteractionComponent>(player)) {
         return;
     }
 
-    auto& housing = registry.get<HousingInteractionComponent>(player);
-    if (housing.inside_housing) {
-        housing.inside_housing = false;
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (interaction.inside_building) {
+        interaction.inside_building = false;
         return;
     }
 
-    const Entity nearest = nearestHousingBuildingInRange(registry,
+    const Entity nearest = nearestInteractableBuildingInRange(registry,
         registry.get<TransformComponent>(player),
         range_wu);
     if (nearest != MAX_ENTITIES) {
-        housing.housing_entity = nearest;
-        housing.inside_housing = true;
+        interaction.building_entity = nearest;
+        interaction.building_role = registry.get<BuildingUseComponent>(nearest).role;
+        interaction.inside_building = true;
     }
+}
+
+static void performInspection(Registry& registry, Entity player, float range_wu) {
+    if (!registry.alive(player) || !registry.has<InspectionComponent>(player) ||
+        !registry.has<TransformComponent>(player)) {
+        return;
+    }
+
+    auto& inspection = registry.get<InspectionComponent>(player);
+    inspection.target_entity = MAX_ENTITIES;
+    inspection.target_type = InspectionTargetType::NONE;
+    inspection.has_result = true;
+
+    if (registry.has<BuildingInteractionComponent>(player)) {
+        const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+        if (interaction.inside_building && registry.alive(interaction.building_entity)) {
+            inspection.target_entity = interaction.building_entity;
+            inspection.target_type = inspectionTypeForRole(interaction.building_role);
+            return;
+        }
+    }
+
+    const InspectionTarget target = nearestInspectionTargetInRange(registry,
+        registry.get<TransformComponent>(player),
+        range_wu);
+    inspection.target_entity = target.entity;
+    inspection.target_type = target.type;
 }
 
 static const char* locationStateName(PlayerLocationState state) {
@@ -181,6 +211,8 @@ static const char* locationStateName(PlayerLocationState state) {
         case PlayerLocationState::OUTSIDE: return "OUTSIDE";
         case PlayerLocationState::NEAR_HOUSING: return "NEAR HOUSING";
         case PlayerLocationState::INSIDE_HOUSING: return "INSIDE HOUSING";
+        case PlayerLocationState::NEAR_WORKPLACE: return "NEAR WORKPLACE";
+        case PlayerLocationState::INSIDE_WORKPLACE: return "INSIDE WORKPLACE";
     }
     return "OUTSIDE";
 }
@@ -190,6 +222,32 @@ static const char* locationPrompt(PlayerLocationState state) {
         case PlayerLocationState::OUTSIDE: return "";
         case PlayerLocationState::NEAR_HOUSING: return "E ENTER HOUSING";
         case PlayerLocationState::INSIDE_HOUSING: return "E EXIT HOUSING";
+        case PlayerLocationState::NEAR_WORKPLACE: return "E ENTER WORKPLACE";
+        case PlayerLocationState::INSIDE_WORKPLACE: return "E EXIT WORKPLACE";
+    }
+    return "";
+}
+
+static const char* inspectionTargetName(InspectionTargetType type) {
+    switch (type) {
+        case InspectionTargetType::NONE: return "NO TARGET";
+        case InspectionTargetType::HOUSING: return "HOUSING";
+        case InspectionTargetType::WORKPLACE: return "WORKPLACE";
+        case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
+    }
+    return "NO TARGET";
+}
+
+static const char* inspectionDetail(InspectionTargetType type) {
+    switch (type) {
+        case InspectionTargetType::NONE:
+            return "Nothing close enough to read.";
+        case InspectionTargetType::HOUSING:
+            return "Private shelter. Enterable. Solid exterior.";
+        case InspectionTargetType::WORKPLACE:
+            return "Work site. Enterable. Linked to housing.";
+        case InspectionTargetType::PEDESTRIAN_PATH:
+            return "Foot path. Non-solid access between buildings.";
     }
     return "";
 }
@@ -303,6 +361,8 @@ int main(int, char**) {
 
     Registry registry;
     WorldConfig world_config = makeSandboxConfig();
+    world_config.workplace_micro_zone_count = 1;
+    world_config.workplace_building_count = 1;
     buildWorld(registry, world_config);
     if (!validateWorld(registry, world_config)) {
         std::cerr << "Generated world validation failed during startup." << std::endl;
@@ -312,11 +372,13 @@ int main(int, char**) {
         SDL_Quit();
         return 1;
     }
+    deriveInfrastructure(registry, world_config);
 
     Entity player = registry.create();
-    registry.assign<TransformComponent>(player, 0.0f, 115.0f, 12.0f, 12.0f);
+    registry.assign<TransformComponent>(player, 0.0f, -115.0f, 12.0f, 12.0f);
     registry.assign<PlayerComponent>(player);
-    registry.assign<HousingInteractionComponent>(player);
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.assign<InspectionComponent>(player);
     registry.assign<GlyphComponent>(player, std::string("@"),
         static_cast<uint8_t>(245), static_cast<uint8_t>(245), static_cast<uint8_t>(210),
         static_cast<uint8_t>(255), 1.0f, true, false);
@@ -347,7 +409,10 @@ int main(int, char**) {
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) running = false;
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_E) {
-                toggleHousingInteraction(registry, player, HOUSING_INTERACTION_RANGE_WU);
+                toggleBuildingInteraction(registry, player, BUILDING_INTERACTION_RANGE_WU);
+            }
+            if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_SPACE) {
+                performInspection(registry, player, INSPECTION_RANGE_WU);
             }
             if (event.type == SDL_MOUSEWHEEL && registry.has<CameraComponent>(camera_entity)) {
                 auto& c = registry.get<CameraComponent>(camera_entity);
@@ -373,17 +438,31 @@ int main(int, char**) {
             SDL_Color hud{140, 230, 180, 230};
             char line[160];
             float fps = dt > 0.0f ? 1.0f / dt : 0.0f;
-            std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:1 PLAYER + 1 HOUSING", fps, registry.entity_count());
+            std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE", fps, registry.entity_count());
             drawText(renderer, font, line, 6, 6, hud, 0.7f);
-            std::snprintf(line, sizeof(line), "WASD MOVE  WHEEL ZOOM  ESC QUIT  CAM:%.0f,%.0f Z:%.2f",
+            std::snprintf(line, sizeof(line), "WASD MOVE  SPACE INSPECT  WHEEL ZOOM  ESC QUIT  CAM:%.0f,%.0f Z:%.2f",
                           active_camera.x, active_camera.y, active_camera.scale);
             drawText(renderer, font, line, 6, 20, SDL_Color{110, 190, 230, 220}, 0.65f);
             const PlayerLocationState location_state =
-                playerLocationState(registry, player, HOUSING_INTERACTION_RANGE_WU);
+                playerLocationState(registry, player, BUILDING_INTERACTION_RANGE_WU);
             std::snprintf(line, sizeof(line), "LOCATION:%s  %s",
                           locationStateName(location_state),
                           locationPrompt(location_state));
             drawText(renderer, font, line, 6, 34, SDL_Color{245, 205, 120, 230}, 0.65f);
+            const bool can_inspect = playerCanInspect(registry,
+                registry.get<TransformComponent>(player),
+                INSPECTION_RANGE_WU);
+            std::snprintf(line, sizeof(line), "INSPECT:%s",
+                          can_inspect ? "SPACE READ NEARBY" : "NO NEARBY TARGET");
+            drawText(renderer, font, line, 6, 48, SDL_Color{180, 220, 190, 220}, 0.65f);
+            if (registry.has<InspectionComponent>(player) &&
+                registry.get<InspectionComponent>(player).has_result) {
+                const auto& inspection = registry.get<InspectionComponent>(player);
+                std::snprintf(line, sizeof(line), "READOUT:%s - %s",
+                              inspectionTargetName(inspection.target_type),
+                              inspectionDetail(inspection.target_type));
+                drawText(renderer, font, line, 6, 62, SDL_Color{245, 230, 150, 230}, 0.65f);
+            }
         }
 
         SDL_RenderPresent(renderer);

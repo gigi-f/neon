@@ -9,26 +9,68 @@
 #include "world_config.h"
 #include "world_generation.h"
 
-inline Entity buildHousingUnit(Registry& registry, float x, float y, float w, float h) {
+inline int floorsForRole(MicroZoneRole role) {
+    switch (role) {
+        case MicroZoneRole::HOUSING: return 4;
+        case MicroZoneRole::WORKPLACE: return 3;
+    }
+    return 1;
+}
+
+inline char glyphForRole(MicroZoneRole role) {
+    switch (role) {
+        case MicroZoneRole::HOUSING: return 'h';
+        case MicroZoneRole::WORKPLACE: return 'w';
+    }
+    return '?';
+}
+
+inline void colorForRole(MicroZoneRole role, uint8_t& r, uint8_t& g, uint8_t& b) {
+    switch (role) {
+        case MicroZoneRole::HOUSING:
+            r = 100;
+            g = 170;
+            b = 255;
+            return;
+        case MicroZoneRole::WORKPLACE:
+            r = 245;
+            g = 180;
+            b = 90;
+            return;
+    }
+    r = 255;
+    g = 255;
+    b = 255;
+}
+
+inline Entity buildBuildingUnit(Registry& registry,
+                                MicroZoneRole role,
+                                float x, float y, float w, float h) {
     Entity building = registry.create();
     registry.assign<TransformComponent>(building, x, y, w, h);
     registry.assign<SolidComponent>(building);
 
     uint64_t stable_id =
         (static_cast<uint64_t>(static_cast<int>(x) + 4096) << 32) ^
-        static_cast<uint64_t>(static_cast<int>(y) + 4096);
+        static_cast<uint64_t>(static_cast<int>(y) + 4096) ^
+        (static_cast<uint64_t>(static_cast<int>(role)) << 48);
 
-    registry.assign<BuildingComponent>(building, stable_id, 4, true);
-    registry.assign<BuildingUseComponent>(building, MicroZoneRole::HOUSING);
-    registry.assign<GlyphComponent>(building, std::string("h"),
-        static_cast<uint8_t>(100), static_cast<uint8_t>(170), static_cast<uint8_t>(255),
-        static_cast<uint8_t>(255), 1.0f, true, true);
+    uint8_t r = 255;
+    uint8_t g = 255;
+    uint8_t b = 255;
+    colorForRole(role, r, g, b);
+
+    registry.assign<BuildingComponent>(building, stable_id, floorsForRole(role), true);
+    registry.assign<BuildingUseComponent>(building, role);
+    registry.assign<GlyphComponent>(building, std::string(1, glyphForRole(role)),
+        r, g, b, static_cast<uint8_t>(255), 1.0f, true, true);
     return building;
 }
 
-inline void buildHousingUnits(Registry& registry,
-                              float x0, float y0, float x1, float y1,
-                              int building_count) {
+inline void buildBuildingUnits(Registry& registry,
+                               MicroZoneRole role,
+                               float x0, float y0, float x1, float y1,
+                               int building_count) {
     if (building_count <= 0) return;
 
     const float margin = 32.0f;
@@ -47,26 +89,27 @@ inline void buildHousingUnits(Registry& registry,
                          col * (building_w + gap);
         const float cy = y0 + margin + building_h * 0.5f +
                          row * (building_h + gap);
-        buildHousingUnit(registry, cx, cy, building_w, building_h);
+        buildBuildingUnit(registry, role, cx, cy, building_w, building_h);
     }
 }
 
-inline Entity buildHousingMicroZone(Registry& registry,
-                                    Entity macro,
-                                    float x0, float y0, float x1, float y1,
-                                    int building_count) {
+inline Entity buildMicroZone(Registry& registry,
+                             Entity macro,
+                             MicroZoneRole role,
+                             float x0, float y0, float x1, float y1,
+                             int building_count) {
     Entity micro = registry.create();
 
     MicroZoneComponent component;
     component.parent_macro = macro;
-    component.role = MicroZoneRole::HOUSING;
+    component.role = role;
     component.x0 = x0;
     component.y0 = y0;
     component.x1 = x1;
     component.y1 = y1;
     registry.assign<MicroZoneComponent>(micro, component);
 
-    buildHousingUnits(registry, x0, y0, x1, y1, building_count);
+    buildBuildingUnits(registry, role, x0, y0, x1, y1, building_count);
     return micro;
 }
 
@@ -88,24 +131,36 @@ inline Entity buildMacroZone(Registry& registry,
     component.y1 = y1;
     registry.assign<MacroZoneComponent>(macro, component);
 
-    const int micro_count = std::max(0, config.housing_micro_zone_count);
-    const int building_count = std::max(0, config.housing_building_count);
+    const int housing_micro_count = std::max(0, config.housing_micro_zone_count);
+    const int workplace_micro_count = std::max(0, config.workplace_micro_zone_count);
+    const int total_micro_count = housing_micro_count + workplace_micro_count;
     const float inset = 40.0f;
     const float gap = 16.0f;
     const float content_x0 = x0 + inset;
     const float content_y0 = y0 + inset;
     const float content_x1 = x1 - inset;
     const float content_y1 = y1 - inset;
-    const float total_h = std::max(0.0f, (content_y1 - content_y0) - gap * std::max(0, micro_count - 1));
-    const float micro_h = micro_count > 0 ? total_h / static_cast<float>(micro_count) : 0.0f;
+    const float total_h = std::max(0.0f, (content_y1 - content_y0) - gap * std::max(0, total_micro_count - 1));
+    const float micro_h = total_micro_count > 0 ? total_h / static_cast<float>(total_micro_count) : 0.0f;
 
-    for (int i = 0; i < micro_count; ++i) {
-        const int base = micro_count > 0 ? building_count / micro_count : 0;
-        const int extra = i < (micro_count > 0 ? building_count % micro_count : 0) ? 1 : 0;
-        const float my0 = content_y0 + i * (micro_h + gap);
-        const float my1 = my0 + micro_h;
-        buildHousingMicroZone(registry, macro, content_x0, my0, content_x1, my1, base + extra);
-    }
+    int global_micro_index = 0;
+    auto build_role_micros = [&](MicroZoneRole role, int micro_count, int building_count) {
+        for (int i = 0; i < micro_count; ++i) {
+            const int base = micro_count > 0 ? building_count / micro_count : 0;
+            const int extra = i < (micro_count > 0 ? building_count % micro_count : 0) ? 1 : 0;
+            const float my0 = content_y0 + global_micro_index * (micro_h + gap);
+            const float my1 = my0 + micro_h;
+            buildMicroZone(registry, macro, role, content_x0, my0, content_x1, my1, base + extra);
+            ++global_micro_index;
+        }
+    };
+
+    build_role_micros(MicroZoneRole::HOUSING,
+                      housing_micro_count,
+                      std::max(0, config.housing_building_count));
+    build_role_micros(MicroZoneRole::WORKPLACE,
+                      workplace_micro_count,
+                      std::max(0, config.workplace_building_count));
 
     return macro;
 }
@@ -175,14 +230,15 @@ inline bool playerSpawnOutsideSolids(Registry& registry, const TransformComponen
     return !transformOverlapsSolid(registry, spawn);
 }
 
-inline Entity nearestHousingBuildingInRange(Registry& registry,
-                                            const TransformComponent& player_transform,
-                                            float range_wu) {
+inline Entity nearestBuildingInRange(Registry& registry,
+                                     const TransformComponent& player_transform,
+                                     float range_wu,
+                                     MicroZoneRole role) {
     Entity nearest = MAX_ENTITIES;
     float nearest_distance = range_wu;
     auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
     for (Entity building : buildings) {
-        if (registry.get<BuildingUseComponent>(building).role != MicroZoneRole::HOUSING) continue;
+        if (registry.get<BuildingUseComponent>(building).role != role) continue;
 
         const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(building));
         if (distance <= nearest_distance) {
@@ -193,29 +249,131 @@ inline Entity nearestHousingBuildingInRange(Registry& registry,
     return nearest;
 }
 
+inline Entity nearestInteractableBuildingInRange(Registry& registry,
+                                                 const TransformComponent& player_transform,
+                                                 float range_wu) {
+    Entity nearest = MAX_ENTITIES;
+    float nearest_distance = range_wu;
+    auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
+    for (Entity building : buildings) {
+        const MicroZoneRole role = registry.get<BuildingUseComponent>(building).role;
+        if (role != MicroZoneRole::HOUSING && role != MicroZoneRole::WORKPLACE) continue;
+
+        const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(building));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            nearest = building;
+        }
+    }
+    return nearest;
+}
+
+inline Entity nearestHousingBuildingInRange(Registry& registry,
+                                            const TransformComponent& player_transform,
+                                            float range_wu) {
+    return nearestBuildingInRange(registry, player_transform, range_wu, MicroZoneRole::HOUSING);
+}
+
+inline Entity nearestWorkplaceBuildingInRange(Registry& registry,
+                                              const TransformComponent& player_transform,
+                                              float range_wu) {
+    return nearestBuildingInRange(registry, player_transform, range_wu, MicroZoneRole::WORKPLACE);
+}
+
 inline bool playerCanInteractWithHousing(Registry& registry,
                                          const TransformComponent& player_transform,
                                          float range_wu) {
     return nearestHousingBuildingInRange(registry, player_transform, range_wu) != MAX_ENTITIES;
 }
 
+inline bool playerCanInteractWithWorkplace(Registry& registry,
+                                           const TransformComponent& player_transform,
+                                           float range_wu) {
+    return nearestWorkplaceBuildingInRange(registry, player_transform, range_wu) != MAX_ENTITIES;
+}
+
+inline InspectionTargetType inspectionTypeForRole(MicroZoneRole role) {
+    switch (role) {
+        case MicroZoneRole::HOUSING: return InspectionTargetType::HOUSING;
+        case MicroZoneRole::WORKPLACE: return InspectionTargetType::WORKPLACE;
+    }
+    return InspectionTargetType::NONE;
+}
+
+struct InspectionTarget {
+    Entity entity = MAX_ENTITIES;
+    InspectionTargetType type = InspectionTargetType::NONE;
+};
+
+inline InspectionTarget nearestInspectionTargetInRange(Registry& registry,
+                                                       const TransformComponent& player_transform,
+                                                       float range_wu) {
+    InspectionTarget target;
+    float nearest_distance = range_wu;
+
+    auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
+    for (Entity building : buildings) {
+        const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(building));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            target.entity = building;
+            target.type = inspectionTypeForRole(registry.get<BuildingUseComponent>(building).role);
+        }
+    }
+
+    auto paths = registry.view<PathComponent, TransformComponent>();
+    for (Entity path : paths) {
+        if (registry.get<PathComponent>(path).kind != PathKind::PEDESTRIAN) continue;
+
+        const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(path));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            target.entity = path;
+            target.type = InspectionTargetType::PEDESTRIAN_PATH;
+        }
+    }
+
+    return target;
+}
+
+inline bool playerCanInspect(Registry& registry,
+                             const TransformComponent& player_transform,
+                             float range_wu) {
+    return nearestInspectionTargetInRange(registry, player_transform, range_wu).entity != MAX_ENTITIES;
+}
+
+inline PlayerLocationState locationStateForRole(MicroZoneRole role, bool inside) {
+    switch (role) {
+        case MicroZoneRole::HOUSING:
+            return inside ? PlayerLocationState::INSIDE_HOUSING : PlayerLocationState::NEAR_HOUSING;
+        case MicroZoneRole::WORKPLACE:
+            return inside ? PlayerLocationState::INSIDE_WORKPLACE : PlayerLocationState::NEAR_WORKPLACE;
+    }
+    return PlayerLocationState::OUTSIDE;
+}
+
 inline PlayerLocationState playerLocationState(Registry& registry,
                                                Entity player,
-                                               float housing_range_wu) {
+                                               float interaction_range_wu) {
     if (!registry.alive(player) || !registry.has<TransformComponent>(player)) {
         return PlayerLocationState::OUTSIDE;
     }
 
-    if (registry.has<HousingInteractionComponent>(player) &&
-        registry.get<HousingInteractionComponent>(player).inside_housing) {
-        return PlayerLocationState::INSIDE_HOUSING;
+    if (registry.has<BuildingInteractionComponent>(player)) {
+        const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+        if (interaction.inside_building) {
+            return locationStateForRole(interaction.building_role, true);
+        }
     }
 
-    return playerCanInteractWithHousing(registry,
-                                        registry.get<TransformComponent>(player),
-                                        housing_range_wu)
-        ? PlayerLocationState::NEAR_HOUSING
-        : PlayerLocationState::OUTSIDE;
+    const Entity nearest = nearestInteractableBuildingInRange(registry,
+        registry.get<TransformComponent>(player),
+        interaction_range_wu);
+    if (nearest == MAX_ENTITIES || !registry.has<BuildingUseComponent>(nearest)) {
+        return PlayerLocationState::OUTSIDE;
+    }
+
+    return locationStateForRole(registry.get<BuildingUseComponent>(nearest).role, false);
 }
 
 inline bool buildingsDoNotOverlap(Registry& registry) {
@@ -239,9 +397,13 @@ inline bool validateWorld(Registry& registry, const WorldConfig& config) {
     const size_t expected_macros =
         static_cast<size_t>(std::max(0, config.macro_count_x) * std::max(0, config.macro_count_y));
     const size_t expected_micros =
-        expected_macros * static_cast<size_t>(std::max(0, config.housing_micro_zone_count));
+        expected_macros * static_cast<size_t>(
+            std::max(0, config.housing_micro_zone_count) +
+            std::max(0, config.workplace_micro_zone_count));
     const size_t expected_buildings =
-        expected_macros * static_cast<size_t>(std::max(0, config.housing_building_count));
+        expected_macros * static_cast<size_t>(
+            std::max(0, config.housing_building_count) +
+            std::max(0, config.workplace_building_count));
 
     if (macros.size() != expected_macros) return false;
     if (micros.size() != expected_micros) return false;
@@ -251,27 +413,52 @@ inline bool validateWorld(Registry& registry, const WorldConfig& config) {
         if (registry.get<MacroZoneComponent>(macro).type != config.macro_type) return false;
     }
 
+    size_t housing_micros = 0;
+    size_t workplace_micros = 0;
     for (Entity micro : micros) {
         const auto& micro_component = registry.get<MicroZoneComponent>(micro);
         if (micro_component.parent_macro == MAX_ENTITIES || !registry.alive(micro_component.parent_macro)) return false;
-        if (micro_component.role != MicroZoneRole::HOUSING) return false;
+        switch (micro_component.role) {
+            case MicroZoneRole::HOUSING:
+                ++housing_micros;
+                break;
+            case MicroZoneRole::WORKPLACE:
+                ++workplace_micros;
+                break;
+        }
     }
 
+    if (housing_micros != expected_macros * static_cast<size_t>(std::max(0, config.housing_micro_zone_count))) return false;
+    if (workplace_micros != expected_macros * static_cast<size_t>(std::max(0, config.workplace_micro_zone_count))) return false;
+
+    size_t housing_buildings = 0;
+    size_t workplace_buildings = 0;
     for (Entity building : buildings) {
         const auto& use = registry.get<BuildingUseComponent>(building);
         const auto& transform = registry.get<TransformComponent>(building);
 
-        if (use.role != MicroZoneRole::HOUSING) return false;
+        switch (use.role) {
+            case MicroZoneRole::HOUSING:
+                ++housing_buildings;
+                break;
+            case MicroZoneRole::WORKPLACE:
+                ++workplace_buildings;
+                break;
+        }
 
-        bool inside_any_micro = false;
+        bool inside_matching_micro = false;
         for (Entity micro : micros) {
-            if (entityInsideMicroZone(transform, registry.get<MicroZoneComponent>(micro))) {
-                inside_any_micro = true;
+            const auto& micro_component = registry.get<MicroZoneComponent>(micro);
+            if (micro_component.role == use.role && entityInsideMicroZone(transform, micro_component)) {
+                inside_matching_micro = true;
                 break;
             }
         }
-        if (!inside_any_micro) return false;
+        if (!inside_matching_micro) return false;
     }
+
+    if (housing_buildings != expected_macros * static_cast<size_t>(std::max(0, config.housing_building_count))) return false;
+    if (workplace_buildings != expected_macros * static_cast<size_t>(std::max(0, config.workplace_building_count))) return false;
 
     if (!buildingsDoNotOverlap(registry)) return false;
 

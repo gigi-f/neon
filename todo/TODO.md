@@ -60,17 +60,18 @@ Acceptance:
 
 Goal: add one new purpose at a time and derive infrastructure from explicit needs.
 
-- [ ] Add a `WORKPLACE` building type only after Phase 1 and Phase 2 are stable.
-- [ ] Add connection specs for HOUSING -> WORKPLACE pedestrian access.
-- [ ] Add `src/infrastructure_solver.h` that derives only the required pedestrian path between existing configured buildings.
-- [ ] Add the minimal path component/rendering needed for that derived path.
-- [ ] Add tests for path creation only when both endpoint building types exist.
+- [x] Add a `WORKPLACE` building type only after Phase 1 and Phase 2 are stable.
+- [x] Add connection specs for HOUSING -> WORKPLACE pedestrian access.
+- [x] Add `src/infrastructure_solver.h` that derives only the required pedestrian path between existing configured buildings.
+- [x] Add the minimal path component/rendering needed for that derived path.
+- [x] Add tests for path creation only when both endpoint building types exist.
+- [x] Give workplace the same minimal `E` enter/exit interaction pattern as housing.
 
 Acceptance:
 
-- [ ] Config with HOUSING=1 and WORKPLACE=1 creates one visible path.
-- [ ] Config with HOUSING=1 and WORKPLACE=0 creates no path.
-- [ ] No traffic, transit, power, or ambient population logic is introduced.
+- [x] Config with HOUSING=1 and WORKPLACE=1 creates one visible path.
+- [x] Config with HOUSING=1 and WORKPLACE=0 creates no path.
+- [x] No traffic, transit, power, or ambient population logic is introduced.
 
 ## Phase 4: First Player Loop
 
@@ -78,16 +79,16 @@ Goal: create a repeatable verb loop before rebuilding simulation depth.
 
 Candidate loop: leave housing, inspect one nearby thing, return or act on it.
 
-- [ ] Choose one investigation verb and implement it narrowly.
-- [ ] Prefer a simple Surface/Structure readout over full inventory/equipment/scanner architecture.
-- [ ] Add one HUD/panel view that explains what the player learned.
-- [ ] Add tests for target selection/range only after the UI behavior is defined.
+- [x] Choose one investigation verb and implement it narrowly.
+- [x] Prefer a simple Surface/Structure readout over full inventory/equipment/scanner architecture.
+- [x] Add one HUD/panel view that explains what the player learned.
+- [x] Add tests for target selection/range only after the UI behavior is defined.
 
 Acceptance:
 
-- [ ] The player can intentionally trigger the verb.
-- [ ] The result is visible without reading debug logs.
-- [ ] The implementation does not recreate the deleted scan/equipment stack unless that stack is redesigned for the current scope.
+- [x] The player can intentionally trigger the verb.
+- [x] The result is visible without reading debug logs.
+- [x] The implementation does not recreate the deleted scan/equipment stack unless that stack is redesigned for the current scope.
 
 ## Phase 5: Fixed Actors Only
 
@@ -108,6 +109,7 @@ Acceptance:
 
 These are not deleted creatively; they are intentionally not implementation backlog until the clean sandbox earns them back:
 
+- Building doors, interiors, furniture, and pathfinding
 - Inventory, equipment, scanner tools, item provenance, market barter, and survival counters.
 - Biology, injury, pathogens, cognitive state, relationships, schedules, conversations, rumors, and eavesdropping.
 - Roads, traffic, vehicles, transit, stations, power grid simulation, and city-scale infrastructure.

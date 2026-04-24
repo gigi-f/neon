@@ -9,7 +9,19 @@ enum class ZoneType {
 };
 
 enum class MicroZoneRole {
-    HOUSING
+    HOUSING,
+    WORKPLACE
+};
+
+enum class PathKind {
+    PEDESTRIAN
+};
+
+enum class InspectionTargetType {
+    NONE,
+    HOUSING,
+    WORKPLACE,
+    PEDESTRIAN_PATH
 };
 
 enum class Facing {
@@ -22,7 +34,9 @@ enum class Facing {
 enum class PlayerLocationState {
     OUTSIDE,
     NEAR_HOUSING,
-    INSIDE_HOUSING
+    INSIDE_HOUSING,
+    NEAR_WORKPLACE,
+    INSIDE_WORKPLACE
 };
 
 struct TransformComponent {
@@ -46,9 +60,16 @@ struct PlayerComponent {
     Facing facing = Facing::DOWN;
 };
 
-struct HousingInteractionComponent {
-    Entity housing_entity = MAX_ENTITIES;
-    bool inside_housing = false;
+struct BuildingInteractionComponent {
+    Entity building_entity = MAX_ENTITIES;
+    MicroZoneRole building_role = MicroZoneRole::HOUSING;
+    bool inside_building = false;
+};
+
+struct InspectionComponent {
+    Entity target_entity = MAX_ENTITIES;
+    InspectionTargetType target_type = InspectionTargetType::NONE;
+    bool has_result = false;
 };
 
 struct SolidComponent {
@@ -94,4 +115,10 @@ struct BuildingComponent {
 
 struct BuildingUseComponent {
     MicroZoneRole role = MicroZoneRole::HOUSING;
+};
+
+struct PathComponent {
+    PathKind kind = PathKind::PEDESTRIAN;
+    Entity from = MAX_ENTITIES;
+    Entity to = MAX_ENTITIES;
 };
