@@ -307,6 +307,35 @@ static void testFixedWorkerMovesOnAssignedPath() {
     assert(after.y <= path.y + path.height * 0.5f + 0.01f);
 }
 
+static void testWorkerAcknowledgementToggle() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = registry.view<FixedActorComponent, TransformComponent>().front();
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(worker));
+
+    Entity found_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), 18.0f);
+    assert(found_worker == worker);
+    assert(!registry.get<FixedActorComponent>(worker).acknowledged);
+
+    registry.get<FixedActorComponent>(worker).acknowledged = true;
+    assert(registry.get<FixedActorComponent>(worker).acknowledged);
+
+    TransformComponent far_transform = registry.get<TransformComponent>(worker);
+    far_transform.x += 100.0f;
+    registry.get<TransformComponent>(player) = far_transform;
+    Entity far_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), 18.0f);
+    assert(far_worker == MAX_ENTITIES);
+}
+
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
@@ -320,5 +349,6 @@ int main() {
     testWorkerInspectionRangeAndPriority();
     testFixedWorkerCountIsConfigDriven();
     testFixedWorkerMovesOnAssignedPath();
+    testWorkerAcknowledgementToggle();
     return 0;
 }

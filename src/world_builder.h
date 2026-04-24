@@ -280,6 +280,24 @@ inline Entity nearestWorkplaceBuildingInRange(Registry& registry,
     return nearestBuildingInRange(registry, player_transform, range_wu, MicroZoneRole::WORKPLACE);
 }
 
+inline Entity nearestWorkerInRange(Registry& registry,
+                                   const TransformComponent& player_transform,
+                                   float range_wu) {
+    Entity nearest = MAX_ENTITIES;
+    float nearest_distance = range_wu;
+    auto actors = registry.view<FixedActorComponent, TransformComponent>();
+    for (Entity actor : actors) {
+        if (registry.get<FixedActorComponent>(actor).kind != FixedActorKind::WORKER) continue;
+
+        const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(actor));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            nearest = actor;
+        }
+    }
+    return nearest;
+}
+
 inline bool playerCanInteractWithHousing(Registry& registry,
                                          const TransformComponent& player_transform,
                                          float range_wu) {

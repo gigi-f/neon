@@ -107,3 +107,18 @@ Acceptance:
 - [x] The player can intentionally inspect the worker without opening any new UI stack.
 - [x] Inspecting the worker never creates conversation, relationship, schedule, biology, or pathogen state.
 - [x] `cmake --build build`, `rtk test ctest --test-dir build --output-on-failure`, and cclsp diagnostics pass.
+
+## Phase 7: Worker Acknowledgement Interaction
+
+Goal: add one actor-facing interaction without rebuilding conversations.
+
+- [x] Add a minimal `E` prompt when the player is near the worker.
+- [x] Add one reversible acknowledgement state, such as `WORKER ACKNOWLEDGED`, visible in the HUD.
+- [x] Keep the state local and deterministic; do not add dialogue trees, memory, affinity, rumors, or relationship scores.
+- [x] Add tests for acknowledgement range and state toggle.
+
+Acceptance:
+
+- [x] The player has exactly one intentional interaction with the worker.
+- [x] The interaction has a visible HUD symptom.
+- [x] The worker count and movement behavior remain unchanged.

@@ -21,21 +21,6 @@ Supersedes all previous TODO files, copied OpenSpec artifacts, archived specs, a
 - The player can inspect nearby housing, workplace, and path targets with `SPACE`.
 - The fixed worker is config-driven and moves on the derived pedestrian path.
 
-## Phase 7: Worker Acknowledgement Interaction
-
-Goal: add one actor-facing interaction without rebuilding conversations.
-
-- [ ] Add a minimal `E` prompt when the player is near the worker.
-- [ ] Add one reversible acknowledgement state, such as `WORKER ACKNOWLEDGED`, visible in the HUD.
-- [ ] Keep the state local and deterministic; do not add dialogue trees, memory, affinity, rumors, or relationship scores.
-- [ ] Add tests for acknowledgement range and state toggle.
-
-Acceptance:
-
-- [ ] The player has exactly one intentional interaction with the worker.
-- [ ] The interaction has a visible HUD symptom.
-- [ ] The worker count and movement behavior remain unchanged.
-
 ## Phase 8: Housing Interior Placeholder
 
 Goal: make entering housing more meaningful without doors, furniture systems, or pathfinding.

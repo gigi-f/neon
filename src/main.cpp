@@ -415,7 +415,14 @@ int main(int, char**) {
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) running = false;
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_E) {
-                toggleBuildingInteraction(registry, player, BUILDING_INTERACTION_RANGE_WU);
+                Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
+                bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
+                if (near_worker != MAX_ENTITIES && !inside) {
+                    auto& actor_comp = registry.get<FixedActorComponent>(near_worker);
+                    actor_comp.acknowledged = !actor_comp.acknowledged;
+                } else {
+                    toggleBuildingInteraction(registry, player, BUILDING_INTERACTION_RANGE_WU);
+                }
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_SPACE) {
                 performInspection(registry, player, INSPECTION_RANGE_WU);
@@ -452,9 +459,19 @@ int main(int, char**) {
             drawText(renderer, font, line, 6, 20, SDL_Color{110, 190, 230, 220}, 0.65f);
             const PlayerLocationState location_state =
                 playerLocationState(registry, player, BUILDING_INTERACTION_RANGE_WU);
-            std::snprintf(line, sizeof(line), "LOCATION:%s  %s",
-                          locationStateName(location_state),
-                          locationPrompt(location_state));
+            Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
+            bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
+            
+            if (near_worker != MAX_ENTITIES && !inside) {
+                bool ack = registry.get<FixedActorComponent>(near_worker).acknowledged;
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E %s",
+                              locationStateName(location_state),
+                              ack ? "DISMISS WORKER [WORKER ACKNOWLEDGED]" : "ACKNOWLEDGE WORKER");
+            } else {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s",
+                              locationStateName(location_state),
+                              locationPrompt(location_state));
+            }
             drawText(renderer, font, line, 6, 34, SDL_Color{245, 205, 120, 230}, 0.65f);
             const bool can_inspect = playerCanInspect(registry,
                 registry.get<TransformComponent>(player),

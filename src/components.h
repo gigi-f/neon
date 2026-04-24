@@ -83,6 +83,7 @@ struct FixedActorComponent {
     float route_t = 0.0f;
     float direction = 1.0f;
     float speed_wu = 24.0f;
+    bool acknowledged = false;
 };
 
 struct SolidComponent {
