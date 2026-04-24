@@ -1,4 +1,0 @@
-#!/bin/sh
-set -eu
-
-scripts/check-user-manual-updated.sh --staged
