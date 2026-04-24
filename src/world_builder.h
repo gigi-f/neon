@@ -386,6 +386,8 @@ inline InspectionTarget playerInspectionTarget(Registry& registry,
             target.entity = interaction.building_entity;
             if (interaction.building_role == MicroZoneRole::HOUSING) {
                 target.type = InspectionTargetType::HOUSING_INTERIOR;
+            } else if (interaction.building_role == MicroZoneRole::WORKPLACE) {
+                target.type = InspectionTargetType::WORKPLACE_INTERIOR;
             } else {
                 target.type = inspectionTypeForRole(interaction.building_role);
             }

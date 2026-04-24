@@ -137,3 +137,18 @@ Acceptance:
 - [x] Entering housing changes what the player can inspect.
 - [x] No door graph, room graph, furniture component hierarchy, or pathfinding is introduced.
 - [x] The outside housing building remains unchanged.
+
+## Phase 9: Workplace Interior Placeholder
+
+Goal: make entering workplace distinct from housing before adding jobs or schedules.
+
+- [x] Add a minimal interior readout shown only while inside workplace.
+- [x] Add one authored workplace detail, such as `WORK BENCH`, as text state rather than a furniture system.
+- [x] Let `SPACE` inspect the current workplace interior state while inside workplace.
+- [x] Add tests for inside-workplace inspection output selection.
+
+Acceptance:
+
+- [x] Housing and workplace interiors read differently.
+- [x] No job assignment, schedule, economy, market, or production system is introduced.
+- [x] The worker remains fixed-count and path-bound.

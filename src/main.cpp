@@ -224,6 +224,7 @@ static const char* inspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
         case InspectionTargetType::WORKER: return "WORKER";
         case InspectionTargetType::HOUSING_INTERIOR: return "HOUSING INTERIOR";
+        case InspectionTargetType::WORKPLACE_INTERIOR: return "WORKPLACE INTERIOR";
     }
     return "NO TARGET";
 }
@@ -242,6 +243,8 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "Fixed worker. Path route. Count locked at one.";
         case InspectionTargetType::HOUSING_INTERIOR:
             return "SLEEPING MAT: Tattered synthetic weave.";
+        case InspectionTargetType::WORKPLACE_INTERIOR:
+            return "WORK BENCH: Heavy machinery array.";
     }
     return "";
 }

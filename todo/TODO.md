@@ -21,21 +21,6 @@ Supersedes all previous TODO files, copied OpenSpec artifacts, archived specs, a
 - The player can inspect nearby housing, workplace, and path targets with `SPACE`.
 - The fixed worker is config-driven and moves on the derived pedestrian path.
 
-## Phase 9: Workplace Interior Placeholder
-
-Goal: make entering workplace distinct from housing before adding jobs or schedules.
-
-- [ ] Add a minimal interior readout shown only while inside workplace.
-- [ ] Add one authored workplace detail, such as `WORK BENCH`, as text state rather than a furniture system.
-- [ ] Let `SPACE` inspect the current workplace interior state while inside workplace.
-- [ ] Add tests for inside-workplace inspection output selection.
-
-Acceptance:
-
-- [ ] Housing and workplace interiors read differently.
-- [ ] No job assignment, schedule, economy, market, or production system is introduced.
-- [ ] The worker remains fixed-count and path-bound.
-
 ## Phase 10: One Carried Object
 
 Goal: introduce inventory pressure with one object, not an inventory system.

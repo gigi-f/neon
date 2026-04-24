@@ -357,6 +357,38 @@ static void testInsideHousingInspectionTarget() {
     assert(target.type == InspectionTargetType::HOUSING_INTERIOR);
 }
 
+static void testInsideWorkplaceInspectionTarget() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    buildWorld(registry, config);
+
+    Entity workplace_building = MAX_ENTITIES;
+    auto buildings = registry.view<BuildingComponent, TransformComponent, BuildingUseComponent>();
+    for (Entity b : buildings) {
+        if (registry.get<BuildingUseComponent>(b).role == MicroZoneRole::WORKPLACE) {
+            workplace_building = b;
+            break;
+        }
+    }
+    assert(workplace_building != MAX_ENTITIES);
+
+    const auto& building_transform = registry.get<TransformComponent>(workplace_building);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, building_transform);
+    auto& interaction = registry.assign<BuildingInteractionComponent>(player);
+    interaction.building_entity = workplace_building;
+    interaction.building_role = MicroZoneRole::WORKPLACE;
+    interaction.inside_building = true;
+
+    InspectionTarget target = playerInspectionTarget(registry, player, 22.0f);
+    assert(target.entity == workplace_building);
+    assert(target.type == InspectionTargetType::WORKPLACE_INTERIOR);
+}
+
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
@@ -368,6 +400,7 @@ int main() {
     testBuildingInteractionRangeHelpers();
     testInspectionTargetHelpers();
     testInsideHousingInspectionTarget();
+    testInsideWorkplaceInspectionTarget();
     testWorkerInspectionRangeAndPriority();
     testFixedWorkerCountIsConfigDriven();
     testFixedWorkerMovesOnAssignedPath();
