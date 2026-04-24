@@ -1,4 +1,5 @@
 #include <cassert>
+#include "fixed_actor_system.h"
 #include "infrastructure_solver.h"
 #include "world_builder.h"
 
@@ -228,6 +229,84 @@ static void testInspectionTargetHelpers() {
     assert(nearestInspectionTargetInRange(registry, far_from_targets, 22.0f).type == InspectionTargetType::NONE);
 }
 
+static void testWorkerInspectionRangeAndPriority() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = registry.view<FixedActorComponent, TransformComponent>().front();
+    const auto& worker_transform = registry.get<TransformComponent>(worker);
+    const auto target = nearestInspectionTargetInRange(registry, worker_transform, 22.0f);
+    assert(target.entity == worker);
+    assert(target.type == InspectionTargetType::WORKER);
+    assert(playerCanInspect(registry, worker_transform, 22.0f));
+
+    TransformComponent far_from_worker = worker_transform;
+    far_from_worker.x += 80.0f;
+    assert(nearestInspectionTargetInRange(registry, far_from_worker, 22.0f).type != InspectionTargetType::WORKER);
+}
+
+static void testFixedWorkerCountIsConfigDriven() {
+    Registry none_registry;
+    WorldConfig none_config = makeSandboxConfig();
+    none_config.workplace_micro_zone_count = 1;
+    none_config.workplace_building_count = 1;
+    none_config.fixed_worker_count = 0;
+    buildWorld(none_registry, none_config);
+    deriveInfrastructure(none_registry, none_config);
+
+    assert(spawnFixedActors(none_registry, none_config) == 0);
+    assert(none_registry.view<FixedActorComponent>().empty());
+
+    Registry one_registry;
+    WorldConfig one_config = makeSandboxConfig();
+    one_config.workplace_micro_zone_count = 1;
+    one_config.workplace_building_count = 1;
+    one_config.fixed_worker_count = 1;
+    buildWorld(one_registry, one_config);
+    deriveInfrastructure(one_registry, one_config);
+
+    assert(spawnFixedActors(one_registry, one_config) == 1);
+    auto actors = one_registry.view<FixedActorComponent, TransformComponent, GlyphComponent>();
+    assert(actors.size() == 1);
+    const auto& actor = one_registry.get<FixedActorComponent>(actors.front());
+    assert(actor.kind == FixedActorKind::WORKER);
+    assert(one_registry.alive(actor.path_entity));
+    assert(one_registry.has<PathComponent>(actor.path_entity));
+    assert(spawnFixedActors(one_registry, one_config) == 0);
+    assert(one_registry.view<FixedActorComponent>().size() == 1);
+}
+
+static void testFixedWorkerMovesOnAssignedPath() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity actor = registry.view<FixedActorComponent, TransformComponent>().front();
+    const auto before = registry.get<TransformComponent>(actor);
+    const Entity path_entity = registry.get<FixedActorComponent>(actor).path_entity;
+    const auto& path = registry.get<TransformComponent>(path_entity);
+
+    updateFixedActors(registry, 1.0f);
+
+    const auto& after = registry.get<TransformComponent>(actor);
+    assert(after.y != before.y || after.x != before.x);
+    assert(after.x >= path.x - path.width * 0.5f - 0.01f);
+    assert(after.x <= path.x + path.width * 0.5f + 0.01f);
+    assert(after.y >= path.y - path.height * 0.5f - 0.01f);
+    assert(after.y <= path.y + path.height * 0.5f + 0.01f);
+}
+
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
@@ -238,5 +317,8 @@ int main() {
     testPlayerSpawnValidationRejectsSolids();
     testBuildingInteractionRangeHelpers();
     testInspectionTargetHelpers();
+    testWorkerInspectionRangeAndPriority();
+    testFixedWorkerCountIsConfigDriven();
+    testFixedWorkerMovesOnAssignedPath();
     return 0;
 }

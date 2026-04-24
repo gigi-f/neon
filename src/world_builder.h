@@ -333,6 +333,18 @@ inline InspectionTarget nearestInspectionTargetInRange(Registry& registry,
         }
     }
 
+    auto actors = registry.view<FixedActorComponent, TransformComponent>();
+    for (Entity actor : actors) {
+        if (registry.get<FixedActorComponent>(actor).kind != FixedActorKind::WORKER) continue;
+
+        const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(actor));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            target.entity = actor;
+            target.type = InspectionTargetType::WORKER;
+        }
+    }
+
     return target;
 }
 

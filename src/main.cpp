@@ -8,6 +8,7 @@
 #include <string>
 #include "components.h"
 #include "ecs.h"
+#include "fixed_actor_system.h"
 #include "infrastructure_solver.h"
 #include "stb_image.h"
 #include "world_builder.h"
@@ -234,6 +235,7 @@ static const char* inspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::HOUSING: return "HOUSING";
         case InspectionTargetType::WORKPLACE: return "WORKPLACE";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
+        case InspectionTargetType::WORKER: return "WORKER";
     }
     return "NO TARGET";
 }
@@ -248,6 +250,8 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "Work site. Enterable. Linked to housing.";
         case InspectionTargetType::PEDESTRIAN_PATH:
             return "Foot path. Non-solid access between buildings.";
+        case InspectionTargetType::WORKER:
+            return "Fixed worker. Path route. Count locked at one.";
     }
     return "";
 }
@@ -363,6 +367,7 @@ int main(int, char**) {
     WorldConfig world_config = makeSandboxConfig();
     world_config.workplace_micro_zone_count = 1;
     world_config.workplace_building_count = 1;
+    world_config.fixed_worker_count = 1;
     buildWorld(registry, world_config);
     if (!validateWorld(registry, world_config)) {
         std::cerr << "Generated world validation failed during startup." << std::endl;
@@ -373,6 +378,7 @@ int main(int, char**) {
         return 1;
     }
     deriveInfrastructure(registry, world_config);
+    spawnFixedActors(registry, world_config);
 
     Entity player = registry.create();
     registry.assign<TransformComponent>(player, 0.0f, -115.0f, 12.0f, 12.0f);
@@ -422,6 +428,7 @@ int main(int, char**) {
 
         const uint8_t* keys = SDL_GetKeyboardState(nullptr);
         updatePlayer(registry, player, dt, keys);
+        updateFixedActors(registry, dt);
 
         int screen_w = 0;
         int screen_h = 0;
@@ -438,7 +445,7 @@ int main(int, char**) {
             SDL_Color hud{140, 230, 180, 230};
             char line[160];
             float fps = dt > 0.0f ? 1.0f / dt : 0.0f;
-            std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE", fps, registry.entity_count());
+            std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + WORKER", fps, registry.entity_count());
             drawText(renderer, font, line, 6, 6, hud, 0.7f);
             std::snprintf(line, sizeof(line), "WASD MOVE  SPACE INSPECT  WHEEL ZOOM  ESC QUIT  CAM:%.0f,%.0f Z:%.2f",
                           active_camera.x, active_camera.y, active_camera.scale);

@@ -28,6 +28,7 @@ struct WorldConfig {
     int housing_building_count = 1;
     int workplace_micro_zone_count = 0;
     int workplace_building_count = 0;
+    int fixed_worker_count = 0;
     uint32_t seed = kDefaultWorldSeed;
 };
 

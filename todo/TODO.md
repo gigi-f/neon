@@ -1,16 +1,8 @@
 # Neon Oubliette Implementation Plan
 
-This file is the singular source of truth for implementation order.
+This file is the singular source of truth for active implementation order. Completed slices are archived in `todo/completed_todo.md`.
 
 Supersedes all previous TODO files, copied OpenSpec artifacts, archived specs, and broad simulation plans that were moved under `todo/`. The external planning reference is `/Users/gm1/.claude/plans/we-went-too-big-linear-map.md`; this file is the repo-local executable plan.
-
-## Current Baseline
-
-- [x] Runtime is reduced to the clean sandbox: one player and one generated housing building.
-- [x] Source tree is reduced to focused files: ECS, components, `main.cpp`, world builder, geometry helpers, STB font loading, and two tests.
-- [x] Legacy component/system surfaces are removed from active source and tests: ambient spawning, NPCs, vehicles, roads, doors, power, inventory, equipment, scan panels, biology, pathogens, conversations, schedules, relationships, economy, markets, transit, feature flags, and old system scaffolds.
-- [x] World rendering has a clean glyph-or-fallback path: fitted glyphs when the font loads, rectangle fallback only when it does not.
-- [x] Validation is green: CMake configure/build, `rtk test ctest --test-dir build --output-on-failure`, and cclsp diagnostics on remaining edited C++ files.
 
 ## Binding Rules
 
@@ -22,98 +14,143 @@ Supersedes all previous TODO files, copied OpenSpec artifacts, archived specs, a
 - Keep the build small. Do not keep compatibility stubs for deleted systems.
 - If a feature needs an OpenSpec change, write only the current focused change. Do not restore archived/spec-dump folders under `todo/`.
 
-## Phase 1: Count-Driven World Builder
+## Current Runtime Shape
 
-Goal: make the one-building sandbox tunable without restoring the old procedural city.
+- The runtime has one player, one housing building, one workplace building, one derived pedestrian path, and at most one fixed worker.
+- The player can enter/exit housing and workplace with `E`.
+- The player can inspect nearby housing, workplace, and path targets with `SPACE`.
+- The fixed worker is config-driven and moves on the derived pedestrian path.
 
-- [x] Add `src/world_config.h`.
-- [x] Define explicit world counts: macro zone count, micro-zone counts, and building counts.
-- [x] Provide `makeSandboxConfig()` that defaults to one macro, one SLUM/housing micro-zone, and one HOUSING building.
-- [x] Rewire `buildWorld()` to consume `WorldConfig` while preserving the current `buildWorld(registry, 1, 1, seed)` compatibility path only if it stays small.
-- [x] Add tests proving default config creates one housing building.
-- [x] Add tests proving increasing the housing count creates exactly that many housing buildings without overlap.
-- [x] Keep `main.cpp` calling the sandbox config path.
+## Phase 7: Worker Acknowledgement Interaction
 
-Acceptance:
+Goal: add one actor-facing interaction without rebuilding conversations.
 
-- [x] Temporarily setting housing count to 3 creates 3 visible housing buildings, then reverting returns to 1.
-- [x] No roads, doors, NPCs, vehicles, items, power, inventory, or scan systems return in this phase.
-- [x] `cmake --build build`, `rtk test ctest --test-dir build --output-on-failure`, and cclsp diagnostics pass.
-
-## Phase 2: Placement Basics And Housing Interaction
-
-Goal: make the first generated building useful before adding more city content.
-
-- [x] Strengthen placement validation: building containment, building-building non-overlap, and player spawn outside solids.
-- [x] Add a minimal interaction prompt when the player is near the housing building.
-- [x] Add a minimal enter/exit state for the housing unit only if it is visible and reversible.
-- [x] Add a small HUD line for current location/state: outside, near housing, inside housing.
-- [x] Add tests for validation failures and interaction range helpers.
+- [ ] Add a minimal `E` prompt when the player is near the worker.
+- [ ] Add one reversible acknowledgement state, such as `WORKER ACKNOWLEDGED`, visible in the HUD.
+- [ ] Keep the state local and deterministic; do not add dialogue trees, memory, affinity, rumors, or relationship scores.
+- [ ] Add tests for acknowledgement range and state toggle.
 
 Acceptance:
 
-- [x] Player cannot spawn inside or walk through the housing unit.
-- [x] The housing unit has one obvious player-facing interaction.
-- [x] The interaction does not require restoring legacy door/interior systems wholesale.
+- [ ] The player has exactly one intentional interaction with the worker.
+- [ ] The interaction has a visible HUD symptom.
+- [ ] The worker count and movement behavior remain unchanged.
 
-## Phase 3: Second Building Type And Derived Paths
+## Phase 8: Housing Interior Placeholder
 
-Goal: add one new purpose at a time and derive infrastructure from explicit needs.
+Goal: make entering housing more meaningful without doors, furniture systems, or pathfinding.
 
-- [x] Add a `WORKPLACE` building type only after Phase 1 and Phase 2 are stable.
-- [x] Add connection specs for HOUSING -> WORKPLACE pedestrian access.
-- [x] Add `src/infrastructure_solver.h` that derives only the required pedestrian path between existing configured buildings.
-- [x] Add the minimal path component/rendering needed for that derived path.
-- [x] Add tests for path creation only when both endpoint building types exist.
-- [x] Give workplace the same minimal `E` enter/exit interaction pattern as housing.
+- [ ] Add a minimal interior readout shown only while inside housing.
+- [ ] Add one authored housing detail, such as `SLEEPING MAT`, as text state rather than a spawned furniture system.
+- [ ] Let `SPACE` inspect the current housing interior state while inside housing.
+- [ ] Add tests for inside-housing inspection output selection.
 
 Acceptance:
 
-- [x] Config with HOUSING=1 and WORKPLACE=1 creates one visible path.
-- [x] Config with HOUSING=1 and WORKPLACE=0 creates no path.
-- [x] No traffic, transit, power, or ambient population logic is introduced.
+- [ ] Entering housing changes what the player can inspect.
+- [ ] No door graph, room graph, furniture component hierarchy, or pathfinding is introduced.
+- [ ] The outside housing building remains unchanged.
 
-## Phase 4: First Player Loop
+## Phase 9: Workplace Interior Placeholder
 
-Goal: create a repeatable verb loop before rebuilding simulation depth.
+Goal: make entering workplace distinct from housing before adding jobs or schedules.
 
-Candidate loop: leave housing, inspect one nearby thing, return or act on it.
-
-- [x] Choose one investigation verb and implement it narrowly.
-- [x] Prefer a simple Surface/Structure readout over full inventory/equipment/scanner architecture.
-- [x] Add one HUD/panel view that explains what the player learned.
-- [x] Add tests for target selection/range only after the UI behavior is defined.
+- [ ] Add a minimal interior readout shown only while inside workplace.
+- [ ] Add one authored workplace detail, such as `WORK BENCH`, as text state rather than a furniture system.
+- [ ] Let `SPACE` inspect the current workplace interior state while inside workplace.
+- [ ] Add tests for inside-workplace inspection output selection.
 
 Acceptance:
 
-- [x] The player can intentionally trigger the verb.
-- [x] The result is visible without reading debug logs.
-- [x] The implementation does not recreate the deleted scan/equipment stack unless that stack is redesigned for the current scope.
+- [ ] Housing and workplace interiors read differently.
+- [ ] No job assignment, schedule, economy, market, or production system is introduced.
+- [ ] The worker remains fixed-count and path-bound.
 
-## Phase 5: Fixed Actors Only
+## Phase 10: One Carried Object
 
-Goal: reintroduce people only when the map has a reason for them.
+Goal: introduce inventory pressure with one object, not an inventory system.
 
-- [ ] Add at most one authored/fixed NPC type after housing, workplace, and one player verb exist.
-- [ ] Keep population count explicit in config.
-- [ ] Do not add ambient spawning, despawn churn, schedules, relationships, pathogens, or conversations in the first actor pass.
-- [ ] Give the actor one visible behavior and one testable rule.
+- [ ] Add exactly one authored carryable object in the world, placed by config.
+- [ ] Add `E PICK UP` and `E DROP` for that object.
+- [ ] Show carried/not-carried state in the HUD.
+- [ ] Add tests for pickup range, single-object ownership, and drop placement outside solids.
 
 Acceptance:
 
-- [ ] Actor count is deterministic and config-driven.
-- [ ] Actor behavior is visible in the game window.
-- [ ] The actor cannot grow into an uncontrolled simulation surface.
+- [ ] The player can carry at most one object.
+- [ ] No bag slots, equipment slots, item flags, market barter, survival counters, or scanner tools are introduced.
+- [ ] The carried object is visible when dropped and visible in HUD when carried.
 
-## Deferred Until The Core Loop Exists
+## Phase 11: One Shelter Need
 
-These are not deleted creatively; they are intentionally not implementation backlog until the clean sandbox earns them back:
+Goal: add one survival-adjacent pressure only after carrying exists.
 
-- Building doors, interiors, furniture, and pathfinding
-- Inventory, equipment, scanner tools, item provenance, market barter, and survival counters.
+- [ ] Add one named shelter need, such as `REST`, as a HUD state.
+- [ ] Let entering housing satisfy or reset that single need.
+- [ ] Keep the need deterministic and non-lethal.
+- [ ] Add tests for need change inside housing and no change outside housing.
+
+Acceptance:
+
+- [ ] The need creates a reason to return home.
+- [ ] No health, hunger, thirst, injury, pathogen, death, or survival inventory system is introduced.
+- [ ] The need is visible without debug logs.
+
+## Phase 12: One Explicit Path Upgrade
+
+Goal: improve infrastructure only when a current verb needs it.
+
+- [ ] Add one path state, such as `ROUGH` or `LIT`, to the existing pedestrian path.
+- [ ] Show the path state in inspection readouts.
+- [ ] Add one visible render difference for the path state.
+- [ ] Add tests that the state exists only on derived pedestrian paths.
+
+Acceptance:
+
+- [ ] The infrastructure upgrade is visible and inspectable.
+- [ ] No traffic, vehicles, transit, road hierarchy, power simulation, conduits, or stop lights are introduced.
+- [ ] The path remains non-solid and derived from housing-workplace need.
+
+## Phase 13: One More Building Purpose
+
+Goal: add a third building role only after the player loop uses the first two.
+
+- [ ] Choose one role with a direct player-loop purpose, such as `SUPPLY` or `CLINIC`.
+- [ ] Add explicit config counts for that role.
+- [ ] Add placement, validation, glyph rendering, and one inspection readout.
+- [ ] Derive only the one needed pedestrian connection from existing buildings.
+- [ ] Add tests for role count, non-overlap, and conditional path creation.
+
+Acceptance:
+
+- [ ] The new role is visible, inspectable, and connected only when configured.
+- [ ] No zone distribution tables, procedural city generation, market system, hospital system, or ambient population logic is introduced.
+- [ ] The default sandbox can still be reduced back to housing-only by config.
+
+## Phase 14: Save And Reload Tiny State
+
+Goal: persist the small sandbox only after the loop has state worth preserving.
+
+- [ ] Save player position, current building state, carried object state, and worker route progress.
+- [ ] Reload the same small state deterministically.
+- [ ] Add a clear failure path if the save file is missing or invalid.
+- [ ] Add tests for serialize/deserialize round trip of the tiny state model.
+
+Acceptance:
+
+- [ ] Save/load covers only current-scope state.
+- [ ] No global simulation snapshot, ECS reflection, content database, or migration layer is introduced.
+- [ ] Runtime still starts cleanly without a save file.
+
+## Still Deferred
+
+These remain intentionally out of scope until a smaller phase above creates a concrete need:
+
+- Full building doors, multi-room interiors, furniture components, and pathfinding.
+- Multi-slot inventory, equipment, scanner tools, item provenance, market barter, and survival counters.
 - Biology, injury, pathogens, cognitive state, relationships, schedules, conversations, rumors, and eavesdropping.
-- Roads, traffic, vehicles, transit, stations, power grid simulation, and city-scale infrastructure.
-- Factions, wanted level, directive markets, law enforcement, crises, xenos, AGI cores, death cascade, save/load, and sanctuary systems.
+- Roads, traffic, vehicles, transit, stations, power grid simulation, conduits, and city-scale infrastructure.
+- Factions, wanted level, directive markets, law enforcement, crises, xenos, AGI cores, death cascade, sanctuary systems, and broad narrative simulation.
 - Sparse-set ECS replacement unless profiling proves the current registry is blocking active work.
 
 ## Creative North Star

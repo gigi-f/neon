@@ -21,7 +21,12 @@ enum class InspectionTargetType {
     NONE,
     HOUSING,
     WORKPLACE,
-    PEDESTRIAN_PATH
+    PEDESTRIAN_PATH,
+    WORKER
+};
+
+enum class FixedActorKind {
+    WORKER
 };
 
 enum class Facing {
@@ -70,6 +75,14 @@ struct InspectionComponent {
     Entity target_entity = MAX_ENTITIES;
     InspectionTargetType target_type = InspectionTargetType::NONE;
     bool has_result = false;
+};
+
+struct FixedActorComponent {
+    FixedActorKind kind = FixedActorKind::WORKER;
+    Entity path_entity = MAX_ENTITIES;
+    float route_t = 0.0f;
+    float direction = 1.0f;
+    float speed_wu = 24.0f;
 };
 
 struct SolidComponent {
