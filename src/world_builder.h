@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
+#include <string>
 #include <vector>
 #include "components.h"
 #include "ecs.h"
+#include "fixed_actor_system.h"
 #include "world_config.h"
 #include "world_generation.h"
 
@@ -25,6 +27,15 @@ inline char glyphForRole(MicroZoneRole role) {
         case MicroZoneRole::SUPPLY: return 's';
     }
     return '?';
+}
+
+inline const char* roleDisplayName(MicroZoneRole role) {
+    switch (role) {
+        case MicroZoneRole::HOUSING: return "HOUSING";
+        case MicroZoneRole::WORKPLACE: return "WORKPLACE";
+        case MicroZoneRole::SUPPLY: return "SUPPLY";
+    }
+    return "UNKNOWN";
 }
 
 inline void colorForRole(MicroZoneRole role, uint8_t& r, uint8_t& g, uint8_t& b) {
@@ -72,6 +83,12 @@ inline Entity buildBuildingUnit(Registry& registry,
         floorsForRole(role),
         true);
     registry.assign<BuildingUseComponent>(building, role);
+    if (role == MicroZoneRole::HOUSING) {
+        registry.assign<ShelterStockComponent>(building);
+        registry.assign<BuildingImprovementComponent>(building);
+    } else if (role == MicroZoneRole::WORKPLACE) {
+        registry.assign<WorkplaceBenchComponent>(building);
+    }
     registry.assign<GlyphComponent>(building, std::string(1, glyphForRole(role)),
         r, g, b, static_cast<uint8_t>(255), 1.0f, true, true);
     return building;
@@ -362,6 +379,1182 @@ inline Entity nearestCarryableObjectInRange(Registry& registry,
     return nearest;
 }
 
+inline Entity firstCarryableObject(Registry& registry) {
+    auto objects = registry.view<CarryableComponent, TransformComponent>();
+    return objects.empty() ? MAX_ENTITIES : objects.front();
+}
+
+inline void hideCarryableObject(Registry& registry, Entity object) {
+    auto& object_transform = registry.get<TransformComponent>(object);
+    object_transform.x = 99999.0f;
+    object_transform.y = 99999.0f;
+}
+
+inline bool playerInsideSupplyInterior(Registry& registry, Entity player) {
+    if (!registry.alive(player) || !registry.has<BuildingInteractionComponent>(player)) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    return interaction.inside_building && interaction.building_role == MicroZoneRole::SUPPLY &&
+           registry.alive(interaction.building_entity);
+}
+
+inline bool playerInsideHousingInterior(Registry& registry, Entity player) {
+    if (!registry.alive(player) || !registry.has<BuildingInteractionComponent>(player)) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    return interaction.inside_building && interaction.building_role == MicroZoneRole::HOUSING &&
+           registry.alive(interaction.building_entity);
+}
+
+inline bool playerInsideWorkplaceInterior(Registry& registry, Entity player) {
+    if (!registry.alive(player) || !registry.has<BuildingInteractionComponent>(player)) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    return interaction.inside_building && interaction.building_role == MicroZoneRole::WORKPLACE &&
+           registry.alive(interaction.building_entity);
+}
+
+inline bool carryableObjectIsHeld(Registry& registry, Entity object) {
+    auto players = registry.view<PlayerComponent>();
+    for (Entity player : players) {
+        if (registry.get<PlayerComponent>(player).carried_object == object) {
+            return true;
+        }
+    }
+    auto actors = registry.view<FixedActorComponent>();
+    for (Entity actor : actors) {
+        if (registry.get<FixedActorComponent>(actor).carried_object == object) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool carryableObjectIsKind(Registry& registry, Entity object, ItemKind kind) {
+    return registry.alive(object) &&
+           registry.has<CarryableComponent>(object) &&
+           registry.get<CarryableComponent>(object).kind == kind;
+}
+
+inline const char* carryableObjectLabel(Registry& registry, Entity object) {
+    if (!registry.alive(object) || !registry.has<CarryableComponent>(object)) {
+        return "UNKNOWN";
+    }
+    return itemKindDisplayName(registry.get<CarryableComponent>(object).kind);
+}
+
+inline std::string carryableObjectReadout(Registry& registry, Entity object) {
+    return std::string(carryableObjectLabel(registry, object)) + ": Carryable object.";
+}
+
+inline bool playerInsideAnyBuilding(Registry& registry, Entity player) {
+    if (!registry.alive(player) || !registry.has<BuildingInteractionComponent>(player)) {
+        return false;
+    }
+    return registry.get<BuildingInteractionComponent>(player).inside_building;
+}
+
+inline Entity firstShelterStockBuilding(Registry& registry) {
+    auto shelters = registry.view<ShelterStockComponent, BuildingUseComponent>();
+    for (Entity shelter : shelters) {
+        if (registry.get<BuildingUseComponent>(shelter).role == MicroZoneRole::HOUSING) {
+            return shelter;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline int shelterSupplyCount(Registry& registry) {
+    const Entity shelter = firstShelterStockBuilding(registry);
+    if (shelter == MAX_ENTITIES) return 0;
+    return registry.get<ShelterStockComponent>(shelter).current_supply;
+}
+
+inline int shelterSupplyCapacity(Registry& registry) {
+    const Entity shelter = firstShelterStockBuilding(registry);
+    if (shelter == MAX_ENTITIES) return 0;
+    return registry.get<ShelterStockComponent>(shelter).capacity;
+}
+
+inline std::string shelterSupplyReadout(Registry& registry) {
+    return "SHELTER SUPPLY: " + std::to_string(shelterSupplyCount(registry)) + "/" +
+           std::to_string(shelterSupplyCapacity(registry));
+}
+
+inline bool shelterHasStoredSupply(Registry& registry) {
+    return shelterSupplyCount(registry) > 0;
+}
+
+inline Entity firstWorkplaceBenchBuilding(Registry& registry) {
+    auto benches = registry.view<WorkplaceBenchComponent, BuildingUseComponent>();
+    for (Entity workplace : benches) {
+        if (registry.get<BuildingUseComponent>(workplace).role == MicroZoneRole::WORKPLACE) {
+            return workplace;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline bool workplaceBenchStocked(Registry& registry) {
+    const Entity workplace = firstWorkplaceBenchBuilding(registry);
+    if (workplace == MAX_ENTITIES) return false;
+    return registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::STOCKED;
+}
+
+inline bool workplaceBenchOutputReady(Registry& registry) {
+    const Entity workplace = firstWorkplaceBenchBuilding(registry);
+    if (workplace == MAX_ENTITIES) return false;
+    return registry.get<WorkplaceBenchComponent>(workplace).state ==
+           WorkplaceBenchState::OUTPUT_READY;
+}
+
+inline std::string workplaceBenchReadout(Registry& registry) {
+    const Entity workplace = firstWorkplaceBenchBuilding(registry);
+    if (workplace == MAX_ENTITIES) return "WORK BENCH: EMPTY";
+
+    switch (registry.get<WorkplaceBenchComponent>(workplace).state) {
+        case WorkplaceBenchState::EMPTY: return "WORK BENCH: EMPTY";
+        case WorkplaceBenchState::STOCKED: return "WORK BENCH: STOCKED";
+        case WorkplaceBenchState::OUTPUT_READY: return "WORK BENCH: OUTPUT READY";
+    }
+    return "WORK BENCH: EMPTY";
+}
+
+inline const char* workplaceBenchStateSaveName(WorkplaceBenchState state) {
+    switch (state) {
+        case WorkplaceBenchState::EMPTY: return "EMPTY";
+        case WorkplaceBenchState::STOCKED: return "STOCKED";
+        case WorkplaceBenchState::OUTPUT_READY: return "OUTPUT_READY";
+    }
+    return "EMPTY";
+}
+
+inline bool workplaceBenchStateFromSaveName(const std::string& name,
+                                            WorkplaceBenchState& state) {
+    if (name == "EMPTY") {
+        state = WorkplaceBenchState::EMPTY;
+        return true;
+    }
+    if (name == "STOCKED") {
+        state = WorkplaceBenchState::STOCKED;
+        return true;
+    }
+    if (name == "OUTPUT_READY") {
+        state = WorkplaceBenchState::OUTPUT_READY;
+        return true;
+    }
+    return false;
+}
+
+inline Entity firstBuildingImprovementBuilding(Registry& registry) {
+    auto buildings = registry.view<BuildingImprovementComponent, BuildingUseComponent>();
+    for (Entity building : buildings) {
+        if (registry.get<BuildingUseComponent>(building).role == MicroZoneRole::HOUSING) {
+            return building;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline bool buildingImproved(Registry& registry) {
+    const Entity building = firstBuildingImprovementBuilding(registry);
+    if (building == MAX_ENTITIES) return false;
+    return registry.get<BuildingImprovementComponent>(building).improved;
+}
+
+inline std::string buildingImprovementReadout(Registry& registry) {
+    return std::string("BUILDING IMPROVED: ") + (buildingImproved(registry) ? "YES" : "NO");
+}
+
+inline std::string housingInteriorReadout(Registry& registry) {
+    return shelterSupplyReadout(registry) + "; " + buildingImprovementReadout(registry);
+}
+
+inline std::string routeSignpostReadout(Registry& registry, Entity marker) {
+    if (!registry.alive(marker) || !registry.has<RouteSignpostComponent>(marker)) {
+        return "TO UNKNOWN";
+    }
+    return std::string("TO ") +
+           roleDisplayName(registry.get<RouteSignpostComponent>(marker).target_role);
+}
+
+inline bool carryableObjectUnavailableFromSupply(Registry& registry) {
+    return shelterHasStoredSupply(registry) ||
+           workplaceBenchStocked(registry) ||
+           workplaceBenchOutputReady(registry);
+}
+
+inline bool workerReturningToSupply(Registry& registry, Entity worker);
+
+inline std::string workerCarryReadout(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker) ||
+        registry.get<FixedActorComponent>(worker).carried_object == MAX_ENTITIES) {
+        if (workerReturningToSupply(registry, worker)) {
+            return std::string("WORKER ROUTE: RETURNING TO SUPPLY; ") +
+                   workplaceBenchReadout(registry);
+        }
+        if (workplaceBenchStocked(registry) || workplaceBenchOutputReady(registry)) {
+            return std::string("WORKER CARRYING: NONE; ") + workplaceBenchReadout(registry);
+        }
+        return "WORKER CARRYING: NONE";
+    }
+    return std::string("WORKER CARRYING: ") +
+           carryableObjectLabel(registry, registry.get<FixedActorComponent>(worker).carried_object);
+}
+
+inline bool workerCarryingSupplyObject(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+
+    const Entity object = registry.get<FixedActorComponent>(worker).carried_object;
+    return object != MAX_ENTITIES &&
+           registry.alive(object) &&
+           carryableObjectIsKind(registry, object, ItemKind::SUPPLY);
+}
+
+inline bool workerCarryingPartObject(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+
+    const Entity object = registry.get<FixedActorComponent>(worker).carried_object;
+    return object != MAX_ENTITIES &&
+           registry.alive(object) &&
+           carryableObjectIsKind(registry, object, ItemKind::PART);
+}
+
+inline void refreshWorkerCarryVisual(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker) ||
+        !registry.has<GlyphComponent>(worker)) {
+        return;
+    }
+
+    auto& glyph = registry.get<GlyphComponent>(worker);
+    if (workerCarryingSupplyObject(registry, worker)) {
+        glyph.chars = "A";
+        glyph.r = static_cast<uint8_t>(255);
+        glyph.g = static_cast<uint8_t>(205);
+        glyph.b = static_cast<uint8_t>(90);
+        glyph.a = static_cast<uint8_t>(255);
+        glyph.scale = 1.12f;
+        return;
+    }
+
+    if (workerCarryingPartObject(registry, worker)) {
+        glyph.chars = "P";
+        glyph.r = static_cast<uint8_t>(170);
+        glyph.g = static_cast<uint8_t>(220);
+        glyph.b = static_cast<uint8_t>(255);
+        glyph.a = static_cast<uint8_t>(255);
+        glyph.scale = 1.12f;
+        return;
+    }
+
+    glyph.chars = "a";
+    glyph.r = static_cast<uint8_t>(245);
+    glyph.g = static_cast<uint8_t>(235);
+    glyph.b = static_cast<uint8_t>(130);
+    glyph.a = static_cast<uint8_t>(255);
+    glyph.scale = 1.0f;
+}
+
+inline Entity pathEndpointWithRole(Registry& registry, Entity path_entity, MicroZoneRole role) {
+    if (!registry.alive(path_entity) || !registry.has<PathComponent>(path_entity)) {
+        return MAX_ENTITIES;
+    }
+
+    const auto& path = registry.get<PathComponent>(path_entity);
+    if (registry.alive(path.from) &&
+        registry.has<BuildingUseComponent>(path.from) &&
+        registry.get<BuildingUseComponent>(path.from).role == role) {
+        return path.from;
+    }
+    if (registry.alive(path.to) &&
+        registry.has<BuildingUseComponent>(path.to) &&
+        registry.get<BuildingUseComponent>(path.to).role == role) {
+        return path.to;
+    }
+    return MAX_ENTITIES;
+}
+
+inline bool workerAtEndpointRole(Registry& registry, Entity worker, MicroZoneRole role) {
+    if (!registry.alive(worker) ||
+        !registry.has<FixedActorComponent>(worker) ||
+        !registry.has<TransformComponent>(worker)) {
+        return false;
+    }
+
+    const auto& worker_component = registry.get<FixedActorComponent>(worker);
+    if (worker_component.kind != FixedActorKind::WORKER ||
+        !registry.alive(worker_component.path_entity) ||
+        !registry.has<PathComponent>(worker_component.path_entity)) {
+        return false;
+    }
+
+    constexpr float endpoint_epsilon = 0.001f;
+    const bool at_endpoint = worker_component.route_t <= endpoint_epsilon ||
+                             worker_component.route_t >= 1.0f - endpoint_epsilon;
+    if (!at_endpoint) {
+        return false;
+    }
+
+    const Entity endpoint = pathEndpointAtRouteT(registry,
+                                                 worker_component.path_entity,
+                                                 worker_component.route_t);
+    return endpoint != MAX_ENTITIES &&
+           registry.has<BuildingUseComponent>(endpoint) &&
+           registry.get<BuildingUseComponent>(endpoint).role == role;
+}
+
+inline bool workerAtSupplyEndpoint(Registry& registry, Entity worker) {
+    return workerAtEndpointRole(registry, worker, MicroZoneRole::SUPPLY);
+}
+
+inline bool workerAtWorkplaceEndpoint(Registry& registry, Entity worker) {
+    return workerAtEndpointRole(registry, worker, MicroZoneRole::WORKPLACE);
+}
+
+inline bool workerAtHousingEndpoint(Registry& registry, Entity worker) {
+    return workerAtEndpointRole(registry, worker, MicroZoneRole::HOUSING);
+}
+
+inline Entity firstPedestrianPathBetweenRoles(Registry& registry,
+                                              MicroZoneRole a,
+                                              MicroZoneRole b) {
+    auto paths = registry.view<PathComponent>();
+    for (Entity path_entity : paths) {
+        const auto& path = registry.get<PathComponent>(path_entity);
+        if (path.kind != PathKind::PEDESTRIAN ||
+            !registry.alive(path.from) ||
+            !registry.alive(path.to) ||
+            !registry.has<BuildingUseComponent>(path.from) ||
+            !registry.has<BuildingUseComponent>(path.to)) {
+            continue;
+        }
+
+        const MicroZoneRole from = registry.get<BuildingUseComponent>(path.from).role;
+        const MicroZoneRole to = registry.get<BuildingUseComponent>(path.to).role;
+        if ((from == a && to == b) || (from == b && to == a)) {
+            return path_entity;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline bool workerReturningToSupply(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) ||
+        !registry.has<FixedActorComponent>(worker) ||
+        !registry.has<TransformComponent>(worker) ||
+        !workplaceBenchStocked(registry)) {
+        return false;
+    }
+
+    const auto& worker_component = registry.get<FixedActorComponent>(worker);
+    if (worker_component.kind != FixedActorKind::WORKER ||
+        worker_component.carried_object != MAX_ENTITIES ||
+        !registry.alive(worker_component.path_entity) ||
+        !registry.has<PathComponent>(worker_component.path_entity) ||
+        !registry.has<TransformComponent>(worker_component.path_entity)) {
+        return false;
+    }
+
+    const Entity workplace =
+        pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::WORKPLACE);
+    const Entity supply =
+        pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::SUPPLY);
+    if (workplace == MAX_ENTITIES || supply == MAX_ENTITIES) {
+        return false;
+    }
+
+    const float supply_t = routeTForPathEndpoint(registry, worker_component.path_entity, supply);
+    return std::fabs(worker_component.route_t - supply_t) > 0.001f;
+}
+
+inline bool routeWorkerReturningToSupply(Registry& registry, Entity worker) {
+    if (!workerReturningToSupply(registry, worker)) {
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    const Entity supply =
+        pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::SUPPLY);
+    if (supply == MAX_ENTITIES) {
+        worker_component.direction = 0.0f;
+        return false;
+    }
+
+    const float target_t =
+        routeTForPathEndpoint(registry, worker_component.path_entity, supply);
+    if (std::fabs(worker_component.route_t - target_t) <= 0.001f) {
+        worker_component.route_t = target_t;
+        worker_component.direction = 0.0f;
+        registry.get<TransformComponent>(worker) =
+            transformOnPath(registry.get<TransformComponent>(worker_component.path_entity),
+                            worker_component.route_t);
+        return true;
+    }
+
+    worker_component.direction = worker_component.route_t < target_t ? 1.0f : -1.0f;
+    return true;
+}
+
+inline size_t updateWorkerReturnRoutes(Registry& registry, float dt) {
+    size_t routed = 0;
+    auto workers = registry.view<FixedActorComponent, TransformComponent>();
+    for (Entity worker : workers) {
+        if (!routeWorkerReturningToSupply(registry, worker)) {
+            continue;
+        }
+
+        auto& worker_component = registry.get<FixedActorComponent>(worker);
+        if (worker_component.direction == 0.0f) {
+            ++routed;
+            continue;
+        }
+
+        const auto& path_transform = registry.get<TransformComponent>(worker_component.path_entity);
+        const float span = std::max(path_transform.width, path_transform.height);
+        if (span <= 0.0f) {
+            continue;
+        }
+
+        const Entity supply =
+            pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::SUPPLY);
+        const float target_t =
+            routeTForPathEndpoint(registry, worker_component.path_entity, supply);
+        worker_component.route_t += worker_component.direction *
+                                    (worker_component.speed_wu / span) * dt;
+        if (worker_component.direction > 0.0f) {
+            worker_component.route_t = std::min(worker_component.route_t, target_t);
+        } else {
+            worker_component.route_t = std::max(worker_component.route_t, target_t);
+        }
+
+        registry.get<TransformComponent>(worker) =
+            transformOnPath(path_transform, worker_component.route_t);
+        if (std::fabs(worker_component.route_t - target_t) <= 0.001f) {
+            worker_component.route_t = target_t;
+            worker_component.direction = 0.0f;
+            registry.get<TransformComponent>(worker) =
+                transformOnPath(path_transform, worker_component.route_t);
+        }
+        ++routed;
+    }
+    return routed;
+}
+
+inline Entity availableSupplyCarryableObject(Registry& registry) {
+    if (carryableObjectUnavailableFromSupply(registry)) {
+        return MAX_ENTITIES;
+    }
+
+    auto objects = registry.view<CarryableComponent, TransformComponent>();
+    for (Entity object : objects) {
+        if (!carryableObjectIsHeld(registry, object) &&
+            carryableObjectIsKind(registry, object, ItemKind::SUPPLY)) {
+            return object;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline bool playerCanTakeSupplyObject(Registry& registry, Entity player) {
+    if (!playerInsideSupplyInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
+        return false;
+    }
+
+    if (registry.get<PlayerComponent>(player).carried_object != MAX_ENTITIES) {
+        return false;
+    }
+
+    return availableSupplyCarryableObject(registry) != MAX_ENTITIES;
+}
+
+inline bool workerCanTakeSupplyObject(Registry& registry, Entity worker) {
+    if (!workerAtSupplyEndpoint(registry, worker) || !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+
+    if (registry.get<FixedActorComponent>(worker).carried_object != MAX_ENTITIES) {
+        return false;
+    }
+
+    return availableSupplyCarryableObject(registry) != MAX_ENTITIES;
+}
+
+inline bool takeSupplyObjectForWorker(Registry& registry, Entity worker) {
+    if (!workerCanTakeSupplyObject(registry, worker)) {
+        return false;
+    }
+
+    const Entity object = availableSupplyCarryableObject(registry);
+    if (object == MAX_ENTITIES) {
+        return false;
+    }
+
+    registry.get<FixedActorComponent>(worker).carried_object = object;
+    hideCarryableObject(registry, object);
+    refreshWorkerCarryVisual(registry, worker);
+    return true;
+}
+
+inline size_t updateWorkerSupplyPickups(Registry& registry) {
+    size_t picked_up = 0;
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        if (takeSupplyObjectForWorker(registry, worker)) {
+            ++picked_up;
+        }
+    }
+    return picked_up;
+}
+
+inline bool routeWorkerCarryingSupplyTowardWorkplace(Registry& registry, Entity worker) {
+    if (!workerCarryingSupplyObject(registry, worker) ||
+        !registry.has<TransformComponent>(worker)) {
+        refreshWorkerCarryVisual(registry, worker);
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    if (worker_component.kind != FixedActorKind::WORKER ||
+        !registry.alive(worker_component.path_entity) ||
+        !registry.has<PathComponent>(worker_component.path_entity) ||
+        !registry.has<TransformComponent>(worker_component.path_entity)) {
+        refreshWorkerCarryVisual(registry, worker);
+        return false;
+    }
+
+    const Entity workplace =
+        pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::WORKPLACE);
+    const Entity supply =
+        pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::SUPPLY);
+    if (workplace == MAX_ENTITIES || supply == MAX_ENTITIES) {
+        refreshWorkerCarryVisual(registry, worker);
+        return false;
+    }
+
+    const float target_t =
+        routeTForPathEndpoint(registry, worker_component.path_entity, workplace);
+    constexpr float endpoint_epsilon = 0.001f;
+    if (std::fabs(worker_component.route_t - target_t) <= endpoint_epsilon) {
+        worker_component.route_t = target_t;
+        worker_component.direction = 0.0f;
+        registry.get<TransformComponent>(worker) =
+            transformOnPath(registry.get<TransformComponent>(worker_component.path_entity),
+                            worker_component.route_t);
+        refreshWorkerCarryVisual(registry, worker);
+        return true;
+    }
+
+    worker_component.direction = worker_component.route_t < target_t ? 1.0f : -1.0f;
+    refreshWorkerCarryVisual(registry, worker);
+    return true;
+}
+
+inline size_t updateWorkerSupplyDeliveryRoutes(Registry& registry, float dt) {
+    size_t routed = 0;
+    auto workers = registry.view<FixedActorComponent, TransformComponent>();
+    for (Entity worker : workers) {
+        if (!routeWorkerCarryingSupplyTowardWorkplace(registry, worker)) {
+            continue;
+        }
+
+        auto& worker_component = registry.get<FixedActorComponent>(worker);
+        if (worker_component.direction == 0.0f) {
+            ++routed;
+            continue;
+        }
+
+        const auto& path_transform = registry.get<TransformComponent>(worker_component.path_entity);
+        const float span = std::max(path_transform.width, path_transform.height);
+        if (span <= 0.0f) {
+            continue;
+        }
+
+        const Entity workplace =
+            pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::WORKPLACE);
+        const float target_t =
+            routeTForPathEndpoint(registry, worker_component.path_entity, workplace);
+        worker_component.route_t += worker_component.direction *
+                                    (worker_component.speed_wu / span) * dt;
+        if (worker_component.direction > 0.0f) {
+            worker_component.route_t = std::min(worker_component.route_t, target_t);
+        } else {
+            worker_component.route_t = std::max(worker_component.route_t, target_t);
+        }
+
+        registry.get<TransformComponent>(worker) =
+            transformOnPath(path_transform, worker_component.route_t);
+        if (std::fabs(worker_component.route_t - target_t) <= 0.001f) {
+            worker_component.route_t = target_t;
+            worker_component.direction = 0.0f;
+            registry.get<TransformComponent>(worker) =
+                transformOnPath(path_transform, worker_component.route_t);
+        }
+        ++routed;
+    }
+    return routed;
+}
+
+inline bool workerCanStockWorkplaceBench(Registry& registry, Entity worker) {
+    if (!workerAtWorkplaceEndpoint(registry, worker) ||
+        !workerCarryingSupplyObject(registry, worker)) {
+        return false;
+    }
+
+    const auto& worker_component = registry.get<FixedActorComponent>(worker);
+    const Entity workplace = pathEndpointAtRouteT(registry,
+                                                  worker_component.path_entity,
+                                                  worker_component.route_t);
+    if (workplace == MAX_ENTITIES ||
+        !registry.has<WorkplaceBenchComponent>(workplace)) {
+        return false;
+    }
+
+    return registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::EMPTY;
+}
+
+inline bool stockWorkplaceBenchForWorker(Registry& registry, Entity worker) {
+    if (!workerCanStockWorkplaceBench(registry, worker)) {
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    const Entity workplace = pathEndpointAtRouteT(registry,
+                                                  worker_component.path_entity,
+                                                  worker_component.route_t);
+    auto& bench = registry.get<WorkplaceBenchComponent>(workplace);
+
+    bench.state = WorkplaceBenchState::STOCKED;
+    hideCarryableObject(registry, worker_component.carried_object);
+    worker_component.carried_object = MAX_ENTITIES;
+    worker_component.direction = 0.0f;
+    refreshWorkerCarryVisual(registry, worker);
+    return true;
+}
+
+inline size_t updateWorkerWorkplaceBenchDropOffs(Registry& registry) {
+    size_t stocked = 0;
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        if (stockWorkplaceBenchForWorker(registry, worker)) {
+            ++stocked;
+        }
+    }
+    return stocked;
+}
+
+inline bool workerCanWorkWorkplaceBench(Registry& registry, Entity worker) {
+    if (!workerAtWorkplaceEndpoint(registry, worker) ||
+        !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+
+    const auto& worker_component = registry.get<FixedActorComponent>(worker);
+    if (worker_component.carried_object != MAX_ENTITIES) {
+        return false;
+    }
+
+    const Entity workplace = pathEndpointAtRouteT(registry,
+                                                  worker_component.path_entity,
+                                                  worker_component.route_t);
+    if (workplace == MAX_ENTITIES ||
+        !registry.has<WorkplaceBenchComponent>(workplace)) {
+        return false;
+    }
+
+    return registry.get<WorkplaceBenchComponent>(workplace).state ==
+           WorkplaceBenchState::STOCKED;
+}
+
+inline bool workWorkplaceBenchForWorker(Registry& registry, Entity worker) {
+    if (!workerCanWorkWorkplaceBench(registry, worker)) {
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    const Entity workplace = pathEndpointAtRouteT(registry,
+                                                  worker_component.path_entity,
+                                                  worker_component.route_t);
+    registry.get<WorkplaceBenchComponent>(workplace).state =
+        WorkplaceBenchState::OUTPUT_READY;
+    worker_component.direction = 0.0f;
+    refreshWorkerCarryVisual(registry, worker);
+    return true;
+}
+
+inline size_t updateWorkerWorkplaceBenchWork(Registry& registry) {
+    size_t worked = 0;
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        if (workWorkplaceBenchForWorker(registry, worker)) {
+            ++worked;
+        }
+    }
+    return worked;
+}
+
+inline bool workerCanTakeWorkplaceOutput(Registry& registry, Entity worker) {
+    if (!workerAtWorkplaceEndpoint(registry, worker) ||
+        !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    if (worker_component.carried_object != MAX_ENTITIES) {
+        return false;
+    }
+
+    const Entity workplace = pathEndpointAtRouteT(registry,
+                                                  worker_component.path_entity,
+                                                  worker_component.route_t);
+    if (workplace == MAX_ENTITIES ||
+        !registry.has<WorkplaceBenchComponent>(workplace) ||
+        registry.get<WorkplaceBenchComponent>(workplace).state !=
+            WorkplaceBenchState::OUTPUT_READY) {
+        return false;
+    }
+
+    const Entity object = firstCarryableObject(registry);
+    return object != MAX_ENTITIES && !carryableObjectIsHeld(registry, object);
+}
+
+inline bool takeWorkplaceOutputForWorker(Registry& registry, Entity worker) {
+    if (!workerCanTakeWorkplaceOutput(registry, worker)) {
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    const Entity workplace = pathEndpointAtRouteT(registry,
+                                                  worker_component.path_entity,
+                                                  worker_component.route_t);
+    const Entity object = firstCarryableObject(registry);
+
+    registry.get<CarryableComponent>(object).kind = ItemKind::PART;
+    hideCarryableObject(registry, object);
+    worker_component.carried_object = object;
+    worker_component.direction = 0.0f;
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::EMPTY;
+    refreshWorkerCarryVisual(registry, worker);
+    return true;
+}
+
+inline size_t updateWorkerWorkplaceOutputPickups(Registry& registry) {
+    size_t picked_up = 0;
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        if (takeWorkplaceOutputForWorker(registry, worker)) {
+            ++picked_up;
+        }
+    }
+    return picked_up;
+}
+
+inline bool moveWorkerToPathEndpointRole(Registry& registry,
+                                         Entity worker,
+                                         Entity path,
+                                         MicroZoneRole endpoint_role) {
+    if (!registry.alive(worker) ||
+        !registry.has<FixedActorComponent>(worker) ||
+        !registry.has<TransformComponent>(worker) ||
+        !registry.alive(path) ||
+        !registry.has<PathComponent>(path) ||
+        !registry.has<TransformComponent>(path)) {
+        return false;
+    }
+
+    const Entity endpoint = pathEndpointWithRole(registry, path, endpoint_role);
+    if (endpoint == MAX_ENTITIES) {
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = path;
+    worker_component.route_t = routeTForPathEndpoint(registry, path, endpoint);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(path), worker_component.route_t);
+    return true;
+}
+
+inline bool routeWorkerCarryingPartTowardHousing(Registry& registry, Entity worker) {
+    if (!workerCarryingPartObject(registry, worker) ||
+        !registry.has<TransformComponent>(worker)) {
+        refreshWorkerCarryVisual(registry, worker);
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    if (worker_component.kind != FixedActorKind::WORKER ||
+        !registry.alive(worker_component.path_entity) ||
+        !registry.has<PathComponent>(worker_component.path_entity) ||
+        !registry.has<TransformComponent>(worker_component.path_entity)) {
+        refreshWorkerCarryVisual(registry, worker);
+        return false;
+    }
+
+    Entity housing =
+        pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::HOUSING);
+    if (housing == MAX_ENTITIES) {
+        const Entity housing_workplace_path =
+            firstPedestrianPathBetweenRoles(registry,
+                                            MicroZoneRole::HOUSING,
+                                            MicroZoneRole::WORKPLACE);
+        if (housing_workplace_path == MAX_ENTITIES ||
+            !workerAtWorkplaceEndpoint(registry, worker) ||
+            !moveWorkerToPathEndpointRole(registry,
+                                          worker,
+                                          housing_workplace_path,
+                                          MicroZoneRole::WORKPLACE)) {
+            refreshWorkerCarryVisual(registry, worker);
+            return false;
+        }
+        housing =
+            pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::HOUSING);
+    }
+
+    const float target_t =
+        routeTForPathEndpoint(registry, worker_component.path_entity, housing);
+    constexpr float endpoint_epsilon = 0.001f;
+    if (std::fabs(worker_component.route_t - target_t) <= endpoint_epsilon) {
+        worker_component.route_t = target_t;
+        worker_component.direction = 0.0f;
+        registry.get<TransformComponent>(worker) =
+            transformOnPath(registry.get<TransformComponent>(worker_component.path_entity),
+                            worker_component.route_t);
+        refreshWorkerCarryVisual(registry, worker);
+        return true;
+    }
+
+    worker_component.direction = worker_component.route_t < target_t ? 1.0f : -1.0f;
+    refreshWorkerCarryVisual(registry, worker);
+    return true;
+}
+
+inline size_t updateWorkerFinishedItemDeliveryRoutes(Registry& registry, float dt) {
+    size_t routed = 0;
+    auto workers = registry.view<FixedActorComponent, TransformComponent>();
+    for (Entity worker : workers) {
+        if (!routeWorkerCarryingPartTowardHousing(registry, worker)) {
+            continue;
+        }
+
+        auto& worker_component = registry.get<FixedActorComponent>(worker);
+        if (worker_component.direction == 0.0f) {
+            ++routed;
+            continue;
+        }
+
+        const auto& path_transform = registry.get<TransformComponent>(worker_component.path_entity);
+        const float span = std::max(path_transform.width, path_transform.height);
+        if (span <= 0.0f) {
+            continue;
+        }
+
+        const Entity housing =
+            pathEndpointWithRole(registry, worker_component.path_entity, MicroZoneRole::HOUSING);
+        if (housing == MAX_ENTITIES) {
+            continue;
+        }
+        const float target_t =
+            routeTForPathEndpoint(registry, worker_component.path_entity, housing);
+        worker_component.route_t += worker_component.direction *
+                                    (worker_component.speed_wu / span) * dt;
+        if (worker_component.direction > 0.0f) {
+            worker_component.route_t = std::min(worker_component.route_t, target_t);
+        } else {
+            worker_component.route_t = std::max(worker_component.route_t, target_t);
+        }
+
+        registry.get<TransformComponent>(worker) =
+            transformOnPath(path_transform, worker_component.route_t);
+        if (std::fabs(worker_component.route_t - target_t) <= 0.001f) {
+            worker_component.route_t = target_t;
+            worker_component.direction = 0.0f;
+            registry.get<TransformComponent>(worker) =
+                transformOnPath(path_transform, worker_component.route_t);
+        }
+        ++routed;
+    }
+    return routed;
+}
+
+inline bool workerCanImproveBuilding(Registry& registry, Entity worker) {
+    if (!workerAtHousingEndpoint(registry, worker) ||
+        !workerCarryingPartObject(registry, worker) ||
+        !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+
+    const auto& worker_component = registry.get<FixedActorComponent>(worker);
+    const Entity housing = pathEndpointAtRouteT(registry,
+                                                worker_component.path_entity,
+                                                worker_component.route_t);
+    if (housing == MAX_ENTITIES ||
+        !registry.has<BuildingImprovementComponent>(housing)) {
+        return false;
+    }
+
+    return !registry.get<BuildingImprovementComponent>(housing).improved;
+}
+
+inline bool improveBuildingForWorker(Registry& registry, Entity worker) {
+    if (!workerCanImproveBuilding(registry, worker)) {
+        return false;
+    }
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    const Entity housing = pathEndpointAtRouteT(registry,
+                                                worker_component.path_entity,
+                                                worker_component.route_t);
+    registry.get<BuildingImprovementComponent>(housing).improved = true;
+    hideCarryableObject(registry, worker_component.carried_object);
+    worker_component.carried_object = MAX_ENTITIES;
+    worker_component.direction = 0.0f;
+    refreshWorkerCarryVisual(registry, worker);
+    return true;
+}
+
+inline size_t updateWorkerBuildingDeliveries(Registry& registry) {
+    size_t delivered = 0;
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        if (improveBuildingForWorker(registry, worker)) {
+            ++delivered;
+        }
+    }
+    return delivered;
+}
+
+inline bool playerCanTakeNearbyCarryableObject(Registry& registry, Entity player, float range_wu) {
+    if (!registry.alive(player) ||
+        !registry.has<PlayerComponent>(player) ||
+        !registry.has<TransformComponent>(player) ||
+        playerInsideAnyBuilding(registry, player)) {
+        return false;
+    }
+
+    if (registry.get<PlayerComponent>(player).carried_object != MAX_ENTITIES) {
+        return false;
+    }
+
+    return nearestCarryableObjectInRange(registry,
+                                         registry.get<TransformComponent>(player),
+                                         range_wu) != MAX_ENTITIES;
+}
+
+inline bool takeNearbyCarryableObject(Registry& registry, Entity player, float range_wu) {
+    if (!playerCanTakeNearbyCarryableObject(registry, player, range_wu)) {
+        return false;
+    }
+
+    const Entity object = nearestCarryableObjectInRange(registry,
+                                                        registry.get<TransformComponent>(player),
+                                                        range_wu);
+    if (object == MAX_ENTITIES) {
+        return false;
+    }
+
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+    return true;
+}
+
+inline bool takeSupplyObjectFromInterior(Registry& registry, Entity player) {
+    if (!playerCanTakeSupplyObject(registry, player)) {
+        return false;
+    }
+
+    const Entity object = availableSupplyCarryableObject(registry);
+    if (object == MAX_ENTITIES) {
+        return false;
+    }
+
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+    return true;
+}
+
+inline bool playerCanStoreSupplyAtShelter(Registry& registry, Entity player) {
+    if (!playerInsideHousingInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
+        return false;
+    }
+
+    const auto& player_component = registry.get<PlayerComponent>(player);
+    if (player_component.carried_object == MAX_ENTITIES ||
+        !registry.alive(player_component.carried_object) ||
+        !registry.has<CarryableComponent>(player_component.carried_object) ||
+        !registry.has<TransformComponent>(player_component.carried_object) ||
+        !carryableObjectIsKind(registry, player_component.carried_object, ItemKind::SUPPLY)) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (!registry.has<ShelterStockComponent>(interaction.building_entity)) {
+        return false;
+    }
+
+    const auto& shelter = registry.get<ShelterStockComponent>(interaction.building_entity);
+    return shelter.current_supply < shelter.capacity;
+}
+
+inline bool storeSupplyAtShelter(Registry& registry, Entity player) {
+    if (!playerCanStoreSupplyAtShelter(registry, player)) {
+        return false;
+    }
+
+    auto& player_component = registry.get<PlayerComponent>(player);
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    auto& shelter = registry.get<ShelterStockComponent>(interaction.building_entity);
+
+    shelter.current_supply = std::min(shelter.capacity, shelter.current_supply + 1);
+    hideCarryableObject(registry, player_component.carried_object);
+    player_component.carried_object = MAX_ENTITIES;
+    return true;
+}
+
+inline bool playerCanStockWorkplaceBench(Registry& registry, Entity player) {
+    if (!playerInsideWorkplaceInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
+        return false;
+    }
+
+    const auto& player_component = registry.get<PlayerComponent>(player);
+    if (player_component.carried_object == MAX_ENTITIES ||
+        !registry.alive(player_component.carried_object) ||
+        !registry.has<CarryableComponent>(player_component.carried_object) ||
+        !registry.has<TransformComponent>(player_component.carried_object) ||
+        !carryableObjectIsKind(registry, player_component.carried_object, ItemKind::SUPPLY)) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (!registry.has<WorkplaceBenchComponent>(interaction.building_entity)) {
+        return false;
+    }
+
+    return registry.get<WorkplaceBenchComponent>(interaction.building_entity).state ==
+           WorkplaceBenchState::EMPTY;
+}
+
+inline bool stockWorkplaceBench(Registry& registry, Entity player) {
+    if (!playerCanStockWorkplaceBench(registry, player)) {
+        return false;
+    }
+
+    auto& player_component = registry.get<PlayerComponent>(player);
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    auto& bench = registry.get<WorkplaceBenchComponent>(interaction.building_entity);
+
+    bench.state = WorkplaceBenchState::STOCKED;
+    hideCarryableObject(registry, player_component.carried_object);
+    player_component.carried_object = MAX_ENTITIES;
+    return true;
+}
+
+inline bool playerCanWorkWorkplaceBench(Registry& registry, Entity player) {
+    if (!playerInsideWorkplaceInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (!registry.has<WorkplaceBenchComponent>(interaction.building_entity)) {
+        return false;
+    }
+
+    return registry.get<WorkplaceBenchComponent>(interaction.building_entity).state ==
+           WorkplaceBenchState::STOCKED;
+}
+
+inline bool workWorkplaceBench(Registry& registry, Entity player) {
+    if (!playerCanWorkWorkplaceBench(registry, player)) {
+        return false;
+    }
+
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    registry.get<WorkplaceBenchComponent>(interaction.building_entity).state =
+        WorkplaceBenchState::OUTPUT_READY;
+    return true;
+}
+
+inline bool playerCanTakeWorkplaceOutput(Registry& registry, Entity player) {
+    if (!playerInsideWorkplaceInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
+        return false;
+    }
+
+    if (registry.get<PlayerComponent>(player).carried_object != MAX_ENTITIES) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (!registry.has<WorkplaceBenchComponent>(interaction.building_entity) ||
+        registry.get<WorkplaceBenchComponent>(interaction.building_entity).state !=
+            WorkplaceBenchState::OUTPUT_READY) {
+        return false;
+    }
+
+    const Entity object = firstCarryableObject(registry);
+    return object != MAX_ENTITIES && !carryableObjectIsHeld(registry, object);
+}
+
+inline bool takeWorkplaceOutput(Registry& registry, Entity player) {
+    if (!playerCanTakeWorkplaceOutput(registry, player)) {
+        return false;
+    }
+
+    const Entity object = firstCarryableObject(registry);
+    auto& player_component = registry.get<PlayerComponent>(player);
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+
+    registry.get<CarryableComponent>(object).kind = ItemKind::PART;
+    hideCarryableObject(registry, object);
+    player_component.carried_object = object;
+    registry.get<WorkplaceBenchComponent>(interaction.building_entity).state =
+        WorkplaceBenchState::EMPTY;
+    return true;
+}
+
+inline bool playerCanImproveBuilding(Registry& registry, Entity player) {
+    if (!playerInsideHousingInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
+        return false;
+    }
+
+    const auto& player_component = registry.get<PlayerComponent>(player);
+    if (player_component.carried_object == MAX_ENTITIES ||
+        !registry.alive(player_component.carried_object) ||
+        !registry.has<CarryableComponent>(player_component.carried_object) ||
+        !carryableObjectIsKind(registry, player_component.carried_object, ItemKind::PART)) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (!registry.has<BuildingImprovementComponent>(interaction.building_entity)) {
+        return false;
+    }
+
+    return !registry.get<BuildingImprovementComponent>(interaction.building_entity).improved;
+}
+
+inline bool improveBuilding(Registry& registry, Entity player) {
+    if (!playerCanImproveBuilding(registry, player)) {
+        return false;
+    }
+
+    auto& player_component = registry.get<PlayerComponent>(player);
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    registry.get<BuildingImprovementComponent>(interaction.building_entity).improved = true;
+    hideCarryableObject(registry, player_component.carried_object);
+    player_component.carried_object = MAX_ENTITIES;
+    return true;
+}
+
 inline bool playerCanInteractWithHousing(Registry& registry,
                                          const TransformComponent& player_transform,
                                          float range_wu) {
@@ -413,6 +1606,16 @@ inline InspectionTarget nearestInspectionTargetInRange(Registry& registry,
             nearest_distance = distance;
             target.entity = path;
             target.type = InspectionTargetType::PEDESTRIAN_PATH;
+        }
+    }
+
+    auto signposts = registry.view<RouteSignpostComponent, TransformComponent>();
+    for (Entity marker : signposts) {
+        const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(marker));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            target.entity = marker;
+            target.type = InspectionTargetType::ROUTE_SIGNPOST;
         }
     }
 

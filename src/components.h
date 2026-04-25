@@ -28,6 +28,7 @@ enum class InspectionTargetType {
     WORKPLACE,
     SUPPLY,
     PEDESTRIAN_PATH,
+    ROUTE_SIGNPOST,
     WORKER,
     HOUSING_INTERIOR,
     WORKPLACE_INTERIOR,
@@ -38,6 +39,39 @@ enum class InspectionTargetType {
 enum class FixedActorKind {
     WORKER
 };
+
+enum class ItemKind {
+    SUPPLY,
+    PART
+};
+
+inline const char* itemKindDisplayName(ItemKind kind) {
+    switch (kind) {
+        case ItemKind::SUPPLY: return "SUPPLY";
+        case ItemKind::PART: return "PART";
+    }
+    return "UNKNOWN";
+}
+
+inline const char* itemKindSaveName(ItemKind kind) {
+    switch (kind) {
+        case ItemKind::SUPPLY: return "SUPPLY";
+        case ItemKind::PART: return "PART";
+    }
+    return "UNKNOWN";
+}
+
+inline bool itemKindFromSaveName(const std::string& name, ItemKind& kind) {
+    if (name == "SUPPLY") {
+        kind = ItemKind::SUPPLY;
+        return true;
+    }
+    if (name == "PART") {
+        kind = ItemKind::PART;
+        return true;
+    }
+    return false;
+}
 
 enum class Facing {
     UP,
@@ -79,7 +113,26 @@ struct PlayerComponent {
 };
 
 struct CarryableComponent {
-    std::string name = "SCRAP METAL";
+    ItemKind kind = ItemKind::SUPPLY;
+};
+
+struct ShelterStockComponent {
+    int current_supply = 0;
+    int capacity = 1;
+};
+
+struct BuildingImprovementComponent {
+    bool improved = false;
+};
+
+enum class WorkplaceBenchState {
+    EMPTY,
+    STOCKED,
+    OUTPUT_READY
+};
+
+struct WorkplaceBenchComponent {
+    WorkplaceBenchState state = WorkplaceBenchState::EMPTY;
 };
 
 struct BuildingInteractionComponent {
@@ -99,6 +152,7 @@ struct InspectionComponent {
 struct FixedActorComponent {
     FixedActorKind kind = FixedActorKind::WORKER;
     Entity path_entity = MAX_ENTITIES;
+    Entity carried_object = MAX_ENTITIES;
     float route_t = 0.0f;
     float direction = 1.0f;
     float speed_wu = 24.0f;
@@ -158,4 +212,10 @@ struct PathComponent {
 
 struct PathStateComponent {
     PathState state = PathState::LIT;
+};
+
+struct RouteSignpostComponent {
+    Entity path_entity = MAX_ENTITIES;
+    Entity endpoint_entity = MAX_ENTITIES;
+    MicroZoneRole target_role = MicroZoneRole::HOUSING;
 };

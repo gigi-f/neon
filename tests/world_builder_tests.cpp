@@ -1,9 +1,45 @@
 #include <cassert>
+#include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <string>
 #include "fixed_actor_system.h"
 #include "infrastructure_solver.h"
 #include "interior.h"
+#include "save_state.h"
 #include "world_builder.h"
+
+static bool closeTo(float a, float b) {
+    return std::fabs(a - b) < 0.001f;
+}
+
+static Entity firstPathBetweenRoles(Registry& registry, MicroZoneRole from_role, MicroZoneRole to_role) {
+    auto paths = registry.view<PathComponent>();
+    for (Entity path_entity : paths) {
+        const auto& path = registry.get<PathComponent>(path_entity);
+        if (path.kind != PathKind::PEDESTRIAN ||
+            !registry.alive(path.from) ||
+            !registry.alive(path.to) ||
+            !registry.has<BuildingUseComponent>(path.from) ||
+            !registry.has<BuildingUseComponent>(path.to)) {
+            continue;
+        }
+
+        const auto from = registry.get<BuildingUseComponent>(path.from).role;
+        const auto to = registry.get<BuildingUseComponent>(path.to).role;
+        if ((from == from_role && to == to_role) ||
+            (from == to_role && to == from_role)) {
+            return path_entity;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+static Entity routeSignpostTargetEntity(Registry& registry, Entity marker) {
+    const auto& signpost = registry.get<RouteSignpostComponent>(marker);
+    const auto& path = registry.get<PathComponent>(signpost.path_entity);
+    return path.from == signpost.endpoint_entity ? path.to : path.from;
+}
 
 static void testBuildWorldCreatesOnlyHousingBaseline() {
     Registry registry;
@@ -143,6 +179,7 @@ static void testPedestrianPathRequiresHousingAndWorkplace() {
     assert(deriveInfrastructure(registry_without_workplace, housing_only) == 0);
     assert(registry_without_workplace.view<PathComponent>().empty());
     assert(registry_without_workplace.view<PathStateComponent>().empty());
+    assert(registry_without_workplace.view<RouteSignpostComponent>().empty());
 
     Registry registry_with_workplace;
     WorldConfig connected = makeSandboxConfig();
@@ -154,6 +191,8 @@ static void testPedestrianPathRequiresHousingAndWorkplace() {
     auto paths = registry_with_workplace.view<PathComponent, TransformComponent, GlyphComponent>();
     assert(paths.size() == 1);
     const auto& path = registry_with_workplace.get<PathComponent>(paths.front());
+    auto signposts = registry_with_workplace.view<RouteSignpostComponent, TransformComponent, GlyphComponent>();
+    assert(signposts.size() == 2);
     assert(path.kind == PathKind::PEDESTRIAN);
     assert(registry_with_workplace.has<PathStateComponent>(paths.front()));
     assert(registry_with_workplace.get<PathStateComponent>(paths.front()).state == PathState::LIT);
@@ -164,9 +203,33 @@ static void testPedestrianPathRequiresHousingAndWorkplace() {
     assert(registry_with_workplace.get<BuildingUseComponent>(path.from).role == MicroZoneRole::HOUSING);
     assert(registry_with_workplace.get<BuildingUseComponent>(path.to).role == MicroZoneRole::WORKPLACE);
     assert(!registry_with_workplace.has<SolidComponent>(paths.front()));
+    bool found_to_housing = false;
+    bool found_to_workplace = false;
+    for (Entity marker : signposts) {
+        const auto& signpost = registry_with_workplace.get<RouteSignpostComponent>(marker);
+        assert(signpost.path_entity == paths.front());
+        assert(registry_with_workplace.alive(signpost.endpoint_entity));
+        assert(!registry_with_workplace.has<SolidComponent>(marker));
+        assert(!transformOverlapsSolid(registry_with_workplace,
+                                       registry_with_workplace.get<TransformComponent>(marker),
+                                       marker));
+        const Entity target = routeSignpostTargetEntity(registry_with_workplace, marker);
+        assert(target != MAX_ENTITIES);
+        const char expected_glyph = routeSignpostGlyphForTarget(
+            registry_with_workplace.get<TransformComponent>(marker),
+            registry_with_workplace.get<TransformComponent>(target));
+        assert(registry_with_workplace.get<GlyphComponent>(marker).chars ==
+               std::string(1, expected_glyph));
+        const std::string readout = routeSignpostReadout(registry_with_workplace, marker);
+        if (readout == "TO HOUSING") found_to_housing = true;
+        if (readout == "TO WORKPLACE") found_to_workplace = true;
+    }
+    assert(found_to_housing);
+    assert(found_to_workplace);
     assert(deriveInfrastructure(registry_with_workplace, connected) == 0);
     assert(registry_with_workplace.view<PathComponent>().size() == 1);
     assert(registry_with_workplace.view<PathStateComponent>().size() == 1);
+    assert(registry_with_workplace.view<RouteSignpostComponent>().size() == 2);
 }
 
 static void testSupplyPathRequiresConfiguredSupply() {
@@ -176,6 +239,7 @@ static void testSupplyPathRequiresConfiguredSupply() {
 
     assert(derivePedestrianPaths(without_supply, kWorkplaceToSupplyPedestrianAccess) == 0);
     assert(without_supply.view<PathComponent>().empty());
+    assert(without_supply.view<RouteSignpostComponent>().empty());
 
     Registry with_supply;
     WorldConfig supply_config = makeSandboxConfig();
@@ -188,6 +252,8 @@ static void testSupplyPathRequiresConfiguredSupply() {
     assert(deriveInfrastructure(with_supply, supply_config) == 2);
     auto paths = with_supply.view<PathComponent, TransformComponent, GlyphComponent>();
     assert(paths.size() == 2);
+    auto signposts = with_supply.view<RouteSignpostComponent, TransformComponent, GlyphComponent>();
+    assert(signposts.size() == 4);
     bool found_workplace_supply = false;
     for (Entity path_entity : paths) {
         const auto& path = with_supply.get<PathComponent>(path_entity);
@@ -201,8 +267,33 @@ static void testSupplyPathRequiresConfiguredSupply() {
         }
     }
     assert(found_workplace_supply);
+    bool found_to_housing = false;
+    bool found_to_workplace = false;
+    bool found_to_supply = false;
+    for (Entity marker : signposts) {
+        assert(!with_supply.has<SolidComponent>(marker));
+        assert(with_supply.alive(with_supply.get<RouteSignpostComponent>(marker).path_entity));
+        assert(with_supply.alive(with_supply.get<RouteSignpostComponent>(marker).endpoint_entity));
+        assert(!transformOverlapsSolid(with_supply,
+                                       with_supply.get<TransformComponent>(marker),
+                                       marker));
+        const Entity target = routeSignpostTargetEntity(with_supply, marker);
+        assert(target != MAX_ENTITIES);
+        const char expected_glyph = routeSignpostGlyphForTarget(
+            with_supply.get<TransformComponent>(marker),
+            with_supply.get<TransformComponent>(target));
+        assert(with_supply.get<GlyphComponent>(marker).chars == std::string(1, expected_glyph));
+        const std::string readout = routeSignpostReadout(with_supply, marker);
+        if (readout == "TO HOUSING") found_to_housing = true;
+        if (readout == "TO WORKPLACE") found_to_workplace = true;
+        if (readout == "TO SUPPLY") found_to_supply = true;
+    }
+    assert(found_to_housing);
+    assert(found_to_workplace);
+    assert(found_to_supply);
     assert(deriveInfrastructure(with_supply, supply_config) == 0);
     assert(with_supply.view<PathComponent>().size() == 2);
+    assert(with_supply.view<RouteSignpostComponent>().size() == 4);
 }
 
 static void testValidationRejectsBuildingOutsideMicroZone() {
@@ -353,6 +444,25 @@ static void testInspectionTargetHelpers() {
     assert(nearestInspectionTargetInRange(supply_registry, supply_transform, 22.0f).type == InspectionTargetType::SUPPLY);
 }
 
+static void testRouteSignpostInspectionTarget() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    auto signposts = registry.view<RouteSignpostComponent, TransformComponent>();
+    assert(signposts.size() == 2);
+    Entity marker = signposts.front();
+    const auto& marker_transform = registry.get<TransformComponent>(marker);
+
+    const auto target = nearestInspectionTargetInRange(registry, marker_transform, 22.0f);
+    assert(target.entity == marker);
+    assert(target.type == InspectionTargetType::ROUTE_SIGNPOST);
+    assert(routeSignpostReadout(registry, marker).rfind("TO ", 0) == 0);
+}
+
 static void testWorkerInspectionRangeAndPriority() {
     Registry registry;
     WorldConfig config = makeSandboxConfig();
@@ -486,6 +596,217 @@ static void testWorkerAcknowledgementToggle() {
     registry.get<TransformComponent>(player) = far_transform;
     Entity far_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), 18.0f);
     assert(far_worker == MAX_ENTITIES);
+}
+
+static void testTinySaveRoundTripRestoresCurrentScopeState() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, 12.0f, -96.0f, 12.0f, 12.0f);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    assert(supply != MAX_ENTITIES);
+    assert(enterBuildingInterior(registry, player, supply));
+    registry.get<BuildingInteractionComponent>(player).interior_position =
+        TransformComponent{9.0f, 11.0f, 12.0f, 12.0f};
+
+    Entity object = firstCarryableObject(registry);
+    assert(object != MAX_ENTITIES);
+    registry.get<PlayerComponent>(player).carried_object = object;
+    registry.get<TransformComponent>(object) = TransformComponent{99999.0f, 99999.0f, 8.0f, 8.0f};
+
+    Entity worker = firstFixedWorker(registry);
+    assert(worker != MAX_ENTITIES);
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.route_t = 0.6f;
+    worker_component.direction = -1.0f;
+    worker_component.acknowledged = true;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(worker_component.path_entity),
+                        worker_component.route_t);
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+
+    registry.get<TransformComponent>(player) = TransformComponent{200.0f, 200.0f, 12.0f, 12.0f};
+    registry.get<BuildingInteractionComponent>(player).inside_building = false;
+    registry.get<BuildingInteractionComponent>(player).building_entity = MAX_ENTITIES;
+    registry.get<PlayerComponent>(player).carried_object = MAX_ENTITIES;
+    registry.get<TransformComponent>(object) = TransformComponent{-120.0f, -120.0f, 8.0f, 8.0f};
+    worker_component.route_t = 0.0f;
+    worker_component.direction = 1.0f;
+    worker_component.acknowledged = false;
+
+    assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
+
+    const auto& restored_player = registry.get<TransformComponent>(player);
+    assert(closeTo(restored_player.x, 12.0f));
+    assert(closeTo(restored_player.y, -96.0f));
+    const auto& restored_interaction = registry.get<BuildingInteractionComponent>(player);
+    assert(restored_interaction.inside_building);
+    assert(restored_interaction.building_entity == supply);
+    assert(restored_interaction.building_role == MicroZoneRole::SUPPLY);
+    assert(closeTo(restored_interaction.interior_position.x, 9.0f));
+    assert(closeTo(restored_interaction.interior_position.y, 11.0f));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(closeTo(registry.get<TransformComponent>(object).x, 99999.0f));
+
+    const auto& restored_worker = registry.get<FixedActorComponent>(worker);
+    assert(closeTo(restored_worker.route_t, 0.6f));
+    assert(restored_worker.direction < 0.0f);
+    assert(restored_worker.acknowledged);
+    assert(registry.alive(restored_worker.path_entity));
+}
+
+static void testTinySaveFileFailureAndRoundTrip() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, 3.0f, 4.0f, 12.0f, 12.0f);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    TinySaveState ignored;
+    assert(deserializeTinySaveState("bad save", ignored) == TinySaveStatus::INVALID_FORMAT);
+    assert(loadTinyStateFromFile(registry, player, "/tmp/neon_missing_tiny_save_file.txt") ==
+           TinySaveStatus::MISSING_FILE);
+
+    const std::string path = "/tmp/neon_tiny_save_round_trip.txt";
+    std::remove(path.c_str());
+    assert(saveTinyStateToFile(registry, player, path) == TinySaveStatus::OK);
+
+    registry.get<TransformComponent>(player) = TransformComponent{77.0f, 88.0f, 12.0f, 12.0f};
+    assert(loadTinyStateFromFile(registry, player, path) == TinySaveStatus::OK);
+    assert(closeTo(registry.get<TransformComponent>(player).x, 3.0f));
+    assert(closeTo(registry.get<TransformComponent>(player).y, 4.0f));
+
+    std::remove(path.c_str());
+}
+
+static void testTinySaveStatusTextSelection() {
+    assert(startupSaveStatusLine(false) == "NO SAVE FILE - F5 SAVE");
+    assert(startupSaveStatusLine(true) == "SAVE FILE READY - F9 LOAD");
+    assert(saveResultStatusLine(TinySaveStatus::OK) == "SAVE OK");
+    assert(saveResultStatusLine(TinySaveStatus::INVALID_WORLD) == "SAVE INVALID WORLD");
+
+    assert(loadResultStatusLine(TinySaveStatus::OK,
+                                PlayerLocationState::INSIDE_WORKPLACE,
+                                "SUPPLY") ==
+           "LOAD OK - INSIDE WORKPLACE - CARRYING SUPPLY");
+    assert(loadResultStatusLine(TinySaveStatus::OK,
+                                PlayerLocationState::NEAR_HOUSING,
+                                "") ==
+           "LOAD OK - NEAR HOUSING - CARRYING NONE");
+    assert(loadResultStatusLine(TinySaveStatus::MISSING_FILE,
+                                PlayerLocationState::OUTSIDE,
+                                "") ==
+           "LOAD MISSING FILE - F5 SAVE FIRST");
+    assert(loadResultStatusLine(TinySaveStatus::INVALID_FORMAT,
+                                PlayerLocationState::OUTSIDE,
+                                "") ==
+           "LOAD INVALID FORMAT");
+
+    const std::string path = "/tmp/neon_tiny_save_status_exists.txt";
+    std::remove(path.c_str());
+    assert(!tinySaveFileExists(path));
+    {
+        std::ofstream out(path);
+        out << "present";
+    }
+    assert(tinySaveFileExists(path));
+    std::remove(path.c_str());
+}
+
+static void testCarryableItemKindLabelsAndSaveRoundTrip() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity object = firstCarryableObject(registry);
+    assert(object != MAX_ENTITIES);
+    assert(registry.get<CarryableComponent>(object).kind == ItemKind::SUPPLY);
+    assert(std::string(carryableObjectLabel(registry, object)) == "SUPPLY");
+    assert(carryableObjectReadout(registry, object) == "SUPPLY: Carryable object.");
+    assert(nearestCarryableObjectInRange(registry,
+                                         registry.get<TransformComponent>(object),
+                                         18.0f) == object);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, 0.0f, 0.0f, 12.0f, 12.0f);
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+    assert(std::string(carryableObjectLabel(
+               registry,
+               registry.get<PlayerComponent>(player).carried_object)) == "SUPPLY");
+
+    registry.get<PlayerComponent>(player).carried_object = MAX_ENTITIES;
+    Entity worker = firstFixedWorker(registry);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+    assert(workerCarryReadout(registry, worker) == "WORKER CARRYING: SUPPLY");
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(serialized.find("NEON_TINY_SAVE_V6") != std::string::npos);
+    assert(serialized.find("CARRYABLE 1 SUPPLY") != std::string::npos);
+
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+    assert(parsed.carryable_kind == ItemKind::SUPPLY);
+
+    const std::string invalid_kind_save =
+        "NEON_TINY_SAVE_V6\n"
+        "PLAYER 0 0 12 12 0\n"
+        "BUILDING 0 HOUSING 0 0 0 12 12 0 0 12 12\n"
+        "CARRYABLE 1 UNKNOWN 0 0 8 8\n"
+        "SHELTER 0\n"
+        "WORKPLACE_BENCH EMPTY\n"
+        "BUILDING_IMPROVEMENT 0\n"
+        "WORKER 0 0 0 0 1 0 0\n"
+        "END\n";
+    assert(deserializeTinySaveState(invalid_kind_save, parsed) ==
+           TinySaveStatus::INVALID_FORMAT);
 }
 
 static void testInsideHousingInspectionTarget() {
@@ -652,10 +973,11 @@ static void testCarryableObjectInteractions() {
 
     auto& player_comp = registry.get<PlayerComponent>(player);
 
-    // Pick up
-    player_comp.carried_object = found_object;
-    registry.get<TransformComponent>(found_object).x = 99999.0f; // hidden
+    assert(playerCanTakeNearbyCarryableObject(registry, player, 18.0f));
+    assert(takeNearbyCarryableObject(registry, player, 18.0f));
     assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(registry.get<TransformComponent>(object).y == 99999.0f);
 
     // Enter housing
     Entity building = registry.view<BuildingComponent, TransformComponent>().front();
@@ -696,6 +1018,1538 @@ static void testCarryableObjectInteractions() {
     assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
     assert(registry.get<TransformComponent>(object).x == new_pos.x);
 }
+
+static void testNearbyCarryablePickupRequiresOutsideAndEmptyHands() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    assert(supply != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(object));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(playerCanTakeNearbyCarryableObject(registry, player, 18.0f));
+
+    registry.get<PlayerComponent>(player).carried_object = object;
+    assert(!playerCanTakeNearbyCarryableObject(registry, player, 18.0f));
+    assert(!takeNearbyCarryableObject(registry, player, 18.0f));
+
+    registry.get<PlayerComponent>(player).carried_object = MAX_ENTITIES;
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(supply);
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(!playerCanTakeNearbyCarryableObject(registry, player, 18.0f));
+    assert(!takeNearbyCarryableObject(registry, player, 18.0f));
+}
+
+static void testSupplyInteriorPickupUsesExistingObject() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    assert(supply != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(playerCanTakeSupplyObject(registry, player));
+    assert(takeSupplyObjectFromInterior(registry, player));
+
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(registry.get<TransformComponent>(object).y == 99999.0f);
+    assert(!playerCanTakeSupplyObject(registry, player));
+    assert(!takeSupplyObjectFromInterior(registry, player));
+}
+
+static void testSupplyInteriorPickupIsSupplyOnly() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    assert(housing != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(housing));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, housing));
+    assert(!playerCanTakeSupplyObject(registry, player));
+    assert(!takeSupplyObjectFromInterior(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+
+    assert(exitBuildingInterior(registry, player));
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(playerCanTakeSupplyObject(registry, player));
+}
+
+static void testSupplyInteriorPickupRequiresEmptyHands() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    assert(supply != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply));
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(!playerCanTakeSupplyObject(registry, player));
+    assert(!takeSupplyObjectFromInterior(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+}
+
+static void testShelterDropOffStoresSupplyOnlyInHousing() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(registry.has<ShelterStockComponent>(housing));
+    assert(shelterSupplyReadout(registry) == "SHELTER SUPPLY: 0/1");
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(takeSupplyObjectFromInterior(registry, player));
+    assert(!playerCanStoreSupplyAtShelter(registry, player));
+    assert(!storeSupplyAtShelter(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(workplace);
+    assert(enterBuildingInterior(registry, player, workplace));
+    assert(!playerCanStoreSupplyAtShelter(registry, player));
+    assert(!storeSupplyAtShelter(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(registry, player, housing));
+    assert(playerCanStoreSupplyAtShelter(registry, player));
+    assert(storeSupplyAtShelter(registry, player));
+
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(shelterSupplyCount(registry) == 1);
+    assert(shelterSupplyReadout(registry) == "SHELTER SUPPLY: 1/1");
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(registry.get<TransformComponent>(object).y == 99999.0f);
+    assert(!playerCanTakeSupplyObject(registry, player));
+}
+
+static void testShelterDropOffRequiresCapacityAndCarriedObject() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    assert(housing != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(housing));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, housing));
+    assert(!playerCanStoreSupplyAtShelter(registry, player));
+    assert(!storeSupplyAtShelter(registry, player));
+
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+    registry.get<ShelterStockComponent>(housing).current_supply = 1;
+    assert(!playerCanStoreSupplyAtShelter(registry, player));
+    assert(!storeSupplyAtShelter(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(shelterSupplyCount(registry) == 1);
+}
+
+static void testTinySaveRoundTripRestoresShelterStock() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    assert(housing != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(takeSupplyObjectFromInterior(registry, player));
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(registry, player, housing));
+    assert(storeSupplyAtShelter(registry, player));
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+
+    registry.get<ShelterStockComponent>(housing).current_supply = 0;
+    assert(shelterSupplyReadout(registry) == "SHELTER SUPPLY: 0/1");
+
+    assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
+    assert(shelterSupplyCount(registry) == 1);
+    assert(shelterSupplyReadout(registry) == "SHELTER SUPPLY: 1/1");
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(!playerCanTakeSupplyObject(registry, player));
+}
+
+static void testWorkplaceDeliveryStocksBenchOnlyInWorkplace() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(registry.has<WorkplaceBenchComponent>(workplace));
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: EMPTY");
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(takeSupplyObjectFromInterior(registry, player));
+    assert(!playerCanStockWorkplaceBench(registry, player));
+    assert(!stockWorkplaceBench(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(registry, player, housing));
+    assert(!playerCanStockWorkplaceBench(registry, player));
+    assert(!stockWorkplaceBench(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(workplace);
+    assert(enterBuildingInterior(registry, player, workplace));
+    assert(playerCanStockWorkplaceBench(registry, player));
+    assert(stockWorkplaceBench(registry, player));
+
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(workplaceBenchStocked(registry));
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: STOCKED");
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(registry.get<TransformComponent>(object).y == 99999.0f);
+    assert(!playerCanTakeSupplyObject(registry, player));
+}
+
+static void testWorkplaceDeliveryRequiresEmptyBenchAndCarriedObject() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    assert(workplace != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, workplace));
+    assert(!playerCanStockWorkplaceBench(registry, player));
+    assert(!stockWorkplaceBench(registry, player));
+
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::STOCKED;
+    assert(!playerCanStockWorkplaceBench(registry, player));
+    assert(!stockWorkplaceBench(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(workplaceBenchStocked(registry));
+}
+
+static void testInsideWorkplaceInspectionReflectsBenchState() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    buildWorld(registry, config);
+
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    assert(workplace != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, workplace));
+    InspectionTarget target = playerInspectionTarget(registry, player, 22.0f);
+    assert(target.entity == workplace);
+    assert(target.type == InspectionTargetType::WORKPLACE_INTERIOR);
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: EMPTY");
+
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::STOCKED;
+    target = playerInspectionTarget(registry, player, 22.0f);
+    assert(target.entity == workplace);
+    assert(target.type == InspectionTargetType::WORKPLACE_INTERIOR);
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: STOCKED");
+}
+
+static void testTinySaveRoundTripRestoresWorkplaceBench() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(takeSupplyObjectFromInterior(registry, player));
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(workplace);
+    assert(enterBuildingInterior(registry, player, workplace));
+    assert(stockWorkplaceBench(registry, player));
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::EMPTY;
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: EMPTY");
+
+    assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
+    assert(workplaceBenchStocked(registry));
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: STOCKED");
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(!playerCanTakeSupplyObject(registry, player));
+}
+
+static void testPlayerBenchWorkCreatesOutputOnlyWhenStocked() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    assert(workplace != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    registry.assign<BuildingInteractionComponent>(player);
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    assert(!playerCanWorkWorkplaceBench(registry, player));
+    assert(!workWorkplaceBench(registry, player));
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: EMPTY");
+
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::STOCKED;
+    assert(playerCanWorkWorkplaceBench(registry, player));
+    assert(workWorkplaceBench(registry, player));
+    assert(workplaceBenchOutputReady(registry));
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: OUTPUT READY");
+    assert(!playerCanWorkWorkplaceBench(registry, player));
+    assert(!workWorkplaceBench(registry, player));
+    assert(updateWorkerWorkplaceBenchDropOffs(registry) == 0);
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(serialized.find("WORKPLACE_BENCH OUTPUT_READY") != std::string::npos);
+
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::EMPTY;
+    assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: OUTPUT READY");
+}
+
+static void testPlayerTakesFinishedOutputAsSingleCarriedItem() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity object = firstCarryableObject(registry);
+    assert(workplace != MAX_ENTITIES);
+    assert(housing != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    registry.assign<BuildingInteractionComponent>(player);
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    hideCarryableObject(registry, object);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::OUTPUT_READY;
+    assert(playerCanTakeWorkplaceOutput(registry, player));
+    assert(takeWorkplaceOutput(registry, player));
+
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(registry.get<CarryableComponent>(object).kind == ItemKind::PART);
+    assert(std::string(carryableObjectLabel(registry, object)) == "PART");
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: EMPTY");
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+    assert(!playerCanTakeWorkplaceOutput(registry, player));
+    assert(!takeWorkplaceOutput(registry, player));
+    assert(!playerCanStockWorkplaceBench(registry, player));
+
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(registry, player, housing));
+    assert(!playerCanStoreSupplyAtShelter(registry, player));
+}
+
+static void testPlayerImprovesBuildingWithFinishedItemOnly() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity object = firstCarryableObject(registry);
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(buildingImprovementReadout(registry) == "BUILDING IMPROVED: NO");
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, supply));
+    assert(takeSupplyObjectFromInterior(registry, player));
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(registry, player, housing));
+    assert(!playerCanImproveBuilding(registry, player));
+    assert(!improveBuilding(registry, player));
+
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(workplace);
+    assert(enterBuildingInterior(registry, player, workplace));
+    assert(stockWorkplaceBench(registry, player));
+    assert(workWorkplaceBench(registry, player));
+    assert(takeWorkplaceOutput(registry, player));
+    assert(registry.get<CarryableComponent>(object).kind == ItemKind::PART);
+
+    assert(!playerCanImproveBuilding(registry, player));
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(registry, player, housing));
+    assert(playerCanImproveBuilding(registry, player));
+    assert(improveBuilding(registry, player));
+
+    assert(buildingImproved(registry));
+    assert(buildingImprovementReadout(registry) == "BUILDING IMPROVED: YES");
+    assert(housingInteriorReadout(registry) == "SHELTER SUPPLY: 0/1; BUILDING IMPROVED: YES");
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(shelterSupplyCount(registry) == 0);
+    assert(!playerCanImproveBuilding(registry, player));
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(serialized.find("BUILDING_IMPROVEMENT 1") != std::string::npos);
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+    registry.get<BuildingImprovementComponent>(housing).improved = false;
+    assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
+    assert(buildingImproved(registry));
+}
+
+static void testWorkerSupplyPickupRequiresSupplyEndpoint() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = 0.5f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(!workerAtSupplyEndpoint(registry, worker));
+    assert(!workerCanTakeSupplyObject(registry, worker));
+    assert(!takeSupplyObjectForWorker(registry, worker));
+    assert(worker_component.carried_object == MAX_ENTITIES);
+
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(workerAtSupplyEndpoint(registry, worker));
+    assert(workerCanTakeSupplyObject(registry, worker));
+    assert(takeSupplyObjectForWorker(registry, worker));
+
+    assert(worker_component.carried_object == object);
+    assert(workerCarryReadout(registry, worker) == "WORKER CARRYING: SUPPLY");
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(registry.get<TransformComponent>(object).y == 99999.0f);
+    assert(!workerCanTakeSupplyObject(registry, worker));
+}
+
+static void testWorkerSupplyPickupBlockedWhilePlayerCarriesObject() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply));
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    assert(workerAtSupplyEndpoint(registry, worker));
+    assert(!workerCanTakeSupplyObject(registry, worker));
+    assert(!takeSupplyObjectForWorker(registry, worker));
+    assert(worker_component.carried_object == MAX_ENTITIES);
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(workerCarryReadout(registry, worker) == "WORKER CARRYING: NONE");
+}
+
+static void testWorkerSupplyPickupBlockedByStoredSupplyStates() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    registry.get<ShelterStockComponent>(housing).current_supply = 1;
+    assert(!workerCanTakeSupplyObject(registry, worker));
+    registry.get<ShelterStockComponent>(housing).current_supply = 0;
+
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::STOCKED;
+    assert(!workerCanTakeSupplyObject(registry, worker));
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::EMPTY;
+
+    assert(workerCanTakeSupplyObject(registry, worker));
+}
+
+static void testWorkerSupplyDeliveryMovesTowardWorkplaceEndpoint() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    worker_component.direction = 1.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+
+    const float start_t = worker_component.route_t;
+    const float target_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    assert(!closeTo(start_t, target_t));
+    const float start_distance = std::fabs(start_t - target_t);
+
+    assert(updateWorkerSupplyDeliveryRoutes(registry, 1.0f) == 1);
+    assert(worker_component.path_entity == workplace_supply_path);
+    assert(std::fabs(worker_component.route_t - target_t) < start_distance);
+    assert(worker_component.carried_object != MAX_ENTITIES);
+    assert(registry.get<GlyphComponent>(worker).chars == "A");
+    assert(workerCarryReadout(registry, worker) == "WORKER CARRYING: SUPPLY");
+}
+
+static void testWorkerSupplyDeliveryStopsAtWorkplaceEndpoint() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+
+    assert(updateWorkerSupplyDeliveryRoutes(registry, 100.0f) == 1);
+    assert(worker_component.path_entity == workplace_supply_path);
+    assert(workerAtEndpointRole(registry, worker, MicroZoneRole::WORKPLACE));
+    assert(closeTo(worker_component.direction, 0.0f));
+}
+
+static void testWorkerSupplyDeliveryMissingSupplyPathNoOp() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 0;
+    config.supply_building_count = 0;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity housing_workplace_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(housing_workplace_path != MAX_ENTITIES);
+    assert(firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY) ==
+           MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = housing_workplace_path;
+    worker_component.route_t = 0.25f;
+    worker_component.direction = 1.0f;
+    worker_component.carried_object = object;
+    hideCarryableObject(registry, object);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(housing_workplace_path),
+                        worker_component.route_t);
+    const TransformComponent before_transform = registry.get<TransformComponent>(worker);
+
+    assert(updateWorkerSupplyDeliveryRoutes(registry, 10.0f) == 0);
+    assert(worker_component.path_entity == housing_workplace_path);
+    assert(closeTo(worker_component.route_t, 0.25f));
+    assert(closeTo(registry.get<TransformComponent>(worker).x, before_transform.x));
+    assert(closeTo(registry.get<TransformComponent>(worker).y, before_transform.y));
+    assert(registry.get<GlyphComponent>(worker).chars == "A");
+}
+
+static void testWorkerSupplyDeliveryPreservesFixedWorkerCount() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+    assert(registry.view<FixedActorComponent>().size() == 1);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+
+    updateWorkerSupplyDeliveryRoutes(registry, 5.0f);
+    assert(registry.view<FixedActorComponent>().size() == 1);
+}
+
+static void testWorkerBenchDropOffStocksSharedWorkplaceBench() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+    assert(registry.has<WorkplaceBenchComponent>(workplace));
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+    assert(!workerCanStockWorkplaceBench(registry, worker));
+
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(workerAtWorkplaceEndpoint(registry, worker));
+    assert(workerCanStockWorkplaceBench(registry, worker));
+    assert(stockWorkplaceBenchForWorker(registry, worker));
+
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::STOCKED);
+    assert(workplaceBenchStocked(registry));
+    assert(worker_component.carried_object == MAX_ENTITIES);
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(registry.get<TransformComponent>(object).y == 99999.0f);
+    assert(registry.get<GlyphComponent>(worker).chars == "a");
+    assert(workerReturningToSupply(registry, worker));
+    assert(workerCarryReadout(registry, worker) ==
+           "WORKER ROUTE: RETURNING TO SUPPLY; WORK BENCH: STOCKED");
+}
+
+static void testWorkerBenchDropOffRequiresWorkplaceEndpointAndEmptyBench() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+    assert(!stockWorkplaceBenchForWorker(registry, worker));
+    assert(worker_component.carried_object == object);
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::EMPTY);
+
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::STOCKED;
+    assert(!workerCanStockWorkplaceBench(registry, worker));
+    assert(!stockWorkplaceBenchForWorker(registry, worker));
+    assert(worker_component.carried_object == object);
+}
+
+static void testWorkerBenchDropOffUpdateAvoidsDuplicateObjects() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+
+    assert(updateWorkerSupplyDeliveryRoutes(registry, 100.0f) == 1);
+    assert(updateWorkerWorkplaceBenchDropOffs(registry) == 1);
+    assert(updateWorkerWorkplaceBenchDropOffs(registry) == 0);
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::STOCKED);
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+    assert(registry.view<FixedActorComponent>().size() == 1);
+    assert(worker_component.carried_object == MAX_ENTITIES);
+}
+
+static void testWorkerReturnRouteMovesBackToSupplyAfterBenchDropOff() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+    assert(updateWorkerSupplyDeliveryRoutes(registry, 100.0f) == 1);
+    assert(stockWorkplaceBenchForWorker(registry, worker));
+
+    const float workplace_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    const float supply_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    assert(closeTo(worker_component.route_t, workplace_t));
+    assert(closeTo(worker_component.direction, 0.0f));
+    assert(workerReturningToSupply(registry, worker));
+    assert(workerCarryReadout(registry, worker) ==
+           "WORKER ROUTE: RETURNING TO SUPPLY; WORK BENCH: STOCKED");
+
+    const float start_distance = std::fabs(worker_component.route_t - supply_t);
+    assert(updateWorkerReturnRoutes(registry, 1.0f) == 1);
+    assert(std::fabs(worker_component.route_t - supply_t) < start_distance);
+    assert(worker_component.carried_object == MAX_ENTITIES);
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+    assert(registry.view<FixedActorComponent>().size() == 1);
+
+    assert(updateWorkerReturnRoutes(registry, 100.0f) == 1);
+    assert(closeTo(worker_component.route_t, supply_t));
+    assert(closeTo(worker_component.direction, 0.0f));
+    assert(!workerReturningToSupply(registry, worker));
+    assert(workerCarryReadout(registry, worker) ==
+           "WORKER CARRYING: NONE; WORK BENCH: STOCKED");
+}
+
+static void testWorkerReturnRouteMissingSupplyPathNoOp() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity housing_workplace_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    assert(worker != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(housing_workplace_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = housing_workplace_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, housing_workplace_path, workplace);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(housing_workplace_path),
+                        worker_component.route_t);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::STOCKED;
+
+    const float original_t = worker_component.route_t;
+    assert(!workerReturningToSupply(registry, worker));
+    assert(!routeWorkerReturningToSupply(registry, worker));
+    assert(updateWorkerReturnRoutes(registry, 10.0f) == 0);
+    assert(closeTo(worker_component.route_t, original_t));
+    assert(closeTo(worker_component.direction, 0.0f));
+    assert(registry.view<FixedActorComponent>().size() == 1);
+}
+
+static void testTinySaveRoundTripRestoresWorkerBenchDropOff() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, 0.0f, 0.0f, 12.0f, 12.0f);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+    assert(updateWorkerSupplyDeliveryRoutes(registry, 100.0f) == 1);
+    assert(stockWorkplaceBenchForWorker(registry, worker));
+    assert(closeTo(worker_component.direction, 0.0f));
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::EMPTY;
+    worker_component.carried_object = object;
+    registry.get<TransformComponent>(object) = TransformComponent{-120.0f, -120.0f, 8.0f, 8.0f};
+
+    assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::STOCKED);
+    assert(registry.get<FixedActorComponent>(worker).carried_object == MAX_ENTITIES);
+    assert(closeTo(registry.get<FixedActorComponent>(worker).direction, 0.0f));
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(workerCarryReadout(registry, worker) ==
+           "WORKER ROUTE: RETURNING TO SUPPLY; WORK BENCH: STOCKED");
+}
+
+static void testWorkerBenchWorkCreatesSharedOutputOnlyWhenStocked() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    assert(!workerCanWorkWorkplaceBench(registry, worker));
+    assert(!workWorkplaceBenchForWorker(registry, worker));
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: EMPTY");
+
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::STOCKED;
+    assert(workerCanWorkWorkplaceBench(registry, worker));
+    assert(workWorkplaceBenchForWorker(registry, worker));
+    assert(workplaceBenchOutputReady(registry));
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: OUTPUT READY");
+    assert(workerCarryReadout(registry, worker) ==
+           "WORKER CARRYING: NONE; WORK BENCH: OUTPUT READY");
+    assert(!workerReturningToSupply(registry, worker));
+    assert(!workerCanWorkWorkplaceBench(registry, worker));
+    assert(!workWorkplaceBenchForWorker(registry, worker));
+    assert(updateWorkerWorkplaceBenchWork(registry) == 0);
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+}
+
+static void testWorkerBenchWorkRequiresWorkplaceEndpointAndEmptyHands() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = firstCarryableObject(registry);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::STOCKED;
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(!workerCanWorkWorkplaceBench(registry, worker));
+
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.carried_object = object;
+    hideCarryableObject(registry, object);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(!workerCanWorkWorkplaceBench(registry, worker));
+    assert(!workWorkplaceBenchForWorker(registry, worker));
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::STOCKED);
+}
+
+static void testWorkerTakesFinishedOutputAsSharedPart() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = firstCarryableObject(registry);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, 0.0f, 0.0f, 12.0f, 12.0f);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::OUTPUT_READY;
+
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+    assert(!workerCanTakeWorkplaceOutput(registry, worker));
+    assert(!takeWorkplaceOutputForWorker(registry, worker));
+
+    registry.get<PlayerComponent>(player).carried_object = MAX_ENTITIES;
+    assert(workerCanTakeWorkplaceOutput(registry, worker));
+    assert(takeWorkplaceOutputForWorker(registry, worker));
+    assert(worker_component.carried_object == object);
+    assert(carryableObjectIsKind(registry, object, ItemKind::PART));
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::EMPTY);
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(registry.get<GlyphComponent>(worker).chars == "P");
+    assert(workerCarryReadout(registry, worker) == "WORKER CARRYING: PART");
+    assert(!workerCanTakeWorkplaceOutput(registry, worker));
+    assert(updateWorkerWorkplaceOutputPickups(registry) == 0);
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+}
+
+static void testWorkerFinishedItemRoutesTowardHousing() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = firstCarryableObject(registry);
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    Entity housing_workplace_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+    assert(housing_workplace_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.direction = 0.0f;
+    worker_component.carried_object = object;
+    registry.get<CarryableComponent>(object).kind = ItemKind::PART;
+    hideCarryableObject(registry, object);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    assert(routeWorkerCarryingPartTowardHousing(registry, worker));
+    assert(worker_component.path_entity == housing_workplace_path);
+    const float housing_t = routeTForPathEndpoint(registry, housing_workplace_path, housing);
+    assert(std::fabs(worker_component.route_t - housing_t) > 0.001f);
+
+    const float start_distance = std::fabs(worker_component.route_t - housing_t);
+    assert(updateWorkerFinishedItemDeliveryRoutes(registry, 1.0f) == 1);
+    assert(std::fabs(worker_component.route_t - housing_t) < start_distance);
+    assert(worker_component.carried_object == object);
+
+    assert(updateWorkerFinishedItemDeliveryRoutes(registry, 100.0f) == 1);
+    assert(closeTo(worker_component.route_t, housing_t));
+    assert(closeTo(worker_component.direction, 0.0f));
+    assert(workerAtHousingEndpoint(registry, worker));
+}
+
+static void testWorkerBuildingDeliveryCompletesSharedImprovement() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = firstCarryableObject(registry);
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity housing_workplace_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(housing_workplace_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = housing_workplace_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, housing_workplace_path, workplace);
+    worker_component.direction = 0.0f;
+    worker_component.carried_object = object;
+    registry.get<CarryableComponent>(object).kind = ItemKind::PART;
+    hideCarryableObject(registry, object);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(housing_workplace_path),
+                        worker_component.route_t);
+    assert(!workerCanImproveBuilding(registry, worker));
+    assert(!improveBuildingForWorker(registry, worker));
+    assert(!buildingImproved(registry));
+
+    worker_component.route_t = routeTForPathEndpoint(registry, housing_workplace_path, housing);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(housing_workplace_path),
+                        worker_component.route_t);
+    assert(workerCanImproveBuilding(registry, worker));
+    assert(improveBuildingForWorker(registry, worker));
+    assert(buildingImproved(registry));
+    assert(buildingImprovementReadout(registry) == "BUILDING IMPROVED: YES");
+    assert(worker_component.carried_object == MAX_ENTITIES);
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(registry.get<GlyphComponent>(worker).chars == "a");
+    assert(!improveBuildingForWorker(registry, worker));
+    assert(updateWorkerBuildingDeliveries(registry) == 0);
+    assert((registry.view<CarryableComponent, TransformComponent>().size() == 1));
+    assert(registry.view<FixedActorComponent>().size() == 1);
+}
+
+static void testWorkerFullLoopCanImproveBuildingWithoutPlayerActions() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    assert(updateWorkerSupplyPickups(registry) == 1);
+    assert(updateWorkerSupplyDeliveryRoutes(registry, 100.0f) == 1);
+    assert(updateWorkerWorkplaceBenchDropOffs(registry) == 1);
+    assert(updateWorkerWorkplaceBenchWork(registry) == 1);
+    assert(updateWorkerWorkplaceOutputPickups(registry) == 1);
+    assert(updateWorkerFinishedItemDeliveryRoutes(registry, 100.0f) == 1);
+    assert(updateWorkerBuildingDeliveries(registry) == 1);
+
+    assert(buildingImproved(registry));
+    assert(workplaceBenchReadout(registry) == "WORK BENCH: EMPTY");
+    assert(worker_component.carried_object == MAX_ENTITIES);
+    assert(workerCarryReadout(registry, worker) == "WORKER CARRYING: NONE");
+}
+
+static void testTinySaveRoundTripRestoresWorkerCarriedPart() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, 0.0f, 0.0f, 12.0f, 12.0f);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = firstCarryableObject(registry);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.direction = 0.0f;
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::OUTPUT_READY;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeWorkplaceOutputForWorker(registry, worker));
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+
+    worker_component.carried_object = MAX_ENTITIES;
+    registry.get<CarryableComponent>(object).kind = ItemKind::SUPPLY;
+    registry.get<TransformComponent>(object) = TransformComponent{-120.0f, -120.0f, 8.0f, 8.0f};
+
+    assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
+    assert(registry.get<FixedActorComponent>(worker).carried_object == object);
+    assert(carryableObjectIsKind(registry, object, ItemKind::PART));
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(workerCarryReadout(registry, worker) == "WORKER CARRYING: PART");
+}
+
+static void testTinySaveRoundTripRestoresWorkerCarriedSupply() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, 0.0f, 0.0f, 12.0f, 12.0f);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+    assert(takeSupplyObjectForWorker(registry, worker));
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState parsed;
+    assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
+
+    worker_component.carried_object = MAX_ENTITIES;
+    registry.get<TransformComponent>(object) = TransformComponent{-120.0f, -120.0f, 8.0f, 8.0f};
+
+    assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
+    assert(registry.get<FixedActorComponent>(worker).carried_object == object);
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(registry.get<TransformComponent>(object).x == 99999.0f);
+    assert(workerCarryReadout(registry, worker) == "WORKER CARRYING: SUPPLY");
+}
+
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
@@ -709,6 +2563,7 @@ int main() {
     testPlayerSpawnValidationRejectsSolids();
     testBuildingInteractionRangeHelpers();
     testInspectionTargetHelpers();
+    testRouteSignpostInspectionTarget();
     testInsideHousingInspectionTarget();
     testInsideWorkplaceInspectionTarget();
     testInteriorLayoutsAreRoleSpecific();
@@ -721,6 +2576,45 @@ int main() {
     testFixedWorkerMovesOnAssignedPath();
     testFixedWorkerTransitionsAcrossConnectedPaths();
     testWorkerAcknowledgementToggle();
+    testTinySaveRoundTripRestoresCurrentScopeState();
+    testTinySaveFileFailureAndRoundTrip();
+    testTinySaveStatusTextSelection();
+    testCarryableItemKindLabelsAndSaveRoundTrip();
     testCarryableObjectInteractions();
+    testNearbyCarryablePickupRequiresOutsideAndEmptyHands();
+    testSupplyInteriorPickupUsesExistingObject();
+    testSupplyInteriorPickupIsSupplyOnly();
+    testSupplyInteriorPickupRequiresEmptyHands();
+    testShelterDropOffStoresSupplyOnlyInHousing();
+    testShelterDropOffRequiresCapacityAndCarriedObject();
+    testTinySaveRoundTripRestoresShelterStock();
+    testWorkplaceDeliveryStocksBenchOnlyInWorkplace();
+    testWorkplaceDeliveryRequiresEmptyBenchAndCarriedObject();
+    testInsideWorkplaceInspectionReflectsBenchState();
+    testTinySaveRoundTripRestoresWorkplaceBench();
+    testPlayerBenchWorkCreatesOutputOnlyWhenStocked();
+    testPlayerTakesFinishedOutputAsSingleCarriedItem();
+    testPlayerImprovesBuildingWithFinishedItemOnly();
+    testWorkerSupplyPickupRequiresSupplyEndpoint();
+    testWorkerSupplyPickupBlockedWhilePlayerCarriesObject();
+    testWorkerSupplyPickupBlockedByStoredSupplyStates();
+    testWorkerSupplyDeliveryMovesTowardWorkplaceEndpoint();
+    testWorkerSupplyDeliveryStopsAtWorkplaceEndpoint();
+    testWorkerSupplyDeliveryMissingSupplyPathNoOp();
+    testWorkerSupplyDeliveryPreservesFixedWorkerCount();
+    testWorkerBenchDropOffStocksSharedWorkplaceBench();
+    testWorkerBenchDropOffRequiresWorkplaceEndpointAndEmptyBench();
+    testWorkerBenchDropOffUpdateAvoidsDuplicateObjects();
+    testWorkerReturnRouteMovesBackToSupplyAfterBenchDropOff();
+    testWorkerReturnRouteMissingSupplyPathNoOp();
+    testTinySaveRoundTripRestoresWorkerBenchDropOff();
+    testWorkerBenchWorkCreatesSharedOutputOnlyWhenStocked();
+    testWorkerBenchWorkRequiresWorkplaceEndpointAndEmptyHands();
+    testWorkerTakesFinishedOutputAsSharedPart();
+    testWorkerFinishedItemRoutesTowardHousing();
+    testWorkerBuildingDeliveryCompletesSharedImprovement();
+    testWorkerFullLoopCanImproveBuildingWithoutPlayerActions();
+    testTinySaveRoundTripRestoresWorkerCarriedPart();
+    testTinySaveRoundTripRestoresWorkerCarriedSupply();
     return 0;
 }

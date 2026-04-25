@@ -114,7 +114,7 @@ inline Entity spawnFixedWorker(Registry& registry, Entity path_entity) {
     registry.assign<TransformComponent>(actor,
         transformOnPath(registry.get<TransformComponent>(path_entity), 0.0f));
     registry.assign<FixedActorComponent>(actor,
-        FixedActorKind::WORKER, path_entity, 0.0f, 1.0f, 24.0f);
+        FixedActorKind::WORKER, path_entity, MAX_ENTITIES, 0.0f, 1.0f, 24.0f);
     registry.assign<GlyphComponent>(actor, "a",
         static_cast<uint8_t>(245), static_cast<uint8_t>(235), static_cast<uint8_t>(130),
         static_cast<uint8_t>(255), 1.0f, true, false);
@@ -145,6 +145,10 @@ inline void updateFixedActors(Registry& registry, float dt) {
     auto actors = registry.view<FixedActorComponent, TransformComponent>();
     for (Entity actor : actors) {
         auto& component = registry.get<FixedActorComponent>(actor);
+        if (component.kind == FixedActorKind::WORKER &&
+            component.carried_object != MAX_ENTITIES) {
+            continue;
+        }
         if (!registry.alive(component.path_entity) ||
             !registry.has<TransformComponent>(component.path_entity)) {
             continue;

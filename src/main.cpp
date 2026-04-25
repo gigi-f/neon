@@ -11,6 +11,7 @@
 #include "fixed_actor_system.h"
 #include "infrastructure_solver.h"
 #include "interior.h"
+#include "save_state.h"
 #include "stb_image.h"
 
 static constexpr int FONT_GLYPH_W = 16;
@@ -19,6 +20,7 @@ static constexpr int FONT_COLS = 16;
 static constexpr int FONT_FIRST_CHAR = 32;
 static constexpr float BUILDING_INTERACTION_RANGE_WU = 18.0f;
 static constexpr float INSPECTION_RANGE_WU = 22.0f;
+static const char* TINY_SAVE_PATH = "neon_tiny_save.txt";
 
 static SDL_Texture* loadFontTexture(SDL_Renderer* renderer, const char* path) {
     int w = 0, h = 0, ch = 0;
@@ -101,6 +103,17 @@ static void drawGlyphToRect(SDL_Renderer* renderer, SDL_Texture* font, char c,
     SDL_SetTextureColorMod(font, color.r, color.g, color.b);
     SDL_SetTextureAlphaMod(font, color.a);
     SDL_RenderCopy(renderer, font, &src, &dst);
+}
+
+static void drawGlyphToRectRotated(SDL_Renderer* renderer, SDL_Texture* font, char c,
+                                   const SDL_Rect& dst, SDL_Color color, double angle_degrees) {
+    if (!font || dst.w <= 0 || dst.h <= 0) return;
+    SDL_Rect src{};
+    if (!glyphSourceRect(c, src)) return;
+
+    SDL_SetTextureColorMod(font, color.r, color.g, color.b);
+    SDL_SetTextureAlphaMod(font, color.a);
+    SDL_RenderCopyEx(renderer, font, &src, &dst, angle_degrees, nullptr, SDL_FLIP_NONE);
 }
 
 static void drawText(SDL_Renderer* renderer, SDL_Texture* font, const char* text,
@@ -233,6 +246,7 @@ static const char* inspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::WORKPLACE: return "WORKPLACE";
         case InspectionTargetType::SUPPLY: return "SUPPLY";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
+        case InspectionTargetType::ROUTE_SIGNPOST: return "SIGNPOST";
         case InspectionTargetType::WORKER: return "WORKER";
         case InspectionTargetType::HOUSING_INTERIOR: return "HOUSING INTERIOR";
         case InspectionTargetType::WORKPLACE_INTERIOR: return "WORKPLACE INTERIOR";
@@ -254,6 +268,8 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "Supply cache. Visible stock point. Linked through workplace.";
         case InspectionTargetType::PEDESTRIAN_PATH:
             return "Foot path. Non-solid access between buildings.";
+        case InspectionTargetType::ROUTE_SIGNPOST:
+            return "Route marker. Inspectable path endpoint.";
         case InspectionTargetType::WORKER:
             return "Fixed worker. Path route. Count locked at one.";
         case InspectionTargetType::HOUSING_INTERIOR:
@@ -263,7 +279,7 @@ static const char* inspectionDetail(InspectionTargetType type) {
         case InspectionTargetType::SUPPLY_INTERIOR:
             return "STOCK SHELF: Usable cache markers, no inventory system yet.";
         case InspectionTargetType::CARRYABLE_OBJECT:
-            return "SCRAP METAL: Salvageable material.";
+            return "SUPPLY: Carryable object.";
     }
     return "";
 }
@@ -274,6 +290,38 @@ static const char* inspectionDetail(Registry& registry, const InspectionComponen
         registry.has<PathStateComponent>(inspection.target_entity)) {
         return pathStateInspectionDetail(
             registry.get<PathStateComponent>(inspection.target_entity).state);
+    }
+
+    static std::string dynamic_detail;
+    if (inspection.target_type == InspectionTargetType::HOUSING_INTERIOR &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<BuildingImprovementComponent>(inspection.target_entity)) {
+        dynamic_detail = housingInteriorReadout(registry);
+        return dynamic_detail.c_str();
+    }
+    if (inspection.target_type == InspectionTargetType::WORKPLACE_INTERIOR &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<WorkplaceBenchComponent>(inspection.target_entity)) {
+        dynamic_detail = workplaceBenchReadout(registry);
+        return dynamic_detail.c_str();
+    }
+    if (inspection.target_type == InspectionTargetType::WORKER &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<FixedActorComponent>(inspection.target_entity)) {
+        dynamic_detail = workerCarryReadout(registry, inspection.target_entity);
+        return dynamic_detail.c_str();
+    }
+    if (inspection.target_type == InspectionTargetType::ROUTE_SIGNPOST &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<RouteSignpostComponent>(inspection.target_entity)) {
+        dynamic_detail = routeSignpostReadout(registry, inspection.target_entity);
+        return dynamic_detail.c_str();
+    }
+    if (inspection.target_type == InspectionTargetType::CARRYABLE_OBJECT &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<CarryableComponent>(inspection.target_entity)) {
+        dynamic_detail = carryableObjectReadout(registry, inspection.target_entity);
+        return dynamic_detail.c_str();
     }
 
     return inspectionDetail(inspection.target_type);
@@ -372,7 +420,11 @@ static void renderWorld(SDL_Renderer* renderer, SDL_Texture* font, Registry& reg
                 }
             }
         } else if (!g.chars.empty()) {
-            drawGlyphToRect(renderer, font, g.chars[0], rect, color);
+            if (registry.has<RouteSignpostComponent>(e) && g.chars[0] == 'v') {
+                drawGlyphToRectRotated(renderer, font, '^', rect, color, 180.0);
+            } else {
+                drawGlyphToRect(renderer, font, g.chars[0], rect, color);
+            }
         }
     }
 }
@@ -462,6 +514,11 @@ static void renderInterior(SDL_Renderer* renderer, SDL_Texture* font, Registry& 
         drawGlyphToRect(renderer, font, '@', player_rect,
                         SDL_Color{245, 245, 210, 255});
         const char* fixture_label = housing ? "MAT" : workplace ? "BENCH" : "STOCK";
+        if (workplace && workplaceBenchOutputReady(registry)) {
+            fixture_label = "READY";
+        } else if (housing && buildingImproved(registry)) {
+            fixture_label = "FIXED";
+        }
         const float label_fit = static_cast<float>(fixture_rect.w) /
             (std::strlen(fixture_label) * FONT_GLYPH_W);
         const float label_scale = std::clamp(label_fit * 0.82f, 0.75f, 1.15f);
@@ -545,6 +602,7 @@ int main(int, char**) {
     camera.scale = 2.0f;
 
     bool running = true;
+    std::string save_status = startupSaveStatusLine(tinySaveFileExists(TINY_SAVE_PATH));
     uint32_t last_ticks = SDL_GetTicks();
 
     while (running) {
@@ -565,18 +623,27 @@ int main(int, char**) {
                         registry.get<TransformComponent>(player_comp.carried_object) = registry.get<TransformComponent>(player);
                         player_comp.carried_object = MAX_ENTITIES;
                     }
+                } else if (playerCanTakeWorkplaceOutput(registry, player)) {
+                    takeWorkplaceOutput(registry, player);
+                } else if (playerCanTakeSupplyObject(registry, player)) {
+                    takeSupplyObjectFromInterior(registry, player);
+                } else {
+                    takeNearbyCarryableObject(registry, player, BUILDING_INTERACTION_RANGE_WU);
                 }
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_E) {
-                auto& player_comp = registry.get<PlayerComponent>(player);
                 bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
 
                 Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
-                Entity near_carryable = nearestCarryableObjectInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
 
-                if (near_carryable != MAX_ENTITIES && !inside && player_comp.carried_object == MAX_ENTITIES) {
-                    player_comp.carried_object = near_carryable;
-                    registry.get<TransformComponent>(near_carryable).x = 99999.0f; // hide
+                if (playerCanImproveBuilding(registry, player)) {
+                    improveBuilding(registry, player);
+                } else if (playerCanStoreSupplyAtShelter(registry, player)) {
+                    storeSupplyAtShelter(registry, player);
+                } else if (playerCanStockWorkplaceBench(registry, player)) {
+                    stockWorkplaceBench(registry, player);
+                } else if (playerCanWorkWorkplaceBench(registry, player)) {
+                    workWorkplaceBench(registry, player);
                 } else if (near_worker != MAX_ENTITIES && !inside) {
                     auto& actor_comp = registry.get<FixedActorComponent>(near_worker);
                     actor_comp.acknowledged = !actor_comp.acknowledged;
@@ -587,6 +654,22 @@ int main(int, char**) {
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_SPACE) {
                 performInspection(registry, player, INSPECTION_RANGE_WU);
             }
+            if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F5) {
+                const TinySaveStatus status = saveTinyStateToFile(registry, player, TINY_SAVE_PATH);
+                save_status = saveResultStatusLine(status);
+            }
+            if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F9) {
+                const TinySaveStatus status = loadTinyStateFromFile(registry, player, TINY_SAVE_PATH);
+                std::string carried_label;
+                const auto& loaded_player = registry.get<PlayerComponent>(player);
+                if (loaded_player.carried_object != MAX_ENTITIES) {
+                    carried_label = carryableObjectLabel(registry, loaded_player.carried_object);
+                }
+                save_status = loadResultStatusLine(
+                    status,
+                    playerLocationState(registry, player, BUILDING_INTERACTION_RANGE_WU),
+                    carried_label);
+            }
             if (event.type == SDL_MOUSEWHEEL && registry.has<CameraComponent>(camera_entity)) {
                 auto& c = registry.get<CameraComponent>(camera_entity);
                 c.scale = std::clamp(c.scale + event.wheel.y * 0.15f, 0.75f, 4.0f);
@@ -596,6 +679,14 @@ int main(int, char**) {
         const uint8_t* keys = SDL_GetKeyboardState(nullptr);
         updatePlayer(registry, player, dt, keys);
         updateFixedActors(registry, dt);
+        updateWorkerSupplyPickups(registry);
+        updateWorkerSupplyDeliveryRoutes(registry, dt);
+        updateWorkerWorkplaceBenchDropOffs(registry);
+        updateWorkerWorkplaceBenchWork(registry);
+        updateWorkerWorkplaceOutputPickups(registry);
+        updateWorkerFinishedItemDeliveryRoutes(registry, dt);
+        updateWorkerBuildingDeliveries(registry);
+        updateWorkerReturnRoutes(registry, dt);
 
         int screen_w = 0;
         int screen_h = 0;
@@ -617,11 +708,11 @@ int main(int, char**) {
 
         if (font) {
             SDL_Color hud{140, 230, 180, 230};
-            char line[160];
+            char line[220];
             float fps = dt > 0.0f ? 1.0f / dt : 0.0f;
             std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + SUPPLY + WORKER", fps, registry.entity_count());
             drawText(renderer, font, line, 6, 6, hud, 0.7f);
-            std::snprintf(line, sizeof(line), "WASD MOVE  SPACE INSPECT  WHEEL ZOOM  ESC QUIT  CAM:%.0f,%.0f Z:%.2f",
+            std::snprintf(line, sizeof(line), "WASD MOVE  E ACT/DOORS  F PICK/DROP  SPACE INSPECT  F5 SAVE  F9 LOAD  CAM:%.0f,%.0f Z:%.2f",
                           active_camera.x, active_camera.y, active_camera.scale);
             drawText(renderer, font, line, 6, 20, SDL_Color{110, 190, 230, 220}, 0.65f);
             const PlayerLocationState location_state =
@@ -631,16 +722,46 @@ int main(int, char**) {
             bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
             auto& player_comp = registry.get<PlayerComponent>(player);
 
-            if (player_comp.carried_object != MAX_ENTITIES) {
+            if (playerCanImproveBuilding(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E IMPROVE BUILDING  %s  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              buildingImprovementReadout(registry).c_str(),
+                              carryableObjectLabel(registry, player_comp.carried_object));
+            } else if (playerCanStoreSupplyAtShelter(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E STORE SUPPLY  %s  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              shelterSupplyReadout(registry).c_str(),
+                              carryableObjectLabel(registry, player_comp.carried_object));
+            } else if (playerCanStockWorkplaceBench(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E STOCK BENCH  %s  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              workplaceBenchReadout(registry).c_str(),
+                              carryableObjectLabel(registry, player_comp.carried_object));
+            } else if (playerCanWorkWorkplaceBench(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E WORK BENCH  %s  [CARRIED: NONE]",
+                              locationStateName(location_state),
+                              workplaceBenchReadout(registry).c_str());
+            } else if (player_comp.carried_object != MAX_ENTITIES) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  %s  F DROP %s  [CARRIED: %s]",
                               locationStateName(location_state),
                               locationPrompt(location_state),
-                              registry.get<CarryableComponent>(player_comp.carried_object).name.c_str(),
-                              registry.get<CarryableComponent>(player_comp.carried_object).name.c_str());
-            } else if (near_carryable != MAX_ENTITIES && !inside) {
-                std::snprintf(line, sizeof(line), "LOCATION:%s  E PICK UP %s  [CARRIED: NONE]",
+                              carryableObjectLabel(registry, player_comp.carried_object),
+                              carryableObjectLabel(registry, player_comp.carried_object));
+            } else if (playerCanTakeSupplyObject(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s  F TAKE %s  [CARRIED: NONE]",
                               locationStateName(location_state),
-                              registry.get<CarryableComponent>(near_carryable).name.c_str());
+                              locationPrompt(location_state),
+                              itemKindDisplayName(ItemKind::SUPPLY));
+            } else if (playerCanTakeWorkplaceOutput(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s  F TAKE %s  [CARRIED: NONE]",
+                              locationStateName(location_state),
+                              locationPrompt(location_state),
+                              itemKindDisplayName(ItemKind::PART));
+            } else if (near_carryable != MAX_ENTITIES && !inside) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s  F PICK UP %s  [CARRIED: NONE]",
+                              locationStateName(location_state),
+                              locationPrompt(location_state),
+                              carryableObjectLabel(registry, near_carryable));
             } else if (near_worker != MAX_ENTITIES && !inside) {
                 bool ack = registry.get<FixedActorComponent>(near_worker).acknowledged;
                 std::snprintf(line, sizeof(line), "LOCATION:%s  E %s  [CARRIED: NONE]",
@@ -663,6 +784,14 @@ int main(int, char**) {
                               inspectionTargetName(inspection.target_type),
                               inspectionDetail(registry, inspection));
                 drawText(renderer, font, line, 6, 62, SDL_Color{245, 230, 150, 230}, 0.65f);
+            }
+            std::snprintf(line, sizeof(line), "STATE:%s", save_status.c_str());
+            drawText(renderer, font, line, 6, 76, SDL_Color{150, 215, 245, 220}, 0.65f);
+            if (firstShelterStockBuilding(registry) != MAX_ENTITIES) {
+                drawText(renderer, font, housingInteriorReadout(registry).c_str(), 6, 90, SDL_Color{245, 215, 160, 220}, 0.65f);
+            }
+            if (firstWorkplaceBenchBuilding(registry) != MAX_ENTITIES) {
+                drawText(renderer, font, workplaceBenchReadout(registry).c_str(), 6, 104, SDL_Color{245, 185, 120, 220}, 0.65f);
             }
         }
 

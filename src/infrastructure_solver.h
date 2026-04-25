@@ -89,6 +89,71 @@ inline Entity createPedestrianPath(Registry& registry, Entity from, Entity to) {
     return path;
 }
 
+inline TransformComponent routeSignpostTransform(const TransformComponent& path,
+                                                 const TransformComponent& endpoint) {
+    constexpr float marker_size = 8.0f;
+    constexpr float marker_offset = marker_size * 0.5f + 2.0f;
+    const AabbRect endpoint_box = aabbFromTransform(endpoint);
+    const bool vertical = path.height >= path.width;
+    if (vertical) {
+        return TransformComponent{
+            path.x,
+            endpoint.y <= path.y ? endpoint_box.bottom + marker_offset
+                                  : endpoint_box.top - marker_offset,
+            marker_size,
+            marker_size
+        };
+    }
+
+    return TransformComponent{
+        endpoint.x <= path.x ? endpoint_box.right + marker_offset
+                             : endpoint_box.left - marker_offset,
+        path.y,
+        marker_size,
+        marker_size
+    };
+}
+
+inline char routeSignpostGlyphForTarget(const TransformComponent& marker,
+                                        const TransformComponent& target) {
+    const float dx = target.x - marker.x;
+    const float dy = target.y - marker.y;
+    if (std::fabs(dx) >= std::fabs(dy)) {
+        return dx < 0.0f ? '<' : '>';
+    }
+    return dy < 0.0f ? '^' : 'v';
+}
+
+inline Entity createRouteSignpost(Registry& registry,
+                                  Entity path,
+                                  Entity endpoint,
+                                  Entity target) {
+    if (!registry.alive(path) ||
+        !registry.alive(endpoint) ||
+        !registry.alive(target) ||
+        !registry.has<TransformComponent>(path) ||
+        !registry.has<TransformComponent>(endpoint) ||
+        !registry.has<TransformComponent>(target) ||
+        !registry.has<BuildingUseComponent>(target)) {
+        return MAX_ENTITIES;
+    }
+
+    Entity marker = registry.create();
+    registry.assign<TransformComponent>(marker,
+        routeSignpostTransform(registry.get<TransformComponent>(path),
+                               registry.get<TransformComponent>(endpoint)));
+    registry.assign<RouteSignpostComponent>(marker,
+        path,
+        endpoint,
+        registry.get<BuildingUseComponent>(target).role);
+    const char glyph = routeSignpostGlyphForTarget(registry.get<TransformComponent>(marker),
+                                                   registry.get<TransformComponent>(target));
+    registry.assign<GlyphComponent>(marker, std::string(1, glyph),
+        static_cast<uint8_t>(255), static_cast<uint8_t>(225), static_cast<uint8_t>(120),
+        static_cast<uint8_t>(255), 0.9f, true, false);
+    return marker;
+}
+
 inline const char* pathStateName(PathState state) {
     switch (state) {
         case PathState::LIT: return "LIT";
@@ -112,7 +177,12 @@ inline size_t derivePedestrianPaths(Registry& registry, const ConnectionSpec& sp
     if (from == MAX_ENTITIES || to == MAX_ENTITIES) return 0;
     if (pathExistsBetween(registry, from, to, spec.path_kind)) return 0;
 
-    return createPedestrianPath(registry, from, to) == MAX_ENTITIES ? 0 : 1;
+    const Entity path = createPedestrianPath(registry, from, to);
+    if (path == MAX_ENTITIES) return 0;
+
+    createRouteSignpost(registry, path, from, to);
+    createRouteSignpost(registry, path, to, from);
+    return 1;
 }
 
 inline size_t deriveInfrastructure(Registry& registry, const WorldConfig& config) {
