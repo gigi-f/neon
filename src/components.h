@@ -10,21 +10,29 @@ enum class ZoneType {
 
 enum class MicroZoneRole {
     HOUSING,
-    WORKPLACE
+    WORKPLACE,
+    SUPPLY
 };
 
 enum class PathKind {
     PEDESTRIAN
 };
 
+enum class PathState {
+    LIT
+};
+
 enum class InspectionTargetType {
     NONE,
     HOUSING,
     WORKPLACE,
+    SUPPLY,
     PEDESTRIAN_PATH,
     WORKER,
     HOUSING_INTERIOR,
-    WORKPLACE_INTERIOR
+    WORKPLACE_INTERIOR,
+    SUPPLY_INTERIOR,
+    CARRYABLE_OBJECT
 };
 
 enum class FixedActorKind {
@@ -43,7 +51,9 @@ enum class PlayerLocationState {
     NEAR_HOUSING,
     INSIDE_HOUSING,
     NEAR_WORKPLACE,
-    INSIDE_WORKPLACE
+    INSIDE_WORKPLACE,
+    NEAR_SUPPLY,
+    INSIDE_SUPPLY
 };
 
 struct TransformComponent {
@@ -65,12 +75,19 @@ struct CameraComponent {
 struct PlayerComponent {
     float speed = 90.0f;
     Facing facing = Facing::DOWN;
+    Entity carried_object = MAX_ENTITIES;
+};
+
+struct CarryableComponent {
+    std::string name = "SCRAP METAL";
 };
 
 struct BuildingInteractionComponent {
     Entity building_entity = MAX_ENTITIES;
     MicroZoneRole building_role = MicroZoneRole::HOUSING;
     bool inside_building = false;
+    TransformComponent exterior_position{};
+    TransformComponent interior_position{0.0f, 0.0f, 12.0f, 12.0f};
 };
 
 struct InspectionComponent {
@@ -137,4 +154,8 @@ struct PathComponent {
     PathKind kind = PathKind::PEDESTRIAN;
     Entity from = MAX_ENTITIES;
     Entity to = MAX_ENTITIES;
+};
+
+struct PathStateComponent {
+    PathState state = PathState::LIT;
 };

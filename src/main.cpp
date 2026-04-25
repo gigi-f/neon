@@ -10,9 +10,8 @@
 #include "ecs.h"
 #include "fixed_actor_system.h"
 #include "infrastructure_solver.h"
+#include "interior.h"
 #include "stb_image.h"
-#include "world_builder.h"
-#include "world_generation.h"
 
 static constexpr int FONT_GLYPH_W = 16;
 static constexpr int FONT_GLYPH_H = 16;
@@ -122,13 +121,8 @@ static void drawTextCentered(SDL_Renderer* renderer, SDL_Texture* font, const ch
 
 static void updatePlayer(Registry& registry, Entity player, float dt, const uint8_t* keys) {
     if (!registry.has<PlayerComponent>(player) || !registry.has<TransformComponent>(player)) return;
-    if (registry.has<BuildingInteractionComponent>(player) &&
-        registry.get<BuildingInteractionComponent>(player).inside_building) {
-        return;
-    }
 
     auto& player_component = registry.get<PlayerComponent>(player);
-    auto current = registry.get<TransformComponent>(player);
     float dx = 0.0f;
     float dy = 0.0f;
 
@@ -149,6 +143,20 @@ static void updatePlayer(Registry& registry, Entity player, float dt, const uint
     dx /= len;
     dy /= len;
 
+    if (registry.has<BuildingInteractionComponent>(player) &&
+        registry.get<BuildingInteractionComponent>(player).inside_building) {
+        auto& interaction = registry.get<BuildingInteractionComponent>(player);
+        const auto layout = interiorLayoutForRole(interaction.building_role);
+        interaction.interior_position = movedInteriorPosition(layout,
+                                                              interaction.interior_position,
+                                                              dx,
+                                                              dy,
+                                                              player_component.speed,
+                                                              dt);
+        return;
+    }
+
+    auto current = registry.get<TransformComponent>(player);
     TransformComponent proposed = current;
     proposed.x += dx * player_component.speed * dt;
     proposed.y += dy * player_component.speed * dt;
@@ -166,7 +174,7 @@ static void toggleBuildingInteraction(Registry& registry, Entity player, float r
 
     auto& interaction = registry.get<BuildingInteractionComponent>(player);
     if (interaction.inside_building) {
-        interaction.inside_building = false;
+        exitBuildingInterior(registry, player);
         return;
     }
 
@@ -174,9 +182,7 @@ static void toggleBuildingInteraction(Registry& registry, Entity player, float r
         registry.get<TransformComponent>(player),
         range_wu);
     if (nearest != MAX_ENTITIES) {
-        interaction.building_entity = nearest;
-        interaction.building_role = registry.get<BuildingUseComponent>(nearest).role;
-        interaction.inside_building = true;
+        enterBuildingInterior(registry, player, nearest);
     }
 }
 
@@ -201,6 +207,8 @@ static const char* locationStateName(PlayerLocationState state) {
         case PlayerLocationState::INSIDE_HOUSING: return "INSIDE HOUSING";
         case PlayerLocationState::NEAR_WORKPLACE: return "NEAR WORKPLACE";
         case PlayerLocationState::INSIDE_WORKPLACE: return "INSIDE WORKPLACE";
+        case PlayerLocationState::NEAR_SUPPLY: return "NEAR SUPPLY";
+        case PlayerLocationState::INSIDE_SUPPLY: return "INSIDE SUPPLY";
     }
     return "OUTSIDE";
 }
@@ -212,6 +220,8 @@ static const char* locationPrompt(PlayerLocationState state) {
         case PlayerLocationState::INSIDE_HOUSING: return "E EXIT HOUSING";
         case PlayerLocationState::NEAR_WORKPLACE: return "E ENTER WORKPLACE";
         case PlayerLocationState::INSIDE_WORKPLACE: return "E EXIT WORKPLACE";
+        case PlayerLocationState::NEAR_SUPPLY: return "E ENTER SUPPLY";
+        case PlayerLocationState::INSIDE_SUPPLY: return "E EXIT SUPPLY";
     }
     return "";
 }
@@ -221,10 +231,13 @@ static const char* inspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::NONE: return "NO TARGET";
         case InspectionTargetType::HOUSING: return "HOUSING";
         case InspectionTargetType::WORKPLACE: return "WORKPLACE";
+        case InspectionTargetType::SUPPLY: return "SUPPLY";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
         case InspectionTargetType::WORKER: return "WORKER";
         case InspectionTargetType::HOUSING_INTERIOR: return "HOUSING INTERIOR";
         case InspectionTargetType::WORKPLACE_INTERIOR: return "WORKPLACE INTERIOR";
+        case InspectionTargetType::SUPPLY_INTERIOR: return "SUPPLY INTERIOR";
+        case InspectionTargetType::CARRYABLE_OBJECT: return "CARRYABLE OBJECT";
     }
     return "NO TARGET";
 }
@@ -237,6 +250,8 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "Private shelter. Enterable. Solid exterior.";
         case InspectionTargetType::WORKPLACE:
             return "Work site. Enterable. Linked to housing.";
+        case InspectionTargetType::SUPPLY:
+            return "Supply cache. Visible stock point. Linked through workplace.";
         case InspectionTargetType::PEDESTRIAN_PATH:
             return "Foot path. Non-solid access between buildings.";
         case InspectionTargetType::WORKER:
@@ -245,8 +260,23 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "SLEEPING MAT: Tattered synthetic weave.";
         case InspectionTargetType::WORKPLACE_INTERIOR:
             return "WORK BENCH: Heavy machinery array.";
+        case InspectionTargetType::SUPPLY_INTERIOR:
+            return "STOCK SHELF: Usable cache markers, no inventory system yet.";
+        case InspectionTargetType::CARRYABLE_OBJECT:
+            return "SCRAP METAL: Salvageable material.";
     }
     return "";
+}
+
+static const char* inspectionDetail(Registry& registry, const InspectionComponent& inspection) {
+    if (inspection.target_type == InspectionTargetType::PEDESTRIAN_PATH &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<PathStateComponent>(inspection.target_entity)) {
+        return pathStateInspectionDetail(
+            registry.get<PathStateComponent>(inspection.target_entity).state);
+    }
+
+    return inspectionDetail(inspection.target_type);
 }
 
 static void updateCamera(Registry& registry, Entity camera_entity, float screen_w, float screen_h) {
@@ -292,11 +322,28 @@ static void renderWorld(SDL_Renderer* renderer, SDL_Texture* font, Registry& reg
         };
 
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        const bool lit_path = registry.has<PathStateComponent>(e) &&
+                              registry.get<PathStateComponent>(e).state == PathState::LIT;
+        if (lit_path) {
+            SDL_SetRenderDrawColor(renderer, 245, 190, 80, 70);
+            SDL_RenderFillRect(renderer, &rect);
+            SDL_SetRenderDrawColor(renderer, 255, 220, 120, 230);
+            if (rect.h >= rect.w) {
+                const int x = rect.x + rect.w / 2;
+                SDL_RenderDrawLine(renderer, x, rect.y, x, rect.y + rect.h);
+            } else {
+                const int y = rect.y + rect.h / 2;
+                SDL_RenderDrawLine(renderer, rect.x, y, rect.x + rect.w, y);
+            }
+        }
         if (!font) {
             if (registry.has<SolidComponent>(e)) {
                 SDL_SetRenderDrawColor(renderer, 26, 54, 78, 180);
                 SDL_RenderFillRect(renderer, &rect);
                 SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
+                SDL_RenderDrawRect(renderer, &rect);
+            } else if (lit_path) {
+                SDL_SetRenderDrawColor(renderer, 255, 220, 120, 255);
                 SDL_RenderDrawRect(renderer, &rect);
             } else {
                 SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 235);
@@ -330,6 +377,105 @@ static void renderWorld(SDL_Renderer* renderer, SDL_Texture* font, Registry& reg
     }
 }
 
+static SDL_Rect interiorLocalRect(const TransformComponent& t,
+                                  float room_cx,
+                                  float room_cy,
+                                  float scale) {
+    return SDL_Rect{
+        static_cast<int>(room_cx + (t.x - t.width * 0.5f) * scale),
+        static_cast<int>(room_cy + (t.y - t.height * 0.5f) * scale),
+        std::max(2, static_cast<int>(t.width * scale)),
+        std::max(2, static_cast<int>(t.height * scale))
+    };
+}
+
+static void renderInterior(SDL_Renderer* renderer, SDL_Texture* font, Registry& registry,
+                           Entity player, const CameraComponent& camera) {
+    if (!registry.alive(player) || !registry.has<BuildingInteractionComponent>(player)) {
+        return;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (!interaction.inside_building) return;
+
+    const InteriorLayout layout = interiorLayoutForRole(interaction.building_role);
+    uint8_t role_r = 255;
+    uint8_t role_g = 255;
+    uint8_t role_b = 255;
+    colorForRole(interaction.building_role, role_r, role_g, role_b);
+
+    const float hud_top = 86.0f;
+    const float usable_w = std::max(1.0f, camera.screenWidth - 120.0f);
+    const float usable_h = std::max(1.0f, camera.screenHeight - hud_top - 50.0f);
+    const float room_scale = std::max(1.0f, std::min(usable_w / layout.width,
+                                                     usable_h / layout.height) * 0.78f);
+    const float room_cx = camera.screenWidth * 0.5f;
+    const float room_cy = hud_top + usable_h * 0.5f;
+
+    const SDL_Rect room_rect{
+        static_cast<int>(room_cx - layout.width * room_scale * 0.5f),
+        static_cast<int>(room_cy - layout.height * room_scale * 0.5f),
+        static_cast<int>(layout.width * room_scale),
+        static_cast<int>(layout.height * room_scale)
+    };
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 14, 16, 22, 255);
+    SDL_RenderFillRect(renderer, &room_rect);
+
+    SDL_SetRenderDrawColor(renderer, 28, 36, 48, 190);
+    const float grid_step = 12.0f * room_scale;
+    for (float x = static_cast<float>(room_rect.x); x <= room_rect.x + room_rect.w; x += grid_step) {
+        SDL_RenderDrawLine(renderer, static_cast<int>(x), room_rect.y,
+                           static_cast<int>(x), room_rect.y + room_rect.h);
+    }
+    for (float y = static_cast<float>(room_rect.y); y <= room_rect.y + room_rect.h; y += grid_step) {
+        SDL_RenderDrawLine(renderer, room_rect.x, static_cast<int>(y),
+                           room_rect.x + room_rect.w, static_cast<int>(y));
+    }
+
+    SDL_SetRenderDrawColor(renderer, role_r, role_g, role_b, 255);
+    SDL_RenderDrawRect(renderer, &room_rect);
+
+    const bool housing = interaction.building_role == MicroZoneRole::HOUSING;
+    const bool workplace = interaction.building_role == MicroZoneRole::WORKPLACE;
+    const TransformComponent fixture = housing
+        ? TransformComponent{-24.0f, -16.0f, 34.0f, 14.0f}
+        : workplace
+            ? TransformComponent{0.0f, -20.0f, 56.0f, 18.0f}
+            : TransformComponent{0.0f, -18.0f, 48.0f, 16.0f};
+    SDL_Rect fixture_rect = interiorLocalRect(fixture, room_cx, room_cy, room_scale);
+    SDL_SetRenderDrawColor(renderer,
+                           housing ? 64 : workplace ? 130 : 42,
+                           housing ? 112 : workplace ? 94 : 120,
+                           housing ? 180 : workplace ? 42 : 72,
+                           210);
+    SDL_RenderFillRect(renderer, &fixture_rect);
+    SDL_SetRenderDrawColor(renderer, role_r, role_g, role_b, 230);
+    SDL_RenderDrawRect(renderer, &fixture_rect);
+
+    const SDL_Rect player_rect = interiorLocalRect(interaction.interior_position,
+                                                   room_cx,
+                                                   room_cy,
+                                                   room_scale);
+    if (font) {
+        drawGlyphToRect(renderer, font, '@', player_rect,
+                        SDL_Color{245, 245, 210, 255});
+        const char* fixture_label = housing ? "MAT" : workplace ? "BENCH" : "STOCK";
+        const float label_fit = static_cast<float>(fixture_rect.w) /
+            (std::strlen(fixture_label) * FONT_GLYPH_W);
+        const float label_scale = std::clamp(label_fit * 0.82f, 0.75f, 1.15f);
+        drawTextCentered(renderer, font, fixture_label,
+                         fixture_rect.x + fixture_rect.w / 2,
+                         fixture_rect.y + fixture_rect.h / 2,
+                         SDL_Color{245, 245, 210, 220},
+                         label_scale);
+    } else {
+        SDL_SetRenderDrawColor(renderer, 245, 245, 210, 255);
+        SDL_RenderFillRect(renderer, &player_rect);
+    }
+}
+
 int main(int, char**) {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
@@ -360,7 +506,10 @@ int main(int, char**) {
     WorldConfig world_config = makeSandboxConfig();
     world_config.workplace_micro_zone_count = 1;
     world_config.workplace_building_count = 1;
+    world_config.supply_micro_zone_count = 1;
+    world_config.supply_building_count = 1;
     world_config.fixed_worker_count = 1;
+    world_config.carryable_object_count = 1;
     buildWorld(registry, world_config);
     if (!validateWorld(registry, world_config)) {
         std::cerr << "Generated world validation failed during startup." << std::endl;
@@ -407,10 +556,28 @@ int main(int, char**) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) running = false;
-            if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_E) {
-                Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
+            if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F) {
+                auto& player_comp = registry.get<PlayerComponent>(player);
                 bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
-                if (near_worker != MAX_ENTITIES && !inside) {
+
+                if (player_comp.carried_object != MAX_ENTITIES) {
+                    if (!inside && !transformOverlapsSolid(registry, registry.get<TransformComponent>(player))) {
+                        registry.get<TransformComponent>(player_comp.carried_object) = registry.get<TransformComponent>(player);
+                        player_comp.carried_object = MAX_ENTITIES;
+                    }
+                }
+            }
+            if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_E) {
+                auto& player_comp = registry.get<PlayerComponent>(player);
+                bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
+
+                Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
+                Entity near_carryable = nearestCarryableObjectInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
+
+                if (near_carryable != MAX_ENTITIES && !inside && player_comp.carried_object == MAX_ENTITIES) {
+                    player_comp.carried_object = near_carryable;
+                    registry.get<TransformComponent>(near_carryable).x = 99999.0f; // hide
+                } else if (near_worker != MAX_ENTITIES && !inside) {
                     auto& actor_comp = registry.get<FixedActorComponent>(near_worker);
                     actor_comp.acknowledged = !actor_comp.acknowledged;
                 } else {
@@ -439,13 +606,20 @@ int main(int, char**) {
         SDL_SetRenderDrawColor(renderer, 10, 12, 16, 255);
         SDL_RenderClear(renderer);
 
-        renderWorld(renderer, font, registry, active_camera);
+        const bool inside_render =
+            registry.has<BuildingInteractionComponent>(player) &&
+            registry.get<BuildingInteractionComponent>(player).inside_building;
+        if (inside_render) {
+            renderInterior(renderer, font, registry, player, active_camera);
+        } else {
+            renderWorld(renderer, font, registry, active_camera);
+        }
 
         if (font) {
             SDL_Color hud{140, 230, 180, 230};
             char line[160];
             float fps = dt > 0.0f ? 1.0f / dt : 0.0f;
-            std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + WORKER", fps, registry.entity_count());
+            std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + SUPPLY + WORKER", fps, registry.entity_count());
             drawText(renderer, font, line, 6, 6, hud, 0.7f);
             std::snprintf(line, sizeof(line), "WASD MOVE  SPACE INSPECT  WHEEL ZOOM  ESC QUIT  CAM:%.0f,%.0f Z:%.2f",
                           active_camera.x, active_camera.y, active_camera.scale);
@@ -453,15 +627,27 @@ int main(int, char**) {
             const PlayerLocationState location_state =
                 playerLocationState(registry, player, BUILDING_INTERACTION_RANGE_WU);
             Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
+            Entity near_carryable = nearestCarryableObjectInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
             bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
-            
-            if (near_worker != MAX_ENTITIES && !inside) {
+            auto& player_comp = registry.get<PlayerComponent>(player);
+
+            if (player_comp.carried_object != MAX_ENTITIES) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s  F DROP %s  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              locationPrompt(location_state),
+                              registry.get<CarryableComponent>(player_comp.carried_object).name.c_str(),
+                              registry.get<CarryableComponent>(player_comp.carried_object).name.c_str());
+            } else if (near_carryable != MAX_ENTITIES && !inside) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E PICK UP %s  [CARRIED: NONE]",
+                              locationStateName(location_state),
+                              registry.get<CarryableComponent>(near_carryable).name.c_str());
+            } else if (near_worker != MAX_ENTITIES && !inside) {
                 bool ack = registry.get<FixedActorComponent>(near_worker).acknowledged;
-                std::snprintf(line, sizeof(line), "LOCATION:%s  E %s",
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E %s  [CARRIED: NONE]",
                               locationStateName(location_state),
                               ack ? "DISMISS WORKER [WORKER ACKNOWLEDGED]" : "ACKNOWLEDGE WORKER");
             } else {
-                std::snprintf(line, sizeof(line), "LOCATION:%s  %s",
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s  [CARRIED: NONE]",
                               locationStateName(location_state),
                               locationPrompt(location_state));
             }
@@ -475,7 +661,7 @@ int main(int, char**) {
                 const auto& inspection = registry.get<InspectionComponent>(player);
                 std::snprintf(line, sizeof(line), "READOUT:%s - %s",
                               inspectionTargetName(inspection.target_type),
-                              inspectionDetail(inspection.target_type));
+                              inspectionDetail(registry, inspection));
                 drawText(renderer, font, line, 6, 62, SDL_Color{245, 230, 150, 230}, 0.65f);
             }
         }

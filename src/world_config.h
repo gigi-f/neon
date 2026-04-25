@@ -20,6 +20,12 @@ inline constexpr ConnectionSpec kHousingToWorkplacePedestrianAccess{
     PathKind::PEDESTRIAN
 };
 
+inline constexpr ConnectionSpec kWorkplaceToSupplyPedestrianAccess{
+    MicroZoneRole::WORKPLACE,
+    MicroZoneRole::SUPPLY,
+    PathKind::PEDESTRIAN
+};
+
 struct WorldConfig {
     int macro_count_x = MACRO_ZONE_COUNT_X;
     int macro_count_y = MACRO_ZONE_COUNT_Y;
@@ -28,7 +34,10 @@ struct WorldConfig {
     int housing_building_count = 1;
     int workplace_micro_zone_count = 0;
     int workplace_building_count = 0;
+    int supply_micro_zone_count = 0;
+    int supply_building_count = 0;
     int fixed_worker_count = 0;
+    int carryable_object_count = 0;
     uint32_t seed = kDefaultWorldSeed;
 };
 

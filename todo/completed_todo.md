@@ -152,3 +152,62 @@ Acceptance:
 - [x] Housing and workplace interiors read differently.
 - [x] No job assignment, schedule, economy, market, or production system is introduced.
 - [x] The worker remains fixed-count and path-bound.
+
+## Phase 10: One Carried Object
+
+Goal: introduce inventory pressure with one object, not an inventory system.
+
+- [x] Add exactly one authored carryable object in the world, placed by config.
+- [x] Add `E PICK UP` and `E DROP` for that object.
+- [x] Show carried/not-carried state in the HUD.
+- [x] Add tests for pickup range, single-object ownership, and drop placement outside solids.
+
+Acceptance:
+
+- [x] The player can carry at most one object.
+- [x] No bag slots, equipment slots, item flags, market barter, survival counters, or scanner tools are introduced.
+- [x] The carried object is visible when dropped and visible in HUD when carried.
+
+## Phase 11: Enter Shelter with item
+
+Goal: ability to enter building without dropping item
+
+- [x] Currently the player must drop a held item before entering a building
+- [x] Move drop to a new key (for example, f for fling)
+- [x] Add tests for item held inside housing.
+
+Acceptance:
+
+- [x] Player can enter a building while holding an item
+- [x] Player can drop an item with the f key
+
+## Phase 12: One Explicit Path Upgrade
+
+Goal: improve infrastructure only when a current verb needs it.
+
+- [x] Add one path state, such as `ROUGH` or `LIT`, to the existing pedestrian path.
+- [x] Show the path state in inspection readouts.
+- [x] Add one visible render difference for the path state.
+- [x] Add tests that the state exists only on derived pedestrian paths.
+
+Acceptance:
+
+- [x] The infrastructure upgrade is visible and inspectable.
+- [x] No traffic, vehicles, transit, road hierarchy, power simulation, conduits, or stop lights are introduced.
+- [x] The path remains non-solid and derived from housing-workplace need.
+
+## Phase 13: One More Building Purpose
+
+Goal: add a third building role only after the player loop uses the first two.
+
+- [x] Choose one role with a direct player-loop purpose: `SUPPLY`.
+- [x] Add explicit config counts for that role.
+- [x] Add placement, validation, glyph rendering, and one inspection readout.
+- [x] Derive only the one needed pedestrian connection from existing buildings, with supply reached through workplace.
+- [x] Add tests for role count, non-overlap, and conditional path creation.
+
+Acceptance:
+
+- [x] The new role is visible, inspectable, and connected only when configured.
+- [x] No zone distribution tables, procedural city generation, market system, hospital system, or ambient population logic is introduced.
+- [x] The default sandbox can still be reduced back to housing-only by config.

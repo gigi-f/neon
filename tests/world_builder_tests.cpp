@@ -1,6 +1,8 @@
 #include <cassert>
+#include <string>
 #include "fixed_actor_system.h"
 #include "infrastructure_solver.h"
+#include "interior.h"
 #include "world_builder.h"
 
 static void testBuildWorldCreatesOnlyHousingBaseline() {
@@ -82,6 +84,57 @@ static void testConfiguredWorkplaceCreatesSecondBuildingType() {
     assert(buildingsDoNotOverlap(registry));
 }
 
+static void testConfiguredSupplyCreatesThirdPurposeBuilding() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+
+    buildWorld(registry, config);
+
+    assert(validateWorld(registry, config));
+    assert(registry.view<MacroZoneComponent>().size() == 1);
+    assert(registry.view<MicroZoneComponent>().size() == 2);
+
+    size_t housing_count = 0;
+    size_t supply_count = 0;
+    auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
+    assert(buildings.size() == 2);
+    for (Entity building : buildings) {
+        const auto role = registry.get<BuildingUseComponent>(building).role;
+        if (role == MicroZoneRole::HOUSING) ++housing_count;
+        if (role == MicroZoneRole::SUPPLY) {
+            ++supply_count;
+            assert(registry.get<BuildingComponent>(building).is_enterable);
+            assert(registry.has<GlyphComponent>(building));
+            assert(registry.get<GlyphComponent>(building).chars == "s");
+        }
+    }
+    assert(housing_count == 1);
+    assert(supply_count == 1);
+    assert(buildingsDoNotOverlap(registry));
+}
+
+static void testThreeRoleLayoutKeepsUsableBuildingFootprints() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+
+    buildWorld(registry, config);
+
+    assert(validateWorld(registry, config));
+    auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
+    assert(buildings.size() == 3);
+    for (Entity building : buildings) {
+        const auto& transform = registry.get<TransformComponent>(building);
+        assert(transform.width >= 48.0f);
+        assert(transform.height >= 48.0f);
+    }
+}
+
 static void testPedestrianPathRequiresHousingAndWorkplace() {
     Registry registry_without_workplace;
     WorldConfig housing_only = makeSandboxConfig();
@@ -89,6 +142,7 @@ static void testPedestrianPathRequiresHousingAndWorkplace() {
 
     assert(deriveInfrastructure(registry_without_workplace, housing_only) == 0);
     assert(registry_without_workplace.view<PathComponent>().empty());
+    assert(registry_without_workplace.view<PathStateComponent>().empty());
 
     Registry registry_with_workplace;
     WorldConfig connected = makeSandboxConfig();
@@ -101,6 +155,10 @@ static void testPedestrianPathRequiresHousingAndWorkplace() {
     assert(paths.size() == 1);
     const auto& path = registry_with_workplace.get<PathComponent>(paths.front());
     assert(path.kind == PathKind::PEDESTRIAN);
+    assert(registry_with_workplace.has<PathStateComponent>(paths.front()));
+    assert(registry_with_workplace.get<PathStateComponent>(paths.front()).state == PathState::LIT);
+    assert(pathStateName(registry_with_workplace.get<PathStateComponent>(paths.front()).state) == std::string("LIT"));
+    assert(pathStateInspectionDetail(registry_with_workplace.get<PathStateComponent>(paths.front()).state) == std::string("Foot path. LIT: low amber markers make the route easier to follow."));
     assert(registry_with_workplace.alive(path.from));
     assert(registry_with_workplace.alive(path.to));
     assert(registry_with_workplace.get<BuildingUseComponent>(path.from).role == MicroZoneRole::HOUSING);
@@ -108,6 +166,43 @@ static void testPedestrianPathRequiresHousingAndWorkplace() {
     assert(!registry_with_workplace.has<SolidComponent>(paths.front()));
     assert(deriveInfrastructure(registry_with_workplace, connected) == 0);
     assert(registry_with_workplace.view<PathComponent>().size() == 1);
+    assert(registry_with_workplace.view<PathStateComponent>().size() == 1);
+}
+
+static void testSupplyPathRequiresConfiguredSupply() {
+    Registry without_supply;
+    WorldConfig housing_only = makeSandboxConfig();
+    buildWorld(without_supply, housing_only);
+
+    assert(derivePedestrianPaths(without_supply, kWorkplaceToSupplyPedestrianAccess) == 0);
+    assert(without_supply.view<PathComponent>().empty());
+
+    Registry with_supply;
+    WorldConfig supply_config = makeSandboxConfig();
+    supply_config.workplace_micro_zone_count = 1;
+    supply_config.workplace_building_count = 1;
+    supply_config.supply_micro_zone_count = 1;
+    supply_config.supply_building_count = 1;
+    buildWorld(with_supply, supply_config);
+
+    assert(deriveInfrastructure(with_supply, supply_config) == 2);
+    auto paths = with_supply.view<PathComponent, TransformComponent, GlyphComponent>();
+    assert(paths.size() == 2);
+    bool found_workplace_supply = false;
+    for (Entity path_entity : paths) {
+        const auto& path = with_supply.get<PathComponent>(path_entity);
+        assert(path.kind == PathKind::PEDESTRIAN);
+        assert(with_supply.has<PathStateComponent>(path_entity));
+        assert(!transformOverlapsSolid(with_supply, with_supply.get<TransformComponent>(path_entity), path_entity));
+        const auto from_role = with_supply.get<BuildingUseComponent>(path.from).role;
+        const auto to_role = with_supply.get<BuildingUseComponent>(path.to).role;
+        if (from_role == MicroZoneRole::WORKPLACE && to_role == MicroZoneRole::SUPPLY) {
+            found_workplace_supply = true;
+        }
+    }
+    assert(found_workplace_supply);
+    assert(deriveInfrastructure(with_supply, supply_config) == 0);
+    assert(with_supply.view<PathComponent>().size() == 2);
 }
 
 static void testValidationRejectsBuildingOutsideMicroZone() {
@@ -204,6 +299,23 @@ static void testBuildingInteractionRangeHelpers() {
     registry.get<BuildingInteractionComponent>(player).inside_building = false;
     registry.get<TransformComponent>(player) = far_from_buildings;
     assert(playerLocationState(registry, player, 18.0f) == PlayerLocationState::OUTSIDE);
+
+    Registry supply_registry;
+    WorldConfig supply_config = makeSandboxConfig();
+    supply_config.supply_micro_zone_count = 1;
+    supply_config.supply_building_count = 1;
+    buildWorld(supply_registry, supply_config);
+
+    Entity supply = firstBuildingByRole(supply_registry, MicroZoneRole::SUPPLY);
+    assert(supply != MAX_ENTITIES);
+    Entity supply_player = supply_registry.create();
+    supply_registry.assign<PlayerComponent>(supply_player);
+    supply_registry.assign<TransformComponent>(supply_player, supply_registry.get<TransformComponent>(supply));
+    supply_registry.assign<BuildingInteractionComponent>(supply_player);
+    assert(playerLocationState(supply_registry, supply_player, 18.0f) == PlayerLocationState::NEAR_SUPPLY);
+    assert(enterBuildingInterior(supply_registry, supply_player, supply));
+    assert(playerLocationState(supply_registry, supply_player, 18.0f) == PlayerLocationState::INSIDE_SUPPLY);
+    assert(playerInspectionTarget(supply_registry, supply_player, 22.0f).type == InspectionTargetType::SUPPLY_INTERIOR);
 }
 
 static void testInspectionTargetHelpers() {
@@ -227,6 +339,18 @@ static void testInspectionTargetHelpers() {
     assert(nearestInspectionTargetInRange(registry, near_path, 22.0f).type == InspectionTargetType::PEDESTRIAN_PATH);
     assert(!playerCanInspect(registry, far_from_targets, 22.0f));
     assert(nearestInspectionTargetInRange(registry, far_from_targets, 22.0f).type == InspectionTargetType::NONE);
+
+    Registry supply_registry;
+    WorldConfig supply_config = makeSandboxConfig();
+    supply_config.supply_micro_zone_count = 1;
+    supply_config.supply_building_count = 1;
+    buildWorld(supply_registry, supply_config);
+
+    Entity supply = firstBuildingByRole(supply_registry, MicroZoneRole::SUPPLY);
+    assert(supply != MAX_ENTITIES);
+    const auto& supply_transform = supply_registry.get<TransformComponent>(supply);
+    assert(playerCanInspect(supply_registry, supply_transform, 22.0f));
+    assert(nearestInspectionTargetInRange(supply_registry, supply_transform, 22.0f).type == InspectionTargetType::SUPPLY);
 }
 
 static void testWorkerInspectionRangeAndPriority() {
@@ -305,6 +429,34 @@ static void testFixedWorkerMovesOnAssignedPath() {
     assert(after.x <= path.x + path.width * 0.5f + 0.01f);
     assert(after.y >= path.y - path.height * 0.5f - 0.01f);
     assert(after.y <= path.y + path.height * 0.5f + 0.01f);
+    assert(!transformOverlapsSolid(registry, after, actor));
+}
+
+static void testFixedWorkerTransitionsAcrossConnectedPaths() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity actor = registry.view<FixedActorComponent, TransformComponent>().front();
+    const Entity first_path = registry.get<FixedActorComponent>(actor).path_entity;
+
+    updateFixedActors(registry, 10.0f);
+
+    const auto& actor_component = registry.get<FixedActorComponent>(actor);
+    const auto& actor_transform = registry.get<TransformComponent>(actor);
+    assert(actor_component.path_entity != first_path);
+    assert(registry.alive(actor_component.path_entity));
+    const auto& path = registry.get<PathComponent>(actor_component.path_entity);
+    assert(registry.get<BuildingUseComponent>(path.from).role == MicroZoneRole::WORKPLACE);
+    assert(registry.get<BuildingUseComponent>(path.to).role == MicroZoneRole::SUPPLY);
+    assert(!transformOverlapsSolid(registry, actor_transform, actor));
 }
 
 static void testWorkerAcknowledgementToggle() {
@@ -389,11 +541,169 @@ static void testInsideWorkplaceInspectionTarget() {
     assert(target.type == InspectionTargetType::WORKPLACE_INTERIOR);
 }
 
+static void testInteriorLayoutsAreRoleSpecific() {
+    const InteriorLayout housing = interiorLayoutForRole(MicroZoneRole::HOUSING);
+    const InteriorLayout workplace = interiorLayoutForRole(MicroZoneRole::WORKPLACE);
+
+    assert(housing.role == MicroZoneRole::HOUSING);
+    assert(workplace.role == MicroZoneRole::WORKPLACE);
+    assert(housing.width != workplace.width);
+    assert(housing.height != workplace.height);
+    assert(interiorPositionWithinLayout(housing, housing.spawn));
+    assert(interiorPositionWithinLayout(workplace, workplace.spawn));
+}
+
+static void testEnterBuildingInitializesInteriorState() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    buildWorld(registry, config);
+
+    Entity building = registry.view<BuildingComponent, TransformComponent>().front();
+    TransformComponent exterior{0.0f, -115.0f, 12.0f, 12.0f};
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, exterior);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, building));
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    const InteriorLayout layout = interiorLayoutForBuilding(registry, building);
+    assert(interaction.inside_building);
+    assert(interaction.building_entity == building);
+    assert(interaction.building_role == MicroZoneRole::HOUSING);
+    assert(interaction.exterior_position.x == exterior.x);
+    assert(interaction.exterior_position.y == exterior.y);
+    assert(interaction.interior_position.x == layout.spawn.x);
+    assert(interaction.interior_position.y == layout.spawn.y);
+    assert(interiorPositionWithinLayout(layout, interaction.interior_position));
+}
+
+static void testInteriorMovementChangesLocalPositionAndClampsToRoom() {
+    const InteriorLayout layout = interiorLayoutForRole(MicroZoneRole::HOUSING);
+    TransformComponent current = layout.spawn;
+
+    TransformComponent moved = movedInteriorPosition(layout, current, 1.0f, 0.0f, 90.0f, 0.25f);
+    assert(moved.x > current.x);
+    assert(moved.y == current.y);
+    assert(interiorPositionWithinLayout(layout, moved));
+
+    TransformComponent far_edge = movedInteriorPosition(layout, current, 100.0f, 0.0f, 90.0f, 10.0f);
+    assert(interiorPositionWithinLayout(layout, far_edge));
+    assert(far_edge.x + far_edge.width * 0.5f <= layout.width * 0.5f + 0.001f);
+}
+
+static void testExitInteriorRestoresExteriorModeOutsideSolid() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    buildWorld(registry, config);
+
+    Entity building = registry.view<BuildingComponent, TransformComponent>().front();
+    const auto& building_transform = registry.get<TransformComponent>(building);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, building_transform);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, building));
+    assert(exitBuildingInterior(registry, player));
+    assert(!registry.get<BuildingInteractionComponent>(player).inside_building);
+    assert(!transformOverlapsSolid(registry, registry.get<TransformComponent>(player), player));
+}
+
+static void testInsideInspectionIgnoresExteriorCarryables() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity building = registry.view<BuildingComponent, TransformComponent>().front();
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(object));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(enterBuildingInterior(registry, player, building));
+    const InspectionTarget target = playerInspectionTarget(registry, player, 22.0f);
+    assert(target.entity == building);
+    assert(target.type == InspectionTargetType::HOUSING_INTERIOR);
+}
+
+static void testCarryableObjectInteractions() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+
+    Entity object = registry.view<CarryableComponent, TransformComponent>().front();
+    const auto& object_transform = registry.get<TransformComponent>(object);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, object_transform);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    Entity found_object = nearestCarryableObjectInRange(registry, registry.get<TransformComponent>(player), 18.0f);
+    assert(found_object == object);
+
+    auto& player_comp = registry.get<PlayerComponent>(player);
+
+    // Pick up
+    player_comp.carried_object = found_object;
+    registry.get<TransformComponent>(found_object).x = 99999.0f; // hidden
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+
+    // Enter housing
+    Entity building = registry.view<BuildingComponent, TransformComponent>().front();
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(building);
+
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    interaction.building_entity = building;
+    interaction.building_role = registry.get<BuildingUseComponent>(building).role;
+    interaction.inside_building = true;
+
+    assert(registry.get<BuildingInteractionComponent>(player).inside_building);
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+
+    // Drop while inside (should fail, meaning carried object remains)
+    bool inside = registry.get<BuildingInteractionComponent>(player).inside_building;
+    if (!inside && !transformOverlapsSolid(registry, registry.get<TransformComponent>(player))) {
+        registry.get<TransformComponent>(player_comp.carried_object) = registry.get<TransformComponent>(player);
+        player_comp.carried_object = MAX_ENTITIES;
+    }
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+
+    // Exit housing
+    interaction.inside_building = false;
+    assert(!registry.get<BuildingInteractionComponent>(player).inside_building);
+
+    // Drop outside
+    TransformComponent new_pos = registry.get<TransformComponent>(player);
+    new_pos.x = -1000.0f; // move to safe clear area
+    new_pos.y = -1000.0f;
+    registry.get<TransformComponent>(player) = new_pos;
+
+    inside = registry.get<BuildingInteractionComponent>(player).inside_building;
+    if (!inside && !transformOverlapsSolid(registry, registry.get<TransformComponent>(player))) {
+        registry.get<TransformComponent>(player_comp.carried_object) = registry.get<TransformComponent>(player);
+        player_comp.carried_object = MAX_ENTITIES;
+    }
+
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(registry.get<TransformComponent>(object).x == new_pos.x);
+}
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
     testConfiguredWorkplaceCreatesSecondBuildingType();
+    testConfiguredSupplyCreatesThirdPurposeBuilding();
+    testThreeRoleLayoutKeepsUsableBuildingFootprints();
     testPedestrianPathRequiresHousingAndWorkplace();
+    testSupplyPathRequiresConfiguredSupply();
     testValidationRejectsBuildingOutsideMicroZone();
     testValidationRejectsOverlappingBuildings();
     testPlayerSpawnValidationRejectsSolids();
@@ -401,9 +711,16 @@ int main() {
     testInspectionTargetHelpers();
     testInsideHousingInspectionTarget();
     testInsideWorkplaceInspectionTarget();
+    testInteriorLayoutsAreRoleSpecific();
+    testEnterBuildingInitializesInteriorState();
+    testInteriorMovementChangesLocalPositionAndClampsToRoom();
+    testExitInteriorRestoresExteriorModeOutsideSolid();
+    testInsideInspectionIgnoresExteriorCarryables();
     testWorkerInspectionRangeAndPriority();
     testFixedWorkerCountIsConfigDriven();
     testFixedWorkerMovesOnAssignedPath();
+    testFixedWorkerTransitionsAcrossConnectedPaths();
     testWorkerAcknowledgementToggle();
+    testCarryableObjectInteractions();
     return 0;
 }

@@ -82,10 +82,26 @@ inline Entity createPedestrianPath(Registry& registry, Entity from, Entity to) {
         pedestrianPathTransformBetween(registry.get<TransformComponent>(from),
                                        registry.get<TransformComponent>(to)));
     registry.assign<PathComponent>(path, PathKind::PEDESTRIAN, from, to);
+    registry.assign<PathStateComponent>(path, PathState::LIT);
     registry.assign<GlyphComponent>(path, std::string("."),
         static_cast<uint8_t>(120), static_cast<uint8_t>(210), static_cast<uint8_t>(170),
         static_cast<uint8_t>(220), 0.75f, true, true);
     return path;
+}
+
+inline const char* pathStateName(PathState state) {
+    switch (state) {
+        case PathState::LIT: return "LIT";
+    }
+    return "";
+}
+
+inline const char* pathStateInspectionDetail(PathState state) {
+    switch (state) {
+        case PathState::LIT:
+            return "Foot path. LIT: low amber markers make the route easier to follow.";
+    }
+    return "Foot path. Non-solid access between buildings.";
 }
 
 inline size_t derivePedestrianPaths(Registry& registry, const ConnectionSpec& spec) {
@@ -101,5 +117,8 @@ inline size_t derivePedestrianPaths(Registry& registry, const ConnectionSpec& sp
 
 inline size_t deriveInfrastructure(Registry& registry, const WorldConfig& config) {
     (void)config;
-    return derivePedestrianPaths(registry, kHousingToWorkplacePedestrianAccess);
+    size_t created = 0;
+    created += derivePedestrianPaths(registry, kHousingToWorkplacePedestrianAccess);
+    created += derivePedestrianPaths(registry, kWorkplaceToSupplyPedestrianAccess);
+    return created;
 }
