@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 #include "components.h"
 #include "ecs.h"
 #include "fixed_actor_system.h"
@@ -23,6 +24,12 @@ struct SavedTransform {
     float y = 0.0f;
     float width = 0.0f;
     float height = 0.0f;
+};
+
+struct SavedSpoofedSignpost {
+    uint64_t path_from_stable_id = 0;
+    uint64_t path_to_stable_id = 0;
+    uint64_t endpoint_stable_id = 0;
 };
 
 struct TinySaveState {
@@ -50,6 +57,8 @@ struct TinySaveState {
     float worker_direction = 1.0f;
     bool worker_acknowledged = false;
     bool worker_carrying = false;
+
+    std::vector<SavedSpoofedSignpost> spoofed_signposts;
 };
 
 inline SavedTransform savedTransformFromTransform(const TransformComponent& transform) {
@@ -148,6 +157,31 @@ inline Entity pedestrianPathByEndpointStableIds(Registry& registry,
     return MAX_ENTITIES;
 }
 
+inline Entity routeSignpostByStableIds(Registry& registry,
+                                       uint64_t path_from_stable_id,
+                                       uint64_t path_to_stable_id,
+                                       uint64_t endpoint_stable_id) {
+    auto signposts = registry.view<RouteSignpostComponent>();
+    for (Entity marker : signposts) {
+        const auto& signpost = registry.get<RouteSignpostComponent>(marker);
+        if (!registry.alive(signpost.path_entity) ||
+            !registry.has<PathComponent>(signpost.path_entity)) {
+            continue;
+        }
+
+        const auto& path = registry.get<PathComponent>(signpost.path_entity);
+        const uint64_t from = stableIdForEntity(registry, path.from);
+        const uint64_t to = stableIdForEntity(registry, path.to);
+        const bool same_direction = from == path_from_stable_id && to == path_to_stable_id;
+        const bool reverse_direction = from == path_to_stable_id && to == path_from_stable_id;
+        if ((same_direction || reverse_direction) &&
+            stableIdForEntity(registry, signpost.endpoint_entity) == endpoint_stable_id) {
+            return marker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
 inline TinySaveState captureTinySaveState(Registry& registry, Entity player) {
     TinySaveState state;
     if (!registry.alive(player) ||
@@ -213,6 +247,22 @@ inline TinySaveState captureTinySaveState(Registry& registry, Entity player) {
         }
     }
 
+    auto signposts = registry.view<RouteSignpostComponent>();
+    for (Entity marker : signposts) {
+        const auto& signpost = registry.get<RouteSignpostComponent>(marker);
+        if (!signpost.spoofed ||
+            !registry.alive(signpost.path_entity) ||
+            !registry.has<PathComponent>(signpost.path_entity)) {
+            continue;
+        }
+
+        const auto& path = registry.get<PathComponent>(signpost.path_entity);
+        state.spoofed_signposts.push_back(SavedSpoofedSignpost{
+            stableIdForEntity(registry, path.from),
+            stableIdForEntity(registry, path.to),
+            stableIdForEntity(registry, signpost.endpoint_entity)});
+    }
+
     return state;
 }
 
@@ -227,7 +277,7 @@ inline bool readSavedTransform(std::istream& in, SavedTransform& transform) {
 
 inline std::string serializeTinySaveState(const TinySaveState& state) {
     std::ostringstream out;
-    out << "NEON_TINY_SAVE_V6\n";
+    out << "NEON_TINY_SAVE_V7\n";
     out << "PLAYER ";
     writeSavedTransform(out, state.player);
     out << ' ' << (state.player_carrying ? 1 : 0) << "\n";
@@ -258,6 +308,13 @@ inline std::string serializeTinySaveState(const TinySaveState& state) {
         << state.worker_direction << ' '
         << (state.worker_acknowledged ? 1 : 0) << ' '
         << (state.worker_carrying ? 1 : 0) << "\n";
+    out << "SPOOFED_SIGNPOSTS " << state.spoofed_signposts.size() << "\n";
+    for (const auto& signpost : state.spoofed_signposts) {
+        out << "SPOOFED_SIGNPOST "
+            << signpost.path_from_stable_id << ' '
+            << signpost.path_to_stable_id << ' '
+            << signpost.endpoint_stable_id << "\n";
+    }
     out << "END\n";
     return out.str();
 }
@@ -267,7 +324,7 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
     std::istringstream in(text);
 
     std::string tag;
-    if (!(in >> tag) || tag != "NEON_TINY_SAVE_V6") return TinySaveStatus::INVALID_FORMAT;
+    if (!(in >> tag) || tag != "NEON_TINY_SAVE_V7") return TinySaveStatus::INVALID_FORMAT;
 
     int flag = 0;
     if (!(in >> tag) || tag != "PLAYER") return TinySaveStatus::INVALID_FORMAT;
@@ -328,6 +385,22 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
         parsed.worker_direction = 0.0f;
     } else {
         parsed.worker_direction = parsed.worker_direction > 0.0f ? 1.0f : -1.0f;
+    }
+
+    size_t spoofed_count = 0;
+    if (!(in >> tag) || tag != "SPOOFED_SIGNPOSTS") return TinySaveStatus::INVALID_FORMAT;
+    if (!(in >> spoofed_count)) return TinySaveStatus::INVALID_FORMAT;
+    parsed.spoofed_signposts.clear();
+    parsed.spoofed_signposts.reserve(spoofed_count);
+    for (size_t i = 0; i < spoofed_count; ++i) {
+        SavedSpoofedSignpost signpost;
+        if (!(in >> tag) || tag != "SPOOFED_SIGNPOST") return TinySaveStatus::INVALID_FORMAT;
+        if (!(in >> signpost.path_from_stable_id >>
+              signpost.path_to_stable_id >>
+              signpost.endpoint_stable_id)) {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
+        parsed.spoofed_signposts.push_back(signpost);
     }
 
     if (!(in >> tag) || tag != "END") return TinySaveStatus::INVALID_FORMAT;
@@ -422,6 +495,22 @@ inline TinySaveStatus applyTinySaveState(Registry& registry, Entity player, cons
             }
             registry.get<TransformComponent>(worker) =
                 transformOnPath(registry.get<TransformComponent>(path), worker_component.route_t);
+        }
+    }
+
+    auto signposts = registry.view<RouteSignpostComponent>();
+    for (Entity marker : signposts) {
+        auto& signpost = registry.get<RouteSignpostComponent>(marker);
+        signpost.spoofed = false;
+        signpost.signal_recovered = false;
+    }
+    for (const auto& saved_signpost : state.spoofed_signposts) {
+        const Entity marker = routeSignpostByStableIds(registry,
+                                                       saved_signpost.path_from_stable_id,
+                                                       saved_signpost.path_to_stable_id,
+                                                       saved_signpost.endpoint_stable_id);
+        if (marker != MAX_ENTITIES) {
+            registry.get<RouteSignpostComponent>(marker).spoofed = true;
         }
     }
 

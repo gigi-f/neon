@@ -500,3 +500,465 @@ Acceptance:
 - [x] Player and worker can complete the same tiny production-delivery-improvement loop through shared state.
 - [x] The worker remains a single fixed actor with no needs, schedule, dialogue, faction, or relationship state.
 - [x] The loop still works when worker count is zero, because player verbs remain primary.
+
+## Completed Session: Worker Motivation Readout
+
+Gameplay outcome: the player can inspect the fixed worker and understand what the worker is trying to do and why, without being able to command them.
+
+Big Picture: this keeps labor autonomous and legible. The worker feels like part of an existing social machine with its own reason for moving through production, while the player remains an observer, interrupter, or opportunist rather than a manager.
+
+Logical next step: after motivation and intent are readable, expose blocked loop states so the player can see when organic labor has been interrupted.
+
+## Phase 31: Worker Routine State Readout
+
+Goal: replace the worker's generic carry-only readout with one derived routine state.
+
+- [x] Add a helper that derives worker routine text from existing state, such as `GOING TO SUPPLY`, `DELIVERING SUPPLY`, `WORKING BENCH`, `DELIVERING PART`, or `DONE`.
+- [x] Use the derived routine text in worker inspection/readout surfaces.
+- [x] Keep routine state derived from current position, carried item, bench state, and building improvement state; do not add a task queue.
+- [x] Add tests for each current loop stage and for the zero-worker config path.
+
+Acceptance:
+
+- [x] The player can tell what the fixed worker is doing without debug logs.
+- [x] The worker remains autonomous; no player command menu, assignment, priority, or schedule control is introduced.
+- [x] Existing movement and item behavior is unchanged.
+
+## Phase 32: One Labor Reason Tag
+
+Goal: give the fixed worker one inspectable reason for doing the route.
+
+- [x] Add one small worker motivation field or derived tag, such as `WAGE ROUTE`, `MANDATED SHIFT`, or `DEBT WORK`.
+- [x] Show the tag only through worker inspection/readout text.
+- [x] Keep the tag informational; it must not alter movement, production, or player controls in this phase.
+- [x] Save/load the tag only if it is actual mutable state; otherwise keep it derived/static and test the readout.
+
+Acceptance:
+
+- [x] Worker labor has a visible social reason without becoming a management system.
+- [x] No wage economy, coercion model, factions, relationships, or schedules are introduced.
+- [x] The player can inspect the reason but cannot change it.
+
+## Completed Session: Loop Blockage Visibility
+
+Gameplay outcome: the player can inspect the tiny production loop and understand why autonomous labor is stalled.
+
+Big Picture: this completes the `Shared Tiny Loop` epoch by making interruption legible. The point is not to optimize the worker, but to let the player see how shared world state can be helped, stolen from, or disrupted.
+
+Logical next step: after blocked states are readable, let the player intentionally interrupt the loop in one small way and show a local consequence.
+
+## Phase 33: First Blocked Worker Labels
+
+Goal: make the current worker readout name the first simple reason the loop is blocked.
+
+- [x] Derive simple blocked labels for current-scope cases: no supply object available, bench already occupied, output waiting, or building already improved.
+- [x] Show blocked labels in inspection/readout text only when they explain why the worker is not progressing.
+- [x] Do not add recovery rules, alerts, suspicion, dialogue, or a generalized job failure model.
+- [x] Add tests for each blocked label using existing world state.
+
+Acceptance:
+
+- [x] The next session can focus on loop blockage visibility without first refactoring worker status text.
+- [x] All labels remain derived from existing current-scope state.
+- [x] No new worker behavior is introduced.
+
+## Phase 34: Building And Bench Blockage Readouts
+
+Goal: make blocked loop state visible from the relevant world objects, not only from the worker.
+
+- [x] Add inspection/readout details to the workplace bench for `EMPTY`, `STOCKED`, `OUTPUT WAITING`, and `BLOCKED BY CARRIER`.
+- [x] Add inspection/readout details to the target building for `NEEDS PART`, `IMPROVED`, or `ALREADY COMPLETE`.
+- [x] Keep these labels derived from existing bench, item, and building state.
+- [x] Add tests that workplace and housing readouts explain the blocked state without creating new behavior.
+
+Acceptance:
+
+- [x] The player can inspect the place where the blockage occurs.
+- [x] No alerts, quest log, minimap marker, or task assignment UI is introduced.
+- [x] Player and worker actions remain unchanged.
+
+## Phase 35: One Recoverable Blockage Case
+
+Goal: prove that a blocked loop can resume when the player restores the missing condition.
+
+- [x] Pick one current-scope blockage, such as the player holding the needed item or the output waiting on the bench.
+- [x] Add or verify a deterministic test where the worker does not progress while blocked, then progresses after the player/world state clears the blockage.
+- [x] Show the blocked and resumed states through existing inspection/readout text.
+- [x] Do not add new recovery AI, pathfinding, timers, or worker planning.
+
+Acceptance:
+
+- [x] Blockage is visible and reversible through current verbs.
+- [x] The worker remains autonomous and deterministic.
+- [x] No generalized job failure or recovery system is introduced.
+
+## Completed Session: Player Interruption
+
+Gameplay outcome: the player can intentionally interfere with the autonomous worker loop once, and the world exposes the result locally.
+
+Big Picture: this starts the `Organic Labor And Production` direction without making the player a manager. The player can exploit or disrupt a process that belongs to the city.
+
+Logical next step: after one interruption has a local consequence, introduce a small inherited gadget surface so the player can observe hidden labor details instead of relying only on ordinary inspection.
+
+## Phase 36: Expected Item Interruption
+
+Goal: make one player theft/delay case explicit in the worker loop.
+
+- [x] Detect when the player takes or carries the item the worker currently needs next.
+- [x] Show a worker or site readout such as `WAITING FOR SUPPLY` or `EXPECTED PART MISSING`.
+- [x] Keep the consequence local and reversible when the item is returned, delivered, or consumed through current verbs.
+- [x] Add tests for worker waiting while the player holds the expected item and resuming after the condition clears.
+
+Acceptance:
+
+- [x] The player can interfere by using existing pickup/drop/action verbs.
+- [x] No suspicion, crime, combat, faction, or surveillance system is introduced.
+- [x] The city process still behaves organically; the player does not assign or cancel work.
+
+## Phase 37: One Local Consequence Readout
+
+Goal: make interruption produce a readable local consequence without adding broader risk systems.
+
+- [x] Add one consequence label to the affected worker, bench, or building, such as `DELAYED`, `OUTPUT MISSING`, or `SHIFT STALLED`.
+- [x] Keep the label derived from the same blockage/interruption state.
+- [x] Ensure the label disappears or changes when the loop resumes or completes.
+- [x] Add tests for consequence text appearing and clearing.
+
+Acceptance:
+
+- [x] Interruption has a visible symptom in the game window or inspection panel.
+- [x] No global wanted level, surveillance reaction, worker dialogue, or relationship system is introduced.
+- [x] The consequence remains tied to the tiny loop only.
+
+## Phase 38: Production Consequence Summary
+
+Goal: add one compact HUD or inspection summary that names the current production outcome.
+
+- [x] Add a short status line such as `LOOP: RUNNING`, `LOOP: BLOCKED`, or `LOOP: COMPLETE`.
+- [x] Derive the status from existing supply, bench, carried item, worker, and building-improvement state.
+- [x] Keep the summary informational; it must not add controls or task tracking.
+- [x] Add tests for the summary across running, blocked, and complete states.
+
+Acceptance:
+
+- [x] The player can understand the tiny production loop at a glance.
+- [x] No quest system, objective tracker, economy dashboard, or management interface is introduced.
+- [x] The summary prepares later observation tools by giving them a simple state to reveal or enrich.
+
+## Completed Session: Gadget Inventory Stub
+
+Gameplay outcome: the player has one explicit inherited gadget surface that can later reveal hidden system details.
+
+Big Picture: this begins the `Illicit Observation Tools` epoch. The player is special because of illicit tools inherited from her engineer mother, not because she commands workers or production.
+
+Logical next step: after the gadget is held/equipped and visible, add one scan mode that reveals hidden labor detail.
+
+## Phase 39: One Inherited Gadget Item
+
+Goal: represent the mother's gadget as a current-scope held/equipped tool without building an inventory.
+
+- [x] Add one explicit gadget state for the player, such as `MOTHER'S DEBUGGER` or `ILLICIT SCANNER`.
+- [x] Show the gadget in HUD text or inspection text when available.
+- [x] Keep it always available or config-seeded for now; do not add loot, slots, durability, batteries, or upgrades.
+- [x] Add tests for gadget presence/readout and zero-impact on current carryable item behavior.
+
+Acceptance:
+
+- [x] The gadget is visible as part of the player-facing interface.
+- [x] The gadget does not replace `F` pickup/drop or `E` interaction semantics.
+- [x] No full inventory/equipment system is introduced.
+
+## Phase 40: Gadget Use Prompt
+
+Goal: add a clear first prompt for using the gadget without implementing scanning breadth.
+
+- [x] Add a single key or context prompt for the gadget that does not conflict with `E`, `F`, or `SPACE`.
+- [x] Keep the first use target-scoped to worker, bench, building, or route inspection range.
+- [x] Show a no-target/no-signal message when nothing valid is nearby.
+- [x] Add tests for prompt eligibility and no-target behavior.
+
+Acceptance:
+
+- [x] The player has one new verb tied to the inherited gadget.
+- [x] The verb is observation-oriented, not command-oriented.
+- [x] No multi-tool wheel, hotbar, scanner suite, or combat use is introduced.
+
+## Phase 41: Last Gadget Result Readout
+
+Goal: reserve a tiny place to show the most recent gadget result.
+
+- [x] Add one stored last-result string or small component for the player's gadget result.
+- [x] Show it in the HUD or inspection panel after gadget use.
+- [x] Keep the result volatile/current-scope unless save/load becomes necessary in the next phase.
+- [x] Add tests for result replacement and empty/default display.
+
+Acceptance:
+
+- [x] Gadget feedback is visible and inspectable.
+- [x] No journal, codex, map annotation, clue database, or quest log is introduced.
+- [x] The next session can fill the result with one hidden labor detail.
+
+## Completed Session: One Scan Mode
+
+Gameplay outcome: the player can use the inherited gadget to reveal one hidden detail about the tiny labor loop.
+
+Big Picture: this makes the player's special role concrete: she can observe hidden systems adults or institutions do not surface. The scan reveals, decodes, or infers; it does not command.
+
+Logical next step: scan memory is intentionally deferred because the last-result HUD is enough for current play. The next session should add one small spoof/interference verb.
+
+## Phase 42: Worker Motivation Scan
+
+Goal: let the gadget reveal a slightly richer worker reason than ordinary inspection.
+
+- [x] Use the gadget on the fixed worker to reveal one hidden labor detail, such as `DEBT WORK`, `PAY DOCKED IF STALLED`, or `ROUTE QUOTA: 1`.
+- [x] Keep ordinary inspection simpler than the scan result.
+- [x] Do not make the scan alter worker behavior.
+- [x] Add tests for scanned worker result, invalid target no-op, and ordinary inspection remaining unchanged.
+
+Acceptance:
+
+- [x] The player learns something through the inherited gadget that they cannot learn through basic inspection.
+- [x] No surveillance network, faction record, economy simulation, or relationship model is introduced.
+- [x] The scan remains local to the tiny loop.
+
+## Phase 43: Site Metadata Scan
+
+Goal: let the gadget reveal one hidden field on a workplace, housing building, supply site, or route marker.
+
+- [x] Pick one site metadata field, such as `OWNER`, `AUTHORITY`, `PURPOSE`, or `ROUTE CARRIES`.
+- [x] Show the result through the existing gadget-result readout.
+- [x] Keep the metadata static or derived; do not add ownership mechanics yet.
+- [x] Add tests for valid target result and no-target behavior.
+
+Acceptance:
+
+- [x] Building or route purpose becomes more legible without adding a new management layer.
+- [x] No factions, property market, public-works system, or city-scale dependency graph is introduced.
+- [x] The metadata points toward future building-purpose work.
+
+## Phase 44: Scan Result Persistence Decision
+
+Goal: decide whether scan results should persist now or remain volatile.
+
+- [x] Review whether the last scan result supports immediate play or needs save/load persistence.
+- [x] Persistence is not useful yet; no tiny save model change was added.
+- [x] If persistence is not useful yet, document that scan memory is intentionally deferred.
+- [x] Do not build a notebook, archive, memory palace, or clue graph.
+
+Acceptance:
+
+- [x] The current scan feature has a clear persistence boundary.
+- [x] Save/load remains current-scope and deterministic.
+- [x] The next roadmap direction is chosen from actual play needs, not assumed breadth.
+
+## Completed Session: One Spoof Action
+
+Gameplay outcome: the player can use the inherited gadget to subtly alter one local label or signal in the tiny loop.
+
+Big Picture: this begins interference without control. The city and workers still act from their own rules, but the player can exploit a weak point in what the system reads.
+
+Logical next step: after one spoof works, add one small worker-facing diversion or delay that comes from the corrupted signal.
+
+## Phase 45: Spoof Candidate Selection
+
+Goal: choose exactly one current-scope thing the debugger can spoof without adding broad systems.
+
+- [x] Pick one candidate: route signpost label, workplace bench access state, carryable item tag, or building entry/readout flag.
+- [x] Make the chosen candidate inspectable before and after spoofing.
+- [x] Keep spoofing local to the tiny loop; do not add a hacking suite, minigame, cooldown, battery, or inventory expansion.
+- [x] Add tests that identify the selected target and reject unrelated targets.
+
+Acceptance:
+
+- [x] There is one clearly bounded interference target.
+- [x] The player is exploiting a signal, not commanding an NPC.
+- [x] The target choice prepares a visible consequence in the next phase.
+
+## Phase 46: Spoof Verb And Feedback
+
+Goal: add one debugger action that changes the selected local signal and shows immediate feedback.
+
+- [x] Add a single key path or context branch for spoofing that does not replace `G` scan or `E/F/SPACE` semantics.
+- [x] Show spoof success or failure through the existing gadget/result HUD surface.
+- [x] Ensure spoofing changes only the selected local signal.
+- [x] Add tests for successful spoof, no-target failure, and unchanged unrelated loop state.
+
+Acceptance:
+
+- [x] The player has one non-command interference verb.
+- [x] Feedback is visible without a new panel or management interface.
+- [x] No worker AI rewrite, faction system, or surveillance reaction is introduced.
+
+## Phase 47: Local Spoof Consequence
+
+Goal: make the spoof produce one local, inspectable consequence.
+
+- [x] Derive one consequence from the spoofed state, such as a delayed route, confused signpost, blocked bench, or altered item destination.
+- [x] Show the consequence in inspection/HUD text.
+- [x] Ensure the consequence can clear or be overwritten by a small current-scope rule.
+- [x] Add tests for consequence appearing, remaining local, and clearing/overwriting.
+
+Acceptance:
+
+- [x] Interference creates a readable local outcome.
+- [x] The city still behaves organically; the player does not issue instructions.
+- [x] No global risk, wanted level, camera network, economy, or relationship model is introduced.
+
+## Completed Session: One Diversion Outcome
+
+Gameplay outcome: a spoofed local signal causes one small worker-facing diversion or delay that the player can observe.
+
+Big Picture: interference matters because autonomous systems read corrupted signals and react according to their own simple rules. The player is exploiting the loop, not giving orders.
+
+Logical next step: after one diversion changes behavior, make the consequence easier to inspect.
+
+## Phase 48: Worker Notices Spoofed Route Signal
+
+Goal: make the fixed worker readout acknowledge the spoofed route signal when it is relevant to their path.
+
+- [x] Add a derived helper that detects whether the worker's assigned path has a spoofed signpost.
+- [x] Show a worker readout label such as `ROUTE SIGNAL CONFUSED` while the relevant signpost is spoofed.
+- [x] Keep this as readout-only in this phase; do not alter movement yet.
+- [x] Add tests for relevant spoofed signpost, unrelated/no signpost, and ordinary readout clearing after restore.
+
+Acceptance:
+
+- [x] The worker appears to notice a corrupted signal without being commanded.
+- [x] No dialogue, suspicion, relationship, surveillance, or faction system is introduced.
+- [x] The readout remains local to the tiny loop.
+
+## Phase 49: One Spoof Delay Rule
+
+Goal: make the spoof cause one small, deterministic delay in worker progress.
+
+- [x] Choose a narrow delay rule, such as pausing worker movement while their current path has a spoofed signpost.
+- [x] Keep pickup, bench work, item delivery, and building improvement logic unchanged outside the delayed movement condition.
+- [x] Show the delay through existing worker/loop readouts.
+- [x] Add tests that worker position/progress does not advance while spoofed and resumes after restore.
+
+Acceptance:
+
+- [x] The spoof creates a real local outcome.
+- [x] The worker follows their own rule; no player command menu or assignment behavior is introduced.
+- [x] No pathfinding rewrite, route planner, global risk system, or economy model is introduced.
+
+## Phase 50: Diversion Recovery Boundary
+
+Goal: make the delayed route recover cleanly and define the persistence boundary.
+
+- [x] Verify or add a clear recovery path when the signpost is restored.
+- [x] Decide whether spoofed signpost state belongs in tiny save now or remains volatile.
+- [x] Spoofed signpost state is persisted in tiny save because it now affects worker movement.
+- [x] Add tests for recovery and the chosen persistence boundary.
+
+Acceptance:
+
+- [x] The route diversion can end without resetting the world.
+- [x] Save/load behavior is explicit and deterministic for current scope.
+- [x] The next session can focus on consequence inspection or building-purpose depth based on actual play needs.
+
+## Completed Session: One Local Consequence
+
+Gameplay outcome: the route diversion leaves one readable local consequence after it affects worker movement.
+
+Big Picture: risk and consequence should first come from the local system being tampered with, not from global surveillance or faction state. The city reacts because a signal was corrupted.
+
+Logical next step: after one consequence exists, make it easier for the player to inspect what happened without adding a quest log or management screen.
+
+## Phase 51: Consequence Source Label
+
+Goal: make the affected local object name why the consequence exists.
+
+- [x] Add one derived consequence source label to the spoofed signpost, worker, or route path.
+- [x] Use wording like `CAUSE: SPOOFED SIGNPOST` or `SOURCE: CORRUPTED ROUTE SIGNAL`.
+- [x] Keep the label derived from current spoof/diversion state; do not add a general event log.
+- [x] Add tests for source label appearing and clearing.
+
+Acceptance:
+
+- [x] The player can connect the consequence to the spoofed signal.
+- [x] No investigation journal, quest tracker, faction record, or surveillance feed is introduced.
+- [x] The source remains local to the tiny loop.
+
+## Phase 52: One Recovery Symptom
+
+Goal: show that the local consequence can ease when the player restores the signal.
+
+- [x] Add or verify one readable recovery label such as `ROUTE SIGNAL CLEAR` or `DELAY CLEARED`.
+- [x] Ensure the label appears only after the spoof state is restored or overwritten.
+- [x] Keep recovery deterministic and current-scope.
+- [x] Add tests for consequence state before spoof, during spoof, and after restore.
+
+Acceptance:
+
+- [x] The player can see that interference can be undone locally.
+- [x] Recovery does not require resetting the world or issuing worker commands.
+- [x] No global risk decay or suspicion clock is introduced.
+
+## Phase 53: Local Consequence Boundary
+
+Goal: define what this first consequence does not affect.
+
+- [x] Add tests or readout assertions proving bench state, building improvement state, and item ownership are unchanged by the consequence.
+- [x] Document in the TODO or code comments only if needed that this is a route-signal consequence, not a broad alarm system.
+- [x] Keep future risk hooks out until there is a repeated local pattern.
+- [x] Add one regression test guarding against accidental global behavior.
+
+Acceptance:
+
+- [x] The consequence has a clear mechanical boundary.
+- [x] The player remains an interferer, not a production manager.
+- [x] Future local-risk work has a concrete, tested base.
+
+## Completed Session: Consequence Inspection
+
+Gameplay outcome: the player can inspect the affected objects and understand the spoof, diversion, and recovery state without reading debug output.
+
+Big Picture: simulation exploration depends on legible systems. Before adding more systems, the current one should explain itself through world-facing text.
+
+Logical next step: after interference is legible, broaden the world by making building purposes more explicit.
+
+## Phase 54: Signpost Consequence Readout
+
+Goal: make the signpost inspection readout carry the complete current-scope consequence.
+
+- [x] Extend signpost readout to include signal state, consequence state, and recovery state.
+- [x] Keep the readout compact enough for the HUD/readout line.
+- [x] Do not add a modal, map overlay, or route-management panel.
+- [x] Add tests for normal, spoofed, delayed, and recovered signpost text.
+
+Acceptance:
+
+- [x] The affected signpost is the first place to inspect the problem.
+- [x] The player can understand the consequence without hidden debug logs.
+- [x] The feature remains local to the current route.
+
+## Phase 55: Worker Consequence Readout
+
+Goal: make worker inspection reflect the local route consequence from the worker's point of view.
+
+- [x] Add one derived worker label such as `CONFUSED BY ROUTE SIGNAL` or `WAITING ON ROUTE SIGNAL`.
+- [x] Show it only when the worker's current path is affected.
+- [x] Keep ordinary labor reason and carrying readouts intact.
+- [x] Add tests for affected and unaffected worker readouts.
+
+Acceptance:
+
+- [x] The worker appears autonomous and reactive.
+- [x] The player does not receive a command interface.
+- [x] No dialogue, relationship, or suspicion model is introduced.
+
+## Phase 56: Compact Consequence Summary
+
+Goal: give the HUD one compact summary for the current local interference state.
+
+- [x] Extend the existing loop summary or gadget result surface with a short state such as `INTERFERENCE: ROUTE`.
+- [x] Keep the summary informational; it must not become an objective tracker.
+- [x] Ensure the summary clears when the local consequence clears.
+- [x] Add tests for summary text across normal, spoofed, delayed, and recovered states.
+
+Acceptance:
+
+- [x] The player can see at a glance whether their interference still matters.
+- [x] No quest log, management dashboard, or city alert stack is introduced.
+- [x] The next session can move to building purpose without leaving the current loop opaque.

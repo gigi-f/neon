@@ -48,256 +48,438 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - The player can work a stocked workplace bench into `WORK BENCH: OUTPUT READY`.
 - The player can take the ready workplace output as a carried `PART`.
 - The player can deliver the carried `PART` inside housing to set `BUILDING IMPROVED: YES`.
+- The player has `MOTHER'S DEBUGGER` as an always-available inherited gadget, uses it with `G`, and sees a volatile last gadget result in the HUD.
+- The debugger reveals hidden worker labor pressure (`DEBT WORK`, `PAY DOCKED IF STALLED`, and `ROUTE QUOTA: 1`) without changing worker behavior.
+- The debugger reveals static/derived site metadata such as building purpose and route-carried material.
+- Gadget scan memory is intentionally deferred; the HUD only keeps the current volatile last result.
+- The player can use `Shift+G` on a route signpost to spoof or restore that signpost signal.
+- A spoofed signpost is inspectable and produces `LOOP: SPOOFED; CONSEQUENCE: ROUTE SIGNAL CONFUSED` without changing worker AI yet.
+- A worker on a path with a spoofed signpost shows `BLOCKED: ROUTE SIGNAL CONFUSED` and does not advance until the signpost is restored.
+- Tiny save/load persists spoofed signpost state as current-scope mechanical state.
 
-## Session: Worker Motivation Readout
+## Session: Building Purpose Model
 
-Gameplay outcome: the player can inspect the fixed worker and understand what the worker is trying to do and why, without being able to command them.
+Gameplay outcome: buildings have generic purposes that can describe housing, workplace, supply, and future sites without shelter-specific assumptions.
 
-Big Picture: this keeps labor autonomous and legible. The worker should feel like part of an existing social machine with their own reason for moving through production, while the player remains an observer, interrupter, or opportunist rather than a manager.
+Big Picture: `building` should cover shelter, production, commercial use, public infrastructure, storage, institutions, and capital equipment. Purpose should become data the player can inspect, not a city-builder control surface.
 
-Logical next step: after motivation and intent are readable, expose blocked loop states so the player can see when organic labor has been interrupted.
+Logical next step: after purposes are generic and inspectable, add one commercial or capital-purpose site.
 
-## Phase 31: Worker Routine State Readout
+## Phase 57: Generic Building Purpose Field
 
-Goal: replace the worker's generic carry-only readout with one derived routine state.
+Goal: add a small purpose model that can describe current building roles and future site types.
 
-- [ ] Add a helper that derives worker routine text from existing state, such as `GOING TO SUPPLY`, `DELIVERING SUPPLY`, `WORKING BENCH`, `DELIVERING PART`, or `DONE`.
-- [ ] Use the derived routine text in worker inspection/readout surfaces.
-- [ ] Keep routine state derived from current position, carried item, bench state, and building improvement state; do not add a task queue.
-- [ ] Add tests for each current loop stage and for the zero-worker config path.
-
-Acceptance:
-
-- [ ] The player can tell what the fixed worker is doing without debug logs.
-- [ ] The worker remains autonomous; no player command menu, assignment, priority, or schedule control is introduced.
-- [ ] Existing movement and item behavior is unchanged.
-
-## Phase 32: One Labor Reason Tag
-
-Goal: give the fixed worker one inspectable reason for doing the route.
-
-- [ ] Add one small worker motivation field or derived tag, such as `WAGE ROUTE`, `MANDATED SHIFT`, or `DEBT WORK`.
-- [ ] Show the tag only through worker inspection/readout text.
-- [ ] Keep the tag informational; it must not alter movement, production, or player controls in this phase.
-- [ ] Save/load the tag only if it is actual mutable state; otherwise keep it derived/static and test the readout.
+- [ ] Add or extend a building-purpose helper/data shape for current roles: housing, workplace, supply.
+- [ ] Keep existing `MicroZoneRole` behavior intact unless a narrow refactor is required.
+- [ ] Avoid adding ownership, zoning policy, rents, taxes, or economic simulation.
+- [ ] Add tests that current roles resolve to stable purpose labels.
 
 Acceptance:
 
-- [ ] Worker labor has a visible social reason without becoming a management system.
-- [ ] No wage economy, coercion model, factions, relationships, or schedules are introduced.
-- [ ] The player can inspect the reason but cannot change it.
+- [ ] Building purpose becomes explicit data or a clearly named derived helper.
+- [ ] Existing interactions continue to work.
+- [ ] Future building types can be added without duplicating shelter-only language.
 
-## Session: Loop Blockage Visibility
+## Phase 58: Purpose-Aware Building Readouts
 
-Gameplay outcome: the player can inspect the tiny production loop and understand why autonomous labor is stalled.
+Goal: make basic building inspection describe what the site is for.
 
-Big Picture: this completes the `Shared Tiny Loop` epoch by making interruption legible. The point is not to optimize the worker, but to let the player see how shared world state can be helped, stolen from, or disrupted.
-
-Logical next step: after blocked states are readable, let the player intentionally interrupt the loop in one small way and show a local consequence.
-
-## Phase 33: First Blocked Worker Labels
-
-Goal: make the current worker readout name the first simple reason the loop is blocked.
-
-- [ ] Derive simple blocked labels for current-scope cases: no supply object available, bench already occupied, output waiting, or building already improved.
-- [ ] Show blocked labels in inspection/readout text only when they explain why the worker is not progressing.
-- [ ] Do not add recovery rules, alerts, suspicion, dialogue, or a generalized job failure model.
-- [ ] Add tests for each blocked label using existing world state.
+- [ ] Update housing, workplace, and supply inspection/readouts to include purpose language.
+- [ ] Keep action prompts unchanged.
+- [ ] Ensure the debugger scan can reuse or enrich the same purpose information.
+- [ ] Add tests for purpose-aware readouts on all current building roles.
 
 Acceptance:
 
-- [ ] The next session can focus on loop blockage visibility without first refactoring worker status text.
-- [ ] All labels remain derived from existing current-scope state.
-- [ ] No new worker behavior is introduced.
+- [ ] Buildings are more legible as social/economic sites.
+- [ ] The player does not gain management controls.
+- [ ] Readouts prepare for commercial and public sites.
 
-## Phase 34: Building And Bench Blockage Readouts
+## Phase 59: Generic Building Status Language
 
-Goal: make blocked loop state visible from the relevant world objects, not only from the worker.
+Goal: reduce shelter-specific wording where the current mechanic is really building improvement or site condition.
 
-- [ ] Add inspection/readout details to the workplace bench for `EMPTY`, `STOCKED`, `OUTPUT WAITING`, and `BLOCKED BY CARRIER`.
-- [ ] Add inspection/readout details to the target building for `NEEDS PART`, `IMPROVED`, or `ALREADY COMPLETE`.
-- [ ] Keep these labels derived from existing bench, item, and building state.
-- [ ] Add tests that workplace and housing readouts explain the blocked state without creating new behavior.
-
-Acceptance:
-
-- [ ] The player can inspect the place where the blockage occurs.
-- [ ] No alerts, quest log, minimap marker, or task assignment UI is introduced.
-- [ ] Player and worker actions remain unchanged.
-
-## Phase 35: One Recoverable Blockage Case
-
-Goal: prove that a blocked loop can resume when the player restores the missing condition.
-
-- [ ] Pick one current-scope blockage, such as the player holding the needed item or the output waiting on the bench.
-- [ ] Add or verify a deterministic test where the worker does not progress while blocked, then progresses after the player/world state clears the blockage.
-- [ ] Show the blocked and resumed states through existing inspection/readout text.
-- [ ] Do not add new recovery AI, pathfinding, timers, or worker planning.
+- [ ] Rename or wrap player-facing readout helpers so they say `BUILDING`, `SITE`, or another generic term where appropriate.
+- [ ] Keep housing-specific text only where the meaning is truly domestic.
+- [ ] Do not perform a broad file-wide rename unless needed for the player-facing behavior.
+- [ ] Add regression tests for current housing improvement and workplace bench readouts.
 
 Acceptance:
 
-- [ ] Blockage is visible and reversible through current verbs.
-- [ ] The worker remains autonomous and deterministic.
-- [ ] No generalized job failure or recovery system is introduced.
+- [ ] The code and UI no longer imply all production outcomes are shelter-only.
+- [ ] Existing tiny-loop behavior is unchanged.
+- [ ] Future building-purpose sessions have clearer entry points.
 
-## Session: Player Interruption
+## Session: Commercial Or Capital Site
 
-Gameplay outcome: the player can intentionally interfere with the autonomous worker loop once, and the world exposes the result locally.
+Gameplay outcome: the map contains one non-domestic, non-workplace site that represents commercial or capital purpose.
 
-Big Picture: this starts the `Organic Labor And Production` direction without making the player a manager. The player can exploit or disrupt a process that belongs to the city.
+Big Picture: the city should include places that exist for exchange, storage, finance, machinery, or institutional capital, not only survival shelter and production benches.
 
-Logical next step: after one interruption has a local consequence, introduce a small inherited gadget surface so the player can observe hidden labor details instead of relying only on ordinary inspection.
+Logical next step: after one commercial/capital site exists, add one public-purpose site for contrast.
 
-## Phase 36: Expected Item Interruption
+## Phase 60: One Commercial Site Role
 
-Goal: make one player theft/delay case explicit in the worker loop.
+Goal: add one current-scope commercial or capital-purpose site type.
 
-- [ ] Detect when the player takes or carries the item the worker currently needs next.
-- [ ] Show a worker or site readout such as `WAITING FOR SUPPLY` or `EXPECTED PART MISSING`.
-- [ ] Keep the consequence local and reversible when the item is returned, delivered, or consumed through current verbs.
-- [ ] Add tests for worker waiting while the player holds the expected item and resuming after the condition clears.
-
-Acceptance:
-
-- [ ] The player can interfere by using existing pickup/drop/action verbs.
-- [ ] No suspicion, crime, combat, faction, or surveillance system is introduced.
-- [ ] The city process still behaves organically; the player does not assign or cancel work.
-
-## Phase 37: One Local Consequence Readout
-
-Goal: make interruption produce a readable local consequence without adding broader risk systems.
-
-- [ ] Add one consequence label to the affected worker, bench, or building, such as `DELAYED`, `OUTPUT MISSING`, or `SHIFT STALLED`.
-- [ ] Keep the label derived from the same blockage/interruption state.
-- [ ] Ensure the label disappears or changes when the loop resumes or completes.
-- [ ] Add tests for consequence text appearing and clearing.
+- [ ] Pick a narrow role such as `MARKET`, `DEPOT`, `MACHINE SHOP`, or `CAPITAL NODE`.
+- [ ] Place one site in the authored sandbox without overlapping existing buildings or paths.
+- [ ] Give it a glyph, color, and basic inspection label.
+- [ ] Add placement/non-overlap tests.
 
 Acceptance:
 
-- [ ] Interruption has a visible symptom in the game window or inspection panel.
-- [ ] No global wanted level, surveillance reaction, worker dialogue, or relationship system is introduced.
-- [ ] The consequence remains tied to the tiny loop only.
+- [ ] The map has a new kind of building purpose.
+- [ ] No market prices, buying/selling, ownership, rent, or economy simulation is introduced.
+- [ ] The site is visible and inspectable.
 
-## Phase 38: Production Consequence Summary
+## Phase 61: Commercial Site Scan Metadata
 
-Goal: add one compact HUD or inspection summary that names the current production outcome.
+Goal: let the inherited debugger reveal one hidden commercial/capital metadata field.
 
-- [ ] Add a short status line such as `LOOP: RUNNING`, `LOOP: BLOCKED`, or `LOOP: COMPLETE`.
-- [ ] Derive the status from existing supply, bench, carried item, worker, and building-improvement state.
-- [ ] Keep the summary informational; it must not add controls or task tracking.
-- [ ] Add tests for the summary across running, blocked, and complete states.
-
-Acceptance:
-
-- [ ] The player can understand the tiny production loop at a glance.
-- [ ] No quest system, objective tracker, economy dashboard, or management interface is introduced.
-- [ ] The summary prepares later observation tools by giving them a simple state to reveal or enrich.
-
-## Session: Gadget Inventory Stub
-
-Gameplay outcome: the player has one explicit inherited gadget surface that can later reveal hidden system details.
-
-Big Picture: this begins the `Illicit Observation Tools` epoch. The player is special because of illicit tools inherited from her engineer mother, not because she commands workers or production.
-
-Logical next step: after the gadget is held/equipped and visible, add one scan mode that reveals hidden labor detail.
-
-## Phase 39: One Inherited Gadget Item
-
-Goal: represent the mother's gadget as a current-scope held/equipped tool without building an inventory.
-
-- [ ] Add one explicit gadget state for the player, such as `MOTHER'S DEBUGGER` or `ILLICIT SCANNER`.
-- [ ] Show the gadget in HUD text or inspection text when available.
-- [ ] Keep it always available or config-seeded for now; do not add loot, slots, durability, batteries, or upgrades.
-- [ ] Add tests for gadget presence/readout and zero-impact on current carryable item behavior.
+- [ ] Add one scan result such as `PURPOSE: EXCHANGE`, `CAPITAL EQUIPMENT`, or `ACCESS: RESTRICTED`.
+- [ ] Show the result through the existing gadget result HUD.
+- [ ] Keep metadata static or derived.
+- [ ] Add tests for valid scan result and no-target behavior.
 
 Acceptance:
 
-- [ ] The gadget is visible as part of the player-facing interface.
-- [ ] The gadget does not replace `F` pickup/drop or `E` interaction semantics.
-- [ ] No full inventory/equipment system is introduced.
+- [ ] The player learns something beyond ordinary inspection.
+- [ ] No financial system, faction owner, shop UI, or transaction verb is introduced.
+- [ ] The site points toward later economic/social context.
 
-## Phase 40: Gadget Use Prompt
+## Phase 62: Commercial Site Boundary
 
-Goal: add a clear first prompt for using the gadget without implementing scanning breadth.
+Goal: make clear what the commercial site can and cannot do in this pass.
 
-- [ ] Add a single key or context prompt for the gadget that does not conflict with `E`, `F`, or `SPACE`.
-- [ ] Keep the first use target-scoped to worker, bench, building, or route inspection range.
-- [ ] Show a no-target/no-signal message when nothing valid is nearby.
-- [ ] Add tests for prompt eligibility and no-target behavior.
-
-Acceptance:
-
-- [ ] The player has one new verb tied to the inherited gadget.
-- [ ] The verb is observation-oriented, not command-oriented.
-- [ ] No multi-tool wheel, hotbar, scanner suite, or combat use is introduced.
-
-## Phase 41: Last Gadget Result Readout
-
-Goal: reserve a tiny place to show the most recent gadget result.
-
-- [ ] Add one stored last-result string or small component for the player's gadget result.
-- [ ] Show it in the HUD or inspection panel after gadget use.
-- [ ] Keep the result volatile/current-scope unless save/load becomes necessary in the next phase.
-- [ ] Add tests for result replacement and empty/default display.
+- [ ] Ensure `E`, `F`, worker delivery, and building improvement do not accidentally treat the site as housing/workplace/supply.
+- [ ] Add explicit no-op or unavailable readouts where needed.
+- [ ] Add tests for unchanged player and worker loop behavior.
+- [ ] Keep the site as observation context only for now.
 
 Acceptance:
 
-- [ ] Gadget feedback is visible and inspectable.
-- [ ] No journal, codex, map annotation, clue database, or quest log is introduced.
-- [ ] The next session can fill the result with one hidden labor detail.
+- [ ] The new site does not break the tiny production loop.
+- [ ] The player can observe it but not manage it.
+- [ ] Future sessions can choose one real interaction later.
 
-## Session: One Scan Mode
+## Session: Public Site
 
-Gameplay outcome: the player can use the inherited gadget to reveal one hidden detail about the tiny labor loop.
+Gameplay outcome: the map contains one public-purpose site that contrasts with private/commercial building purposes.
 
-Big Picture: this makes the player's special role concrete: she can observe hidden systems adults or institutions do not surface. The scan should reveal, decode, or infer; it should not command.
+Big Picture: public infrastructure should enter as a visible place and purpose first, before transit, utilities, bureaucracy, or surveillance systems become mechanics.
 
-Logical next step: after one hidden detail can be revealed, decide whether to store scan memory, add one spoof/interference verb, or deepen building purposes based on what feels most playable.
+Logical next step: after public and commercial purposes exist, add a simple authority/ownership tag that differentiates site context.
 
-## Phase 42: Worker Motivation Scan
+## Phase 63: One Public Site Role
 
-Goal: let the gadget reveal a slightly richer worker reason than ordinary inspection.
+Goal: add one current-scope public-purpose site type.
 
-- [ ] Use the gadget on the fixed worker to reveal one hidden labor detail, such as `DEBT WORK`, `PAY DOCKED IF STALLED`, or `ROUTE QUOTA: 1`.
-- [ ] Keep ordinary inspection simpler than the scan result.
-- [ ] Do not make the scan alter worker behavior.
-- [ ] Add tests for scanned worker result, invalid target no-op, and ordinary inspection remaining unchanged.
-
-Acceptance:
-
-- [ ] The player learns something through the inherited gadget that they cannot learn through basic inspection.
-- [ ] No surveillance network, faction record, economy simulation, or relationship model is introduced.
-- [ ] The scan remains local to the tiny loop.
-
-## Phase 43: Site Metadata Scan
-
-Goal: let the gadget reveal one hidden field on a workplace, housing building, supply site, or route marker.
-
-- [ ] Pick one site metadata field, such as `OWNER`, `AUTHORITY`, `PURPOSE`, or `ROUTE CARRIES`.
-- [ ] Show the result through the existing gadget-result readout.
-- [ ] Keep the metadata static or derived; do not add ownership mechanics yet.
-- [ ] Add tests for valid target result and no-target behavior.
+- [ ] Pick a narrow role such as `CLINIC`, `PUMP`, `PUBLIC TERMINAL`, or `MUNICIPAL NODE`.
+- [ ] Place one site in the authored sandbox with visible glyph/color/readout.
+- [ ] Keep it non-interactive except for inspection and scanning.
+- [ ] Add placement and inspection tests.
 
 Acceptance:
 
-- [ ] Building or route purpose becomes more legible without adding a new management layer.
-- [ ] No factions, property market, public-works system, or city-scale dependency graph is introduced.
-- [ ] The metadata points toward future building-purpose work.
+- [ ] Public-purpose space exists in the sandbox.
+- [ ] No health system, utility grid, transit network, public works simulation, or bureaucracy is introduced.
+- [ ] The site is visible and inspectable.
 
-## Phase 44: Scan Result Persistence Decision
+## Phase 64: Public Site Scan Metadata
 
-Goal: decide whether scan results should persist now or remain volatile.
+Goal: let the debugger reveal one hidden public-purpose field.
 
-- [ ] Review whether the last scan result supports immediate play or needs save/load persistence.
-- [ ] If persistence is useful, add it narrowly to the tiny save model with tests.
-- [ ] If persistence is not useful yet, document that scan memory is intentionally deferred.
-- [ ] Do not build a notebook, archive, memory palace, or clue graph.
+- [ ] Add one scan field such as `AUTHORITY: MUNICIPAL`, `SERVICE: PUBLIC`, or `ACCESS: RATIONED`.
+- [ ] Reuse the existing gadget result surface.
+- [ ] Keep metadata deterministic.
+- [ ] Add tests for the scan result and ordinary inspection remaining simpler.
 
 Acceptance:
 
-- [ ] The current scan feature has a clear persistence boundary.
-- [ ] Save/load remains current-scope and deterministic.
-- [ ] The next roadmap direction is chosen from actual play needs, not assumed breadth.
+- [ ] Public context becomes legible without building a public-works system.
+- [ ] The player remains an observer/interferer.
+- [ ] The metadata prepares later authority tags.
+
+## Phase 65: Public Site Routing Stub
+
+Goal: decide whether the public site needs an inspectable route edge now.
+
+- [ ] If a route is useful, add one pedestrian route/signpost to the public site with no worker behavior attached.
+- [ ] If a route is premature, document why the site remains standalone for now.
+- [ ] Keep path/signpost logic generic if a route is added.
+- [ ] Add tests for the chosen boundary.
+
+Acceptance:
+
+- [ ] The site either has a visible connection or a clear deferral.
+- [ ] No transit, service delivery, or NPC schedule is introduced.
+- [ ] The next session can add authority/ownership context without route ambiguity.
+
+## Session: Ownership Or Authority Tag
+
+Gameplay outcome: sites can expose a small social context tag such as private, municipal, corporate, illicit, or household.
+
+Big Picture: authority and ownership should begin as inspectable context, not as faction AI or property simulation. This helps the player read the city as a social system.
+
+Logical next step: after site context is visible, connect sites with one dependency edge.
+
+## Phase 66: One Site Context Tag
+
+Goal: add one generic tag field or derived helper for building/site context.
+
+- [ ] Support a small set of labels such as `HOUSEHOLD`, `WORKPLACE`, `PRIVATE`, `MUNICIPAL`, or `COMMERCIAL`.
+- [ ] Assign tags to current sites deterministically.
+- [ ] Keep tags readout-only.
+- [ ] Add tests for all current site tags.
+
+Acceptance:
+
+- [ ] Site context is visible without faction mechanics.
+- [ ] Tags are generic enough for future building roles.
+- [ ] Existing interactions are unchanged.
+
+## Phase 67: Context-Aware Inspection
+
+Goal: show the site context tag in ordinary inspection or building readout.
+
+- [ ] Add compact readout text such as `AUTHORITY: MUNICIPAL` or `CONTEXT: COMMERCIAL`.
+- [ ] Keep debugger scan able to reveal a richer version if useful.
+- [ ] Avoid new UI panels.
+- [ ] Add tests for ordinary and scan readouts.
+
+Acceptance:
+
+- [ ] The player can distinguish site context at a glance.
+- [ ] No ownership transfer, law, rent, faction, or economy system is introduced.
+- [ ] Context tags prepare dependency and risk work.
+
+## Phase 68: Context Boundary Tests
+
+Goal: protect against site tags becoming accidental mechanics too early.
+
+- [ ] Add tests proving context tags do not alter collision, entry, carryables, worker route behavior, or save/load unless explicitly supported.
+- [ ] Document any intentionally unsupported tag behavior in TODO notes if needed.
+- [ ] Keep all tag behavior deterministic.
+- [ ] Avoid speculative hooks for future factions.
+
+Acceptance:
+
+- [ ] Tags remain player-facing context only.
+- [ ] Future mechanics can opt in deliberately.
+- [ ] The code remains small and current-scope.
+
+## Session: One Dependency Edge
+
+Gameplay outcome: one site visibly depends on another site or route, and the player can inspect that dependency.
+
+Big Picture: city flow should start with visible edges, not hidden graphs. Materials, access, energy, information, money, and authority can become flows later if the first edge is legible.
+
+Logical next step: after one dependency edge exists, make route purpose readouts explain what flows across it.
+
+## Phase 69: Dependency Edge Data
+
+Goal: represent one dependency between existing sites without building a graph engine.
+
+- [ ] Choose one edge such as `WORKPLACE DEPENDS ON SUPPLY` or `BUILDING DEPENDS ON PART`.
+- [ ] Store or derive the edge in a small helper/data shape.
+- [ ] Keep it readout-only in this phase.
+- [ ] Add tests for dependency resolution and missing-target behavior.
+
+Acceptance:
+
+- [ ] One dependency is explicit and inspectable.
+- [ ] No city-scale dependency graph, planner, or optimization UI is introduced.
+- [ ] Existing loop mechanics remain unchanged.
+
+## Phase 70: Dependency Inspection Readout
+
+Goal: show the dependency on the involved site or route.
+
+- [ ] Add text such as `DEPENDS ON: SUPPLY` or `SUPPORTS: WORKPLACE`.
+- [ ] Ensure the readout is available through ordinary inspection.
+- [ ] Keep debugger scan optional/enriching rather than required.
+- [ ] Add tests for source and target readouts.
+
+Acceptance:
+
+- [ ] The player can understand a simple dependency in-world.
+- [ ] No management view or dependency editor is introduced.
+- [ ] The edge prepares route-purpose work.
+
+## Phase 71: Dependency Boundary
+
+Goal: define what the dependency edge does not do yet.
+
+- [ ] Add tests proving the edge does not change worker routing, item pickup, or building improvement unless existing mechanics already do.
+- [ ] Keep any blockage/readiness behavior derived from current loop state.
+- [ ] Document deferred graph behavior in TODO notes if useful.
+- [ ] Avoid speculative dependency components for every future flow type.
+
+Acceptance:
+
+- [ ] The dependency is readable, not managerial.
+- [ ] Current gameplay remains deterministic.
+- [ ] The next session can focus on route purpose text.
+
+## Session: Route Purpose Readouts
+
+Gameplay outcome: paths and signposts explain what they connect and what currently moves or could move along them.
+
+Big Picture: route purpose turns movement infrastructure into readable city flow. This supports future material, labor, access, and information flows without adding a planner.
+
+Logical next step: after route purpose is visible, add one flow blockage that follows from an existing player action.
+
+## Phase 72: Path Purpose Helper
+
+Goal: derive a compact purpose label for each current pedestrian path.
+
+- [ ] Use connected building/site roles to derive labels such as `LABOR ROUTE`, `SUPPLY ROUTE`, or `PUBLIC ACCESS`.
+- [ ] Keep labels deterministic and readout-only.
+- [ ] Add tests for housing-workplace, workplace-supply, and any new site route.
+- [ ] Do not add pathfinding or route assignment behavior.
+
+Acceptance:
+
+- [ ] Paths have readable purpose.
+- [ ] The purpose follows existing map topology.
+- [ ] No route planner is introduced.
+
+## Phase 73: Signpost Purpose Text
+
+Goal: make signposts show route purpose in addition to destination.
+
+- [ ] Extend signpost readout with `ROUTE: ...` or `CARRIES: ...`.
+- [ ] Preserve existing direction glyph behavior.
+- [ ] Ensure spoofed signpost text still reads coherently.
+- [ ] Add tests for normal and spoofed signpost readouts.
+
+Acceptance:
+
+- [ ] The player can understand both destination and function.
+- [ ] Existing spoof behavior remains intact.
+- [ ] No new controls are introduced.
+
+## Phase 74: Route Scan Enrichment
+
+Goal: let the debugger reveal one hidden route-purpose detail.
+
+- [ ] Add one scan result such as `EXPECTED CARGO: SUPPLY/PART` or `ACCESS: WORKER ONLY`.
+- [ ] Reuse the current gadget result HUD.
+- [ ] Keep scan results volatile unless a later save need appears.
+- [ ] Add tests for path and signpost scan results.
+
+Acceptance:
+
+- [ ] The debugger adds hidden context rather than duplicating ordinary inspection.
+- [ ] No route map, minimap, or traffic system is introduced.
+- [ ] Flow blockage work has clear route vocabulary.
+
+## Session: Flow Blockage
+
+Gameplay outcome: one existing player action creates a visible blockage in a site or route flow.
+
+Big Picture: flow systems should emerge from concrete interruptions the player can perform, not from abstract simulation breadth.
+
+Logical next step: after one blockage is visible, add a recovery path and decide whether it persists.
+
+## Phase 75: One Flow Blockage Trigger
+
+Goal: choose one current verb that creates a readable flow blockage.
+
+- [ ] Use an existing action such as carrying expected supply, holding finished part, or spoofing a route signpost.
+- [ ] Derive one blockage label from that state.
+- [ ] Keep the trigger local and reversible.
+- [ ] Add tests for blockage appearing from the chosen action.
+
+Acceptance:
+
+- [ ] The player can create a visible blockage using existing verbs.
+- [ ] No new job system, economy, or crisis state is introduced.
+- [ ] The blockage follows existing world state.
+
+## Phase 76: Site And Route Blockage Readouts
+
+Goal: show the blockage where the player would look for it.
+
+- [ ] Add readout text to the affected site, path, signpost, or worker.
+- [ ] Ensure text names the missing/blocked flow.
+- [ ] Keep the HUD compact.
+- [ ] Add tests for each affected readout.
+
+Acceptance:
+
+- [ ] The blockage is inspectable from the relevant object.
+- [ ] No alert feed or objective marker is introduced.
+- [ ] The player can reason from visible symptoms.
+
+## Phase 77: Blockage Does Not Spread
+
+Goal: make the first flow blockage explicitly local.
+
+- [ ] Add tests proving unrelated sites and routes remain normal.
+- [ ] Avoid adding cascading city-wide effects.
+- [ ] Keep future cascade work deferred until multiple local flows exist.
+- [ ] Document the boundary if needed.
+
+Acceptance:
+
+- [ ] The flow blockage has a small blast radius.
+- [ ] The game avoids premature systemic breadth.
+- [ ] Recovery work can target one concrete condition.
+
+## Session: Flow Recovery
+
+Gameplay outcome: the player can restore the blocked flow through a small, current-scope action.
+
+Big Picture: recovery should make systems feel organic and reversible. The city continues when conditions are restored, rather than waiting for player commands.
+
+Logical next step: after local flow interruption and recovery work, consider local risk only if the player-facing loop needs stakes.
+
+## Phase 78: One Recovery Condition
+
+Goal: define exactly how the selected blockage clears.
+
+- [ ] Use a current action such as dropping/returning supply, restoring a signpost, delivering a part, or clearing a held output.
+- [ ] Ensure the worker or loop resumes from existing state.
+- [ ] Add tests for blocked and recovered behavior.
+- [ ] Keep recovery deterministic.
+
+Acceptance:
+
+- [ ] The player can restore the flow without a reset.
+- [ ] The city resumes organically.
+- [ ] No repair minigame or management command is introduced.
+
+## Phase 79: Recovery Readout
+
+Goal: make recovery visible through the same objects that showed the blockage.
+
+- [ ] Add compact text such as `FLOW: CLEAR`, `RECOVERED`, or restored normal labels.
+- [ ] Ensure stale blockage text clears.
+- [ ] Add tests for readout transitions.
+- [ ] Keep the HUD/readout surfaces small.
+
+Acceptance:
+
+- [ ] The player can tell the flow recovered.
+- [ ] No separate log or journal is required.
+- [ ] Future risk work can reference resolved/unresolved local states.
+
+## Phase 80: Recovery Persistence Boundary
+
+Goal: decide whether the blockage/recovery state belongs in tiny save now.
+
+- [ ] If the state is derived from already-saved data, add tests proving save/load restores it.
+- [ ] If new persistence is needed, add only the smallest required state.
+- [ ] If persistence is premature, document the deferral.
+- [ ] Do not add a generalized event or history system.
+
+Acceptance:
+
+- [ ] Save/load behavior is explicit and deterministic.
+- [ ] Flow recovery stays current-scope.
+- [ ] The roadmap can move toward local risk or hidden-system clues without ambiguity.
 
 ## Still Deferred
 
