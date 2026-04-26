@@ -94,6 +94,16 @@ inline Entity buildBuildingUnit(Registry& registry,
     return building;
 }
 
+inline Entity firstWorldBuilderBuildingByRole(Registry& registry, MicroZoneRole role) {
+    auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
+    for (Entity building : buildings) {
+        if (registry.get<BuildingUseComponent>(building).role == role) {
+            return building;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
 inline void buildBuildingUnits(Registry& registry,
                                MicroZoneRole role,
                                float x0, float y0, float x1, float y1,
@@ -241,9 +251,19 @@ inline std::vector<Entity> buildWorld(Registry& registry, const WorldConfig& con
     }
 
     if (config.carryable_object_count > 0) {
+        const Entity supply = firstWorldBuilderBuildingByRole(registry, MicroZoneRole::SUPPLY);
+        TransformComponent supply_transform{};
+        const bool seed_at_supply =
+            supply != MAX_ENTITIES && registry.has<TransformComponent>(supply);
+        if (seed_at_supply) {
+            supply_transform = registry.get<TransformComponent>(supply);
+        }
         for (int i = 0; i < config.carryable_object_count; ++i) {
             Entity item = registry.create();
-            registry.assign<TransformComponent>(item, -30.0f + i * 20.0f, -115.0f, 8.0f, 8.0f);
+            const float item_x = seed_at_supply ? supply_transform.x + i * 10.0f
+                                                : -30.0f + i * 20.0f;
+            const float item_y = seed_at_supply ? supply_transform.y : -115.0f;
+            registry.assign<TransformComponent>(item, item_x, item_y, 8.0f, 8.0f);
             registry.assign<CarryableComponent>(item);
             registry.assign<GlyphComponent>(item, std::string("*"),
                 static_cast<uint8_t>(200), static_cast<uint8_t>(200), static_cast<uint8_t>(200),
@@ -277,6 +297,26 @@ inline float aabbDistance(const TransformComponent& a, const TransformComponent&
     const float dx = std::max(0.0f, std::fabs(a.x - b.x) - (a.width + b.width) * 0.5f);
     const float dy = std::max(0.0f, std::fabs(a.y - b.y) - (a.height + b.height) * 0.5f);
     return std::sqrt(dx * dx + dy * dy);
+}
+
+inline bool carryableObjectIsKind(Registry& registry, Entity object, ItemKind kind);
+
+inline bool supplyObjectAtSupplyBuilding(Registry& registry, Entity object) {
+    if (!registry.alive(object) ||
+        !registry.has<CarryableComponent>(object) ||
+        !registry.has<TransformComponent>(object) ||
+        !carryableObjectIsKind(registry, object, ItemKind::SUPPLY)) {
+        return false;
+    }
+
+    const Entity supply = firstWorldBuilderBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    if (supply == MAX_ENTITIES || !registry.has<TransformComponent>(supply)) {
+        return false;
+    }
+
+    constexpr float supply_pickup_range_wu = 18.0f;
+    return aabbDistance(registry.get<TransformComponent>(object),
+                        registry.get<TransformComponent>(supply)) <= supply_pickup_range_wu;
 }
 
 inline bool transformOverlapsSolid(Registry& registry,
@@ -526,6 +566,35 @@ inline std::string workplaceBenchReadout(Registry& registry) {
     return "WORK BENCH: EMPTY";
 }
 
+inline bool workplaceOutputBlockedByCarrier(Registry& registry) {
+    if (!workplaceBenchOutputReady(registry)) {
+        return false;
+    }
+
+    const Entity object = firstCarryableObject(registry);
+    return object != MAX_ENTITIES && carryableObjectIsHeld(registry, object);
+}
+
+inline std::string workplaceBenchLoopReadout(Registry& registry) {
+    const Entity workplace = firstWorkplaceBenchBuilding(registry);
+    if (workplace == MAX_ENTITIES) {
+        return "WORK BENCH: EMPTY; LOOP: NEEDS SUPPLY";
+    }
+
+    switch (registry.get<WorkplaceBenchComponent>(workplace).state) {
+        case WorkplaceBenchState::EMPTY:
+            return "WORK BENCH: EMPTY; LOOP: NEEDS SUPPLY";
+        case WorkplaceBenchState::STOCKED:
+            return "WORK BENCH: STOCKED; LOOP: BENCH OCCUPIED";
+        case WorkplaceBenchState::OUTPUT_READY:
+            if (workplaceOutputBlockedByCarrier(registry)) {
+                return "WORK BENCH: OUTPUT WAITING; BLOCKED: BLOCKED BY CARRIER";
+            }
+            return "WORK BENCH: OUTPUT WAITING; LOOP: READY FOR PICKUP";
+    }
+    return "WORK BENCH: EMPTY; LOOP: NEEDS SUPPLY";
+}
+
 inline const char* workplaceBenchStateSaveName(WorkplaceBenchState state) {
     switch (state) {
         case WorkplaceBenchState::EMPTY: return "EMPTY";
@@ -572,16 +641,67 @@ inline std::string buildingImprovementReadout(Registry& registry) {
     return std::string("BUILDING IMPROVED: ") + (buildingImproved(registry) ? "YES" : "NO");
 }
 
+inline bool finishedPartInCirculation(Registry& registry) {
+    auto objects = registry.view<CarryableComponent, TransformComponent>();
+    for (Entity object : objects) {
+        if (carryableObjectIsKind(registry, object, ItemKind::PART)) {
+            const auto& transform = registry.get<TransformComponent>(object);
+            if (carryableObjectIsHeld(registry, object) ||
+                transform.x != 99999.0f ||
+                transform.y != 99999.0f) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+inline std::string buildingImprovementLoopReadout(Registry& registry) {
+    if (!buildingImproved(registry)) {
+        return "BUILDING: NEEDS PART; " + buildingImprovementReadout(registry);
+    }
+    if (finishedPartInCirculation(registry)) {
+        return "BUILDING: ALREADY COMPLETE; " + buildingImprovementReadout(registry);
+    }
+    return "BUILDING: IMPROVED; " + buildingImprovementReadout(registry);
+}
+
 inline std::string housingInteriorReadout(Registry& registry) {
-    return shelterSupplyReadout(registry) + "; " + buildingImprovementReadout(registry);
+    return shelterSupplyReadout(registry) + "; " + buildingImprovementLoopReadout(registry);
+}
+
+inline bool routeSignpostSpoofed(Registry& registry, Entity marker) {
+    return registry.alive(marker) &&
+           registry.has<RouteSignpostComponent>(marker) &&
+           registry.get<RouteSignpostComponent>(marker).spoofed;
+}
+
+inline bool anyRouteSignpostSpoofed(Registry& registry) {
+    auto signposts = registry.view<RouteSignpostComponent>();
+    for (Entity marker : signposts) {
+        if (registry.get<RouteSignpostComponent>(marker).spoofed) {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline std::string routeSignpostReadout(Registry& registry, Entity marker) {
     if (!registry.alive(marker) || !registry.has<RouteSignpostComponent>(marker)) {
         return "TO UNKNOWN";
     }
-    return std::string("TO ") +
-           roleDisplayName(registry.get<RouteSignpostComponent>(marker).target_role);
+    const auto& signpost = registry.get<RouteSignpostComponent>(marker);
+    std::string readout = std::string("TO ") +
+        roleDisplayName(signpost.target_role) +
+        "; SIGNAL: ";
+    if (signpost.spoofed) {
+        readout += "CORRUPTED; SPOOFED: ROUTE SIGNAL CONFUSED; CONSEQUENCE: ROUTE DELAY";
+    } else if (signpost.signal_recovered) {
+        readout += "CLEAR; RECOVERY: ROUTE SIGNAL CLEAR; CONSEQUENCE: NONE";
+    } else {
+        readout += "CLEAR; CONSEQUENCE: NONE";
+    }
+    return readout;
 }
 
 inline bool carryableObjectUnavailableFromSupply(Registry& registry) {
@@ -591,21 +711,206 @@ inline bool carryableObjectUnavailableFromSupply(Registry& registry) {
 }
 
 inline bool workerReturningToSupply(Registry& registry, Entity worker);
+inline bool workerCarryingSupplyObject(Registry& registry, Entity worker);
+inline bool workerCarryingPartObject(Registry& registry, Entity worker);
+inline bool workerAtSupplyEndpoint(Registry& registry, Entity worker);
+inline bool workerAtWorkplaceEndpoint(Registry& registry, Entity worker);
+inline bool workerCanWorkWorkplaceBench(Registry& registry, Entity worker);
+inline bool workerCanTakeWorkplaceOutput(Registry& registry, Entity worker);
+inline Entity availableSupplyCarryableObject(Registry& registry);
+
+inline bool playerCarryingItemKind(Registry& registry, ItemKind kind) {
+    auto players = registry.view<PlayerComponent>();
+    for (Entity player : players) {
+        const Entity object = registry.get<PlayerComponent>(player).carried_object;
+        if (object != MAX_ENTITIES && carryableObjectIsKind(registry, object, kind)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline const char* workerLaborReasonTag(Registry& registry, Entity worker) {
+    (void)registry;
+    (void)worker;
+    return "WAGE ROUTE";
+}
+
+inline const char* workerCarriedItemName(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return "NONE";
+    }
+
+    const Entity carried = registry.get<FixedActorComponent>(worker).carried_object;
+    if (carried == MAX_ENTITIES) {
+        return "NONE";
+    }
+    return carryableObjectLabel(registry, carried);
+}
+
+inline std::string workerRoutineState(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return "UNKNOWN";
+    }
+    if (buildingImproved(registry)) {
+        return "DONE";
+    }
+    if (workerCarryingPartObject(registry, worker)) {
+        return "DELIVERING PART";
+    }
+    if (workerCarryingSupplyObject(registry, worker)) {
+        return "DELIVERING SUPPLY";
+    }
+    if (workerCanWorkWorkplaceBench(registry, worker)) {
+        return "WORKING BENCH";
+    }
+    if (workerCanTakeWorkplaceOutput(registry, worker)) {
+        return "TAKING PART";
+    }
+    if (workerReturningToSupply(registry, worker) || !workerAtSupplyEndpoint(registry, worker)) {
+        return "GOING TO SUPPLY";
+    }
+    return "PICKING UP SUPPLY";
+}
+
+inline bool playerCarryingExpectedSupplyForWorker(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+    if (buildingImproved(registry) ||
+        workplaceBenchStocked(registry) ||
+        workplaceBenchOutputReady(registry) ||
+        workerCarryingSupplyObject(registry, worker) ||
+        workerCarryingPartObject(registry, worker)) {
+        return false;
+    }
+
+    const std::string routine = workerRoutineState(registry, worker);
+    if (routine != "PICKING UP SUPPLY" && routine != "GOING TO SUPPLY") {
+        return false;
+    }
+
+    return playerCarryingItemKind(registry, ItemKind::SUPPLY) &&
+           availableSupplyCarryableObject(registry) == MAX_ENTITIES;
+}
+
+inline bool productionInterruptedByPlayer(Registry& registry) {
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        if (playerCarryingExpectedSupplyForWorker(registry, worker)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline std::string productionConsequenceReadout(Registry& registry) {
+    return productionInterruptedByPlayer(registry) ?
+        "CONSEQUENCE: SHIFT STALLED" :
+        "CONSEQUENCE: NONE";
+}
+
+inline std::string workerBlockedReason(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return "";
+    }
+    if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
+        return "ROUTE SIGNAL CONFUSED";
+    }
+    if (buildingImproved(registry)) {
+        return "BUILDING ALREADY IMPROVED";
+    }
+    if (playerCarryingExpectedSupplyForWorker(registry, worker)) {
+        return "WAITING FOR SUPPLY";
+    }
+    if (workerCarryingSupplyObject(registry, worker) && workerAtWorkplaceEndpoint(registry, worker)) {
+        if (workplaceBenchOutputReady(registry)) {
+            return "OUTPUT WAITING";
+        }
+        if (workplaceBenchStocked(registry)) {
+            return "BENCH OCCUPIED";
+        }
+    }
+    if (workplaceOutputBlockedByCarrier(registry)) {
+        return "OUTPUT WAITING";
+    }
+    if (workerAtSupplyEndpoint(registry, worker) &&
+        !workerCarryingSupplyObject(registry, worker) &&
+        !workerCarryingPartObject(registry, worker)) {
+        if (workplaceBenchOutputReady(registry)) {
+            return "OUTPUT WAITING";
+        }
+        if (workplaceBenchStocked(registry)) {
+            return "BENCH OCCUPIED";
+        }
+        if (availableSupplyCarryableObject(registry) == MAX_ENTITIES) {
+            return "NO SUPPLY";
+        }
+    }
+    return "";
+}
+
+inline std::string workerConsequenceSourceReadout(Registry& registry, Entity worker) {
+    return workerCurrentPathHasSpoofedRouteSignpost(registry, worker) ?
+        "SOURCE: CORRUPTED ROUTE SIGNAL" :
+        "";
+}
+
+inline std::string workerRouteConsequenceReadout(Registry& registry, Entity worker) {
+    return workerCurrentPathHasSpoofedRouteSignpost(registry, worker) ?
+        "WAITING ON ROUTE SIGNAL" :
+        "";
+}
 
 inline std::string workerCarryReadout(Registry& registry, Entity worker) {
-    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker) ||
-        registry.get<FixedActorComponent>(worker).carried_object == MAX_ENTITIES) {
-        if (workerReturningToSupply(registry, worker)) {
-            return std::string("WORKER ROUTE: RETURNING TO SUPPLY; ") +
-                   workplaceBenchReadout(registry);
-        }
-        if (workplaceBenchStocked(registry) || workplaceBenchOutputReady(registry)) {
-            return std::string("WORKER CARRYING: NONE; ") + workplaceBenchReadout(registry);
-        }
-        return "WORKER CARRYING: NONE";
+    std::string readout = std::string("WORKER ROUTINE: ") +
+        workerRoutineState(registry, worker) +
+        "; REASON: " +
+        workerLaborReasonTag(registry, worker) +
+        "; CARRYING: " +
+        workerCarriedItemName(registry, worker);
+    if (workplaceBenchStocked(registry) || workplaceBenchOutputReady(registry)) {
+        readout += "; " + workplaceBenchReadout(registry);
     }
-    return std::string("WORKER CARRYING: ") +
-           carryableObjectLabel(registry, registry.get<FixedActorComponent>(worker).carried_object);
+    if (buildingImproved(registry)) {
+        readout += "; " + buildingImprovementReadout(registry);
+    }
+    const std::string blocked_reason = workerBlockedReason(registry, worker);
+    if (!blocked_reason.empty()) {
+        readout += "; BLOCKED: " + blocked_reason;
+    }
+    const std::string consequence_source = workerConsequenceSourceReadout(registry, worker);
+    if (!consequence_source.empty()) {
+        readout += "; " + consequence_source;
+    }
+    const std::string route_consequence = workerRouteConsequenceReadout(registry, worker);
+    if (!route_consequence.empty()) {
+        readout += "; " + route_consequence;
+    }
+    if (playerCarryingExpectedSupplyForWorker(registry, worker)) {
+        readout += "; " + productionConsequenceReadout(registry);
+    }
+    return readout;
+}
+
+inline std::string productionLoopSummaryReadout(Registry& registry) {
+    if (anyRouteSignpostSpoofed(registry)) {
+        return "LOOP: SPOOFED; INTERFERENCE: ROUTE; CONSEQUENCE: ROUTE SIGNAL CONFUSED";
+    }
+    if (buildingImproved(registry)) {
+        return "LOOP: COMPLETE";
+    }
+    if (productionInterruptedByPlayer(registry)) {
+        return "LOOP: BLOCKED; " + productionConsequenceReadout(registry);
+    }
+
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        if (!workerBlockedReason(registry, worker).empty()) {
+            return "LOOP: BLOCKED";
+        }
+    }
+    return "LOOP: RUNNING";
 }
 
 inline bool workerCarryingSupplyObject(Registry& registry, Entity worker) {
@@ -818,6 +1123,10 @@ inline size_t updateWorkerReturnRoutes(Registry& registry, float dt) {
             ++routed;
             continue;
         }
+        if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
+            ++routed;
+            continue;
+        }
 
         const auto& path_transform = registry.get<TransformComponent>(worker_component.path_entity);
         const float span = std::max(path_transform.width, path_transform.height);
@@ -858,7 +1167,7 @@ inline Entity availableSupplyCarryableObject(Registry& registry) {
     auto objects = registry.view<CarryableComponent, TransformComponent>();
     for (Entity object : objects) {
         if (!carryableObjectIsHeld(registry, object) &&
-            carryableObjectIsKind(registry, object, ItemKind::SUPPLY)) {
+            supplyObjectAtSupplyBuilding(registry, object)) {
             return object;
         }
     }
@@ -969,6 +1278,10 @@ inline size_t updateWorkerSupplyDeliveryRoutes(Registry& registry, float dt) {
 
         auto& worker_component = registry.get<FixedActorComponent>(worker);
         if (worker_component.direction == 0.0f) {
+            ++routed;
+            continue;
+        }
+        if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
             ++routed;
             continue;
         }
@@ -1249,6 +1562,10 @@ inline size_t updateWorkerFinishedItemDeliveryRoutes(Registry& registry, float d
 
         auto& worker_component = registry.get<FixedActorComponent>(worker);
         if (worker_component.direction == 0.0f) {
+            ++routed;
+            continue;
+        }
+        if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
             ++routed;
             continue;
         }
@@ -1676,6 +1993,194 @@ inline InspectionTarget playerInspectionTarget(Registry& registry,
     }
 
     return nearestInspectionTargetInRange(registry, registry.get<TransformComponent>(player), range_wu);
+}
+
+inline bool playerHasInheritedGadget(Registry& registry, Entity player) {
+    return registry.alive(player) &&
+           registry.has<InheritedGadgetComponent>(player) &&
+           registry.get<InheritedGadgetComponent>(player).available;
+}
+
+inline std::string inheritedGadgetLabel(Registry& registry, Entity player) {
+    if (!playerHasInheritedGadget(registry, player)) {
+        return "NONE";
+    }
+    return registry.get<InheritedGadgetComponent>(player).label;
+}
+
+inline std::string inheritedGadgetReadout(Registry& registry, Entity player) {
+    if (!playerHasInheritedGadget(registry, player)) {
+        return "GADGET:NONE";
+    }
+    return "GADGET:" + inheritedGadgetLabel(registry, player) + " READY";
+}
+
+inline std::string inheritedGadgetResultReadout(Registry& registry, Entity player) {
+    if (!playerHasInheritedGadget(registry, player)) {
+        return "GADGET RESULT: UNAVAILABLE";
+    }
+
+    const auto& gadget = registry.get<InheritedGadgetComponent>(player);
+    if (gadget.last_result.empty()) {
+        return "GADGET RESULT: IDLE";
+    }
+    return "GADGET RESULT: " + gadget.last_result;
+}
+
+inline const char* inheritedGadgetTargetLabel(InspectionTargetType type) {
+    switch (type) {
+        case InspectionTargetType::HOUSING:
+            return "HOUSING";
+        case InspectionTargetType::WORKPLACE:
+            return "WORKPLACE";
+        case InspectionTargetType::SUPPLY:
+            return "SUPPLY";
+        case InspectionTargetType::PEDESTRIAN_PATH:
+            return "PATH";
+        case InspectionTargetType::ROUTE_SIGNPOST:
+            return "SIGNPOST";
+        case InspectionTargetType::WORKER:
+            return "WORKER";
+        case InspectionTargetType::HOUSING_INTERIOR:
+            return "HOUSING INTERIOR";
+        case InspectionTargetType::WORKPLACE_INTERIOR:
+            return "WORKPLACE INTERIOR";
+        case InspectionTargetType::SUPPLY_INTERIOR:
+            return "SUPPLY INTERIOR";
+        case InspectionTargetType::CARRYABLE_OBJECT:
+            return "CARRYABLE OBJECT";
+        case InspectionTargetType::NONE:
+            return "NO TARGET";
+    }
+    return "NO TARGET";
+}
+
+inline std::string inheritedGadgetWorkerScan(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return "NO SIGNAL";
+    }
+
+    return "WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1";
+}
+
+inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
+                                                   const InspectionTarget& target) {
+    switch (target.type) {
+        case InspectionTargetType::HOUSING:
+        case InspectionTargetType::HOUSING_INTERIOR:
+            return "HOUSING PURPOSE: BUILDING RECOVERY";
+        case InspectionTargetType::WORKPLACE:
+        case InspectionTargetType::WORKPLACE_INTERIOR:
+            return "WORKPLACE PURPOSE: CONVERT SUPPLY TO PART";
+        case InspectionTargetType::SUPPLY:
+        case InspectionTargetType::SUPPLY_INTERIOR:
+            return "SUPPLY PURPOSE: SOURCE LOOP MATERIAL";
+        case InspectionTargetType::ROUTE_SIGNPOST:
+            if (registry.alive(target.entity) && registry.has<RouteSignpostComponent>(target.entity)) {
+                return std::string("SIGNPOST ROUTE CARRIES: SUPPLY/PART; POINTS TO ") +
+                       roleDisplayName(registry.get<RouteSignpostComponent>(target.entity).target_role);
+            }
+            return "SIGNPOST ROUTE CARRIES: SUPPLY/PART";
+        case InspectionTargetType::PEDESTRIAN_PATH:
+            return "PATH PURPOSE: WORKER ACCESS ROUTE";
+        case InspectionTargetType::CARRYABLE_OBJECT:
+            return "OBJECT PURPOSE: LOOP MATERIAL";
+        case InspectionTargetType::WORKER:
+        case InspectionTargetType::NONE:
+            break;
+    }
+    return std::string(inheritedGadgetTargetLabel(target.type)) + " SIGNAL DETECTED";
+}
+
+inline std::string inheritedGadgetScanResult(Registry& registry, const InspectionTarget& target) {
+    if (target.entity == MAX_ENTITIES) {
+        return "NO SIGNAL";
+    }
+    if (target.type == InspectionTargetType::WORKER) {
+        return inheritedGadgetWorkerScan(registry, target.entity);
+    }
+    return inheritedGadgetSiteMetadataScan(registry, target);
+}
+
+inline bool inheritedGadgetCanSpoofTarget(const InspectionTarget& target) {
+    return target.entity != MAX_ENTITIES && target.type == InspectionTargetType::ROUTE_SIGNPOST;
+}
+
+inline bool playerCanUseInheritedGadget(Registry& registry, Entity player) {
+    return playerHasInheritedGadget(registry, player);
+}
+
+inline std::string inheritedGadgetPromptReadout(Registry& registry,
+                                                Entity player,
+                                                float range_wu) {
+    if (!playerHasInheritedGadget(registry, player)) {
+        return "GADGET:NONE";
+    }
+
+    const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
+    if (target.entity == MAX_ENTITIES) {
+        return "G USE DEBUGGER: NO SIGNAL";
+    }
+    return std::string("G USE DEBUGGER ON ") + inheritedGadgetTargetLabel(target.type);
+}
+
+inline std::string inheritedGadgetSpoofPromptReadout(Registry& registry,
+                                                     Entity player,
+                                                     float range_wu) {
+    if (!playerHasInheritedGadget(registry, player)) {
+        return "SPOOF:NONE";
+    }
+
+    const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
+    if (!inheritedGadgetCanSpoofTarget(target)) {
+        return "SHIFT+G SPOOF:N/A";
+    }
+    return routeSignpostSpoofed(registry, target.entity) ?
+        "SHIFT+G RESTORE SIGNPOST" :
+        "SHIFT+G SPOOF SIGNPOST";
+}
+
+inline bool useInheritedGadget(Registry& registry, Entity player, float range_wu) {
+    if (!playerCanUseInheritedGadget(registry, player)) {
+        return false;
+    }
+
+    auto& gadget = registry.get<InheritedGadgetComponent>(player);
+    const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
+    if (target.entity == MAX_ENTITIES) {
+        gadget.last_result = "NO SIGNAL";
+        return false;
+    }
+
+    gadget.last_result = inheritedGadgetScanResult(registry, target);
+    return true;
+}
+
+inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float range_wu) {
+    if (!playerCanUseInheritedGadget(registry, player)) {
+        return false;
+    }
+
+    auto& gadget = registry.get<InheritedGadgetComponent>(player);
+    const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
+    if (target.entity == MAX_ENTITIES) {
+        gadget.last_result = "SPOOF FAILED: NO SIGNAL";
+        return false;
+    }
+    if (!inheritedGadgetCanSpoofTarget(target) ||
+        !registry.alive(target.entity) ||
+        !registry.has<RouteSignpostComponent>(target.entity)) {
+        gadget.last_result = "SPOOF FAILED: SIGNPOST REQUIRED";
+        return false;
+    }
+
+    auto& signpost = registry.get<RouteSignpostComponent>(target.entity);
+    signpost.spoofed = !signpost.spoofed;
+    signpost.signal_recovered = !signpost.spoofed;
+    gadget.last_result = signpost.spoofed ?
+        "SPOOFED SIGNPOST: ROUTE SIGNAL CONFUSED" :
+        "RESTORED SIGNPOST: ROUTE SIGNAL CLEAR";
+    return true;
 }
 
 inline PlayerLocationState locationStateForRole(MicroZoneRole role, bool inside) {

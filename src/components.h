@@ -112,6 +112,12 @@ struct PlayerComponent {
     Entity carried_object = MAX_ENTITIES;
 };
 
+struct InheritedGadgetComponent {
+    bool available = true;
+    std::string label = "MOTHER'S DEBUGGER";
+    std::string last_result;
+};
+
 struct CarryableComponent {
     ItemKind kind = ItemKind::SUPPLY;
 };
@@ -218,4 +224,6 @@ struct RouteSignpostComponent {
     Entity path_entity = MAX_ENTITIES;
     Entity endpoint_entity = MAX_ENTITIES;
     MicroZoneRole target_role = MicroZoneRole::HOUSING;
+    bool spoofed = false;
+    bool signal_recovered = false;
 };

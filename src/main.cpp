@@ -302,7 +302,7 @@ static const char* inspectionDetail(Registry& registry, const InspectionComponen
     if (inspection.target_type == InspectionTargetType::WORKPLACE_INTERIOR &&
         registry.alive(inspection.target_entity) &&
         registry.has<WorkplaceBenchComponent>(inspection.target_entity)) {
-        dynamic_detail = workplaceBenchReadout(registry);
+        dynamic_detail = workplaceBenchLoopReadout(registry);
         return dynamic_detail.c_str();
     }
     if (inspection.target_type == InspectionTargetType::WORKER &&
@@ -582,6 +582,7 @@ int main(int, char**) {
     Entity player = registry.create();
     registry.assign<TransformComponent>(player, 0.0f, -115.0f, 12.0f, 12.0f);
     registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
     registry.assign<BuildingInteractionComponent>(player);
     registry.assign<InspectionComponent>(player);
     registry.assign<GlyphComponent>(player, std::string("@"),
@@ -654,6 +655,13 @@ int main(int, char**) {
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_SPACE) {
                 performInspection(registry, player, INSPECTION_RANGE_WU);
             }
+            if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_G) {
+                if ((event.key.keysym.mod & KMOD_SHIFT) != 0) {
+                    useInheritedGadgetSpoof(registry, player, INSPECTION_RANGE_WU);
+                } else {
+                    useInheritedGadget(registry, player, INSPECTION_RANGE_WU);
+                }
+            }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F5) {
                 const TinySaveStatus status = saveTinyStateToFile(registry, player, TINY_SAVE_PATH);
                 save_status = saveResultStatusLine(status);
@@ -712,7 +720,7 @@ int main(int, char**) {
             float fps = dt > 0.0f ? 1.0f / dt : 0.0f;
             std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + SUPPLY + WORKER", fps, registry.entity_count());
             drawText(renderer, font, line, 6, 6, hud, 0.7f);
-            std::snprintf(line, sizeof(line), "WASD MOVE  E ACT/DOORS  F PICK/DROP  SPACE INSPECT  F5 SAVE  F9 LOAD  CAM:%.0f,%.0f Z:%.2f",
+            std::snprintf(line, sizeof(line), "WASD MOVE  E ACT/DOORS  F PICK/DROP  SPACE INSPECT  G SCAN  SHIFT+G SPOOF  F5 SAVE  F9 LOAD  CAM:%.0f,%.0f Z:%.2f",
                           active_camera.x, active_camera.y, active_camera.scale);
             drawText(renderer, font, line, 6, 20, SDL_Color{110, 190, 230, 220}, 0.65f);
             const PlayerLocationState location_state =
@@ -773,26 +781,33 @@ int main(int, char**) {
                               locationPrompt(location_state));
             }
             drawText(renderer, font, line, 6, 34, SDL_Color{245, 205, 120, 230}, 0.65f);
+            std::snprintf(line, sizeof(line), "%s  %s  %s",
+                          inheritedGadgetReadout(registry, player).c_str(),
+                          inheritedGadgetPromptReadout(registry, player, INSPECTION_RANGE_WU).c_str(),
+                          inheritedGadgetSpoofPromptReadout(registry, player, INSPECTION_RANGE_WU).c_str());
+            drawText(renderer, font, line, 6, 48, SDL_Color{190, 205, 255, 225}, 0.65f);
             const bool can_inspect = playerInspectionTarget(registry, player, INSPECTION_RANGE_WU).entity != MAX_ENTITIES;
             std::snprintf(line, sizeof(line), "INSPECT:%s",
                           can_inspect ? "SPACE READ NEARBY" : "NO NEARBY TARGET");
-            drawText(renderer, font, line, 6, 48, SDL_Color{180, 220, 190, 220}, 0.65f);
+            drawText(renderer, font, line, 6, 62, SDL_Color{180, 220, 190, 220}, 0.65f);
             if (registry.has<InspectionComponent>(player) &&
                 registry.get<InspectionComponent>(player).has_result) {
                 const auto& inspection = registry.get<InspectionComponent>(player);
                 std::snprintf(line, sizeof(line), "READOUT:%s - %s",
                               inspectionTargetName(inspection.target_type),
                               inspectionDetail(registry, inspection));
-                drawText(renderer, font, line, 6, 62, SDL_Color{245, 230, 150, 230}, 0.65f);
+                drawText(renderer, font, line, 6, 76, SDL_Color{245, 230, 150, 230}, 0.65f);
             }
             std::snprintf(line, sizeof(line), "STATE:%s", save_status.c_str());
-            drawText(renderer, font, line, 6, 76, SDL_Color{150, 215, 245, 220}, 0.65f);
+            drawText(renderer, font, line, 6, 90, SDL_Color{150, 215, 245, 220}, 0.65f);
             if (firstShelterStockBuilding(registry) != MAX_ENTITIES) {
-                drawText(renderer, font, housingInteriorReadout(registry).c_str(), 6, 90, SDL_Color{245, 215, 160, 220}, 0.65f);
+                drawText(renderer, font, housingInteriorReadout(registry).c_str(), 6, 104, SDL_Color{245, 215, 160, 220}, 0.65f);
             }
             if (firstWorkplaceBenchBuilding(registry) != MAX_ENTITIES) {
-                drawText(renderer, font, workplaceBenchReadout(registry).c_str(), 6, 104, SDL_Color{245, 185, 120, 220}, 0.65f);
+                drawText(renderer, font, workplaceBenchReadout(registry).c_str(), 6, 118, SDL_Color{245, 185, 120, 220}, 0.65f);
             }
+            drawText(renderer, font, productionLoopSummaryReadout(registry).c_str(), 6, 132, SDL_Color{235, 170, 210, 220}, 0.65f);
+            drawText(renderer, font, inheritedGadgetResultReadout(registry, player).c_str(), 6, 146, SDL_Color{205, 215, 255, 220}, 0.65f);
         }
 
         SDL_RenderPresent(renderer);

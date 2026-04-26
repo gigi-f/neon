@@ -32,6 +32,30 @@ inline Entity firstPedestrianPath(Registry& registry) {
     return MAX_ENTITIES;
 }
 
+inline bool pathHasSpoofedRouteSignpost(Registry& registry, Entity path_entity) {
+    if (!registry.alive(path_entity)) {
+        return false;
+    }
+
+    auto signposts = registry.view<RouteSignpostComponent>();
+    for (Entity marker : signposts) {
+        const auto& signpost = registry.get<RouteSignpostComponent>(marker);
+        if (signpost.path_entity == path_entity && signpost.spoofed) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool workerCurrentPathHasSpoofedRouteSignpost(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+    const auto& worker_component = registry.get<FixedActorComponent>(worker);
+    return worker_component.kind == FixedActorKind::WORKER &&
+           pathHasSpoofedRouteSignpost(registry, worker_component.path_entity);
+}
+
 inline TransformComponent transformOnPath(const TransformComponent& path, float route_t) {
     const float t = std::clamp(route_t, 0.0f, 1.0f);
     const bool vertical = path.height >= path.width;
@@ -151,6 +175,9 @@ inline void updateFixedActors(Registry& registry, float dt) {
         }
         if (!registry.alive(component.path_entity) ||
             !registry.has<TransformComponent>(component.path_entity)) {
+            continue;
+        }
+        if (pathHasSpoofedRouteSignpost(registry, component.path_entity)) {
             continue;
         }
 
