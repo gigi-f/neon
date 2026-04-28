@@ -1253,3 +1253,23 @@ Logical next step: expose the witnessed state through local worker/building read
 - [x] If the player uses `G` Interference Torch to spoof a signpost while the worker is close enough to be affected by the route, record a local suspicion event with a route-tampering cause.
 - [x] Using `G` Interference Torch to restore the signpost clears the flow blockage but does not silently erase that it was witnessed.
 - [x] Acceptance: no global surveillance, faction, wanted-level, or NPC pursuit state is introduced; tests cover witnessed route tampering and restoration.
+
+## Completed Session: Local Suspicion Readout
+
+Gameplay outcome: local suspicion is readable, bounded, and tied to the place where the player caused it.
+
+Big Picture: suspicion should be inspectable like every other hidden-system hint. The player should understand who noticed, what they noticed, and what object or route is involved.
+
+Logical next step: give the player one current-scope way to reduce the local concern without adding a broad stealth system.
+
+## Phase 73: Add worker and workplace suspicion inspection.
+
+- [x] `SPACE` on the worker and affected workplace shows a compact local suspicion line such as `SUSPICION: MISSING PART` or `SUSPICION: ROUTE TAMPERING`.
+- [x] The line identifies only current-scope cause and target; it does not infer motives, crimes, or citywide consequences.
+- [x] Acceptance: readouts clear when no local suspicion exists; tests cover worker and building readout boundaries.
+
+## Phase 74: Add Debugger view of local suspicion.
+
+- [x] `SPACE` on the worker, affected workplace, or affected route reveals the local witness record and the current suspected cause through Debugger inspection.
+- [x] The Debugger distinguishes active flow blockage from lingering local suspicion.
+- [x] Acceptance: volatile last-result HUD behavior remains unchanged; tests cover Debugger output for theft, tampering, and no-suspicion cases.

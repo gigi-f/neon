@@ -38,26 +38,9 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - Core verbs: `E` enters/exits sites and applies carried items to housing/workplace state; `F` picks up or drops the single carried object; `SPACE` runs Debugger inspection on nearby buildings, paths, signposts, and worker targets; `G` uses the Interference Torch to spoof/restore route signposts or disrupt/restore the workplace/supply dependency; `F5`/`F9` save/load the tiny current scope.
 - Production loop: player and worker both operate the same `SUPPLY` -> stocked bench -> output-ready bench -> carried `PART` -> improved housing chain, with item labels derived from the carried kind.
 - Worker loop: the fixed worker follows derived pedestrian paths through supply, workplace, and housing tasks; route endpoints expose readable `TO ...`, `LABOR ROUTE`, `SUPPLY ROUTE`, and carried-flow labels.
-- Hidden-system surface: Debugger inspection reveals labor pressure, route quota, site purpose, market access, dependency state, expected cargo, and access details, but scan memory remains volatile HUD-only state.
+- Hidden-system surface: Debugger inspection reveals labor pressure, route quota, site purpose, market access, dependency state, expected cargo, local suspicion witness detail, and access details, but scan memory remains volatile HUD-only state.
 - Interference loop: spoofed signposts and disrupted dependencies are inspectable, pause affected worker/supply flow, show local `FLOW: BLOCKED` or `SUPPLY FLOW: DISRUPTED` readouts, and persist active blockage state through tiny save/load; restored routes show local `FLOW: CLEAR`, with recovery acknowledgement intentionally volatile.
-- Local risk loop: a worker can witness expected `PART` theft or nearby `G` Interference Torch route tampering, producing a current-scope `LOCAL NOTICE` HUD line without adding surveillance, wanted level, factions, or pursuit.
-
-## Session: Local Suspicion Readout
-
-Gameplay outcome: local suspicion is readable, bounded, and tied to the place where the player caused it.
-
-Big Picture: suspicion should be inspectable like every other hidden-system hint. The player should understand who noticed, what they noticed, and what object or route is involved.
-
-Logical next step: give the player one current-scope way to reduce the local concern without adding a broad stealth system.
-
-- [ ] Phase 73: Add worker and workplace suspicion inspection.
-  - `SPACE` on the worker and affected workplace shows a compact local suspicion line such as `SUSPICION: MISSING PART` or `SUSPICION: ROUTE TAMPERING`.
-  - The line identifies only current-scope cause and target; it does not infer motives, crimes, or citywide consequences.
-  - Acceptance: readouts clear when no local suspicion exists; tests cover worker and building readout boundaries.
-- [ ] Phase 74: Add Debugger view of local suspicion.
-  - `SPACE` on the worker, affected workplace, or affected route reveals the local witness record and the current suspected cause through Debugger inspection.
-  - The Debugger distinguishes active flow blockage from lingering local suspicion.
-  - Acceptance: volatile last-result HUD behavior remains unchanged; tests cover Debugger output for theft, tampering, and no-suspicion cases.
+- Local risk loop: a worker can witness expected `PART` theft or nearby `G` Interference Torch route tampering, producing a current-scope `LOCAL NOTICE` HUD line; active suspicion is readable on the worker/workplace and through Debugger inspection on the worker, affected workplace, or affected route without adding surveillance, wanted level, factions, or pursuit.
 
 ## Session: Hiding Or De-escalation
 

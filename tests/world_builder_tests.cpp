@@ -4116,6 +4116,23 @@ static void testWitnessedOutputTheftCreatesLocalSuspicion() {
     assert(suspicion.path_entity == MAX_ENTITIES);
     assert(localSuspicionHudReadout(registry) ==
            "LOCAL NOTICE: WORKER SAW MISSING PART");
+
+    const std::string worker_readout = workerCarryReadout(registry, worker);
+    assert(worker_readout.find("SUSPICION: MISSING PART") != std::string::npos);
+    const std::string workplace_readout = buildingInspectionReadout(registry, workplace);
+    assert(workplace_readout.find("SUSPICION: MISSING PART") != std::string::npos);
+
+    const std::string worker_scan =
+        inheritedGadgetScanResult(registry, InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(worker_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
+    assert(worker_scan.find("SUSPICION: MISSING PART") != std::string::npos);
+    assert(worker_scan.find("TARGET: WORKPLACE OUTPUT") != std::string::npos);
+    const std::string workplace_scan =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{workplace, InspectionTargetType::WORKPLACE});
+    assert(workplace_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
+    assert(workplace_scan.find("SUSPICION: MISSING PART") != std::string::npos);
+    assert(workplace_scan.find("TARGET: WORKPLACE OUTPUT") != std::string::npos);
 }
 
 static void testUnwitnessedOutputPickupDoesNotCreateLocalSuspicion() {
@@ -4160,6 +4177,15 @@ static void testUnwitnessedOutputPickupDoesNotCreateLocalSuspicion() {
     assert(!localSuspicionActive(registry));
     assert(localSuspicionHudReadout(registry).empty());
     assert(registry.view<LocalSuspicionComponent>().empty());
+    assert(workerCarryReadout(registry, worker).find("SUSPICION:") == std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace).find("SUSPICION:") ==
+           std::string::npos);
+    assert(inheritedGadgetScanResult(registry,
+                                     InspectionTarget{worker, InspectionTargetType::WORKER})
+               .find("SUSPICION:") == std::string::npos);
+    assert(inheritedGadgetScanResult(registry,
+                                     InspectionTarget{workplace, InspectionTargetType::WORKPLACE})
+               .find("SUSPICION:") == std::string::npos);
 }
 
 static void testWitnessedRouteTamperingCreatesLocalSuspicionAndRestoreKeepsIt() {
@@ -4194,15 +4220,47 @@ static void testWitnessedRouteTamperingCreatesLocalSuspicionAndRestoreKeepsIt() 
     assert(suspicion.active);
     assert(suspicion.cause == LocalSuspicionCause::ROUTE_TAMPERING);
     assert(suspicion.target_entity == signpost);
-    assert(suspicion.path_entity == registry.get<RouteSignpostComponent>(signpost).path_entity);
+    const Entity route_path = registry.get<RouteSignpostComponent>(signpost).path_entity;
+    const Entity workplace = pathEndpointWithRole(registry,
+                                                  route_path,
+                                                  MicroZoneRole::WORKPLACE);
+    assert(workplace != MAX_ENTITIES);
+    assert(suspicion.path_entity == route_path);
     assert(localSuspicionHudReadout(registry) ==
            "LOCAL NOTICE: WORKER SAW ROUTE TAMPERING");
+    assert(workerCarryReadout(registry, worker).find("SUSPICION: ROUTE TAMPERING") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace).find("SUSPICION: ROUTE TAMPERING") !=
+           std::string::npos);
 
     assert(useInheritedGadgetSpoof(registry, player, 22.0f));
     assert(!routeSignpostSpoofed(registry, signpost));
     assert(localSuspicionActive(registry));
     assert(registry.get<LocalSuspicionComponent>(worker).cause ==
            LocalSuspicionCause::ROUTE_TAMPERING);
+
+    const std::string worker_scan =
+        inheritedGadgetScanResult(registry, InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(worker_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
+    assert(worker_scan.find("SUSPICION: ROUTE TAMPERING") != std::string::npos);
+    assert(worker_scan.find("TARGET: ROUTE SIGNAL") != std::string::npos);
+    const std::string workplace_scan =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{workplace, InspectionTargetType::WORKPLACE});
+    assert(workplace_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
+    assert(workplace_scan.find("SUSPICION: ROUTE TAMPERING") != std::string::npos);
+    const std::string signpost_scan =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{signpost, InspectionTargetType::ROUTE_SIGNPOST});
+    assert(signpost_scan.find("FLOW: BLOCKED") == std::string::npos);
+    assert(signpost_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
+    assert(signpost_scan.find("SUSPICION: ROUTE TAMPERING") != std::string::npos);
+    const std::string path_scan =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{route_path, InspectionTargetType::PEDESTRIAN_PATH});
+    assert(path_scan.find("FLOW: BLOCKED") == std::string::npos);
+    assert(path_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
+    assert(path_scan.find("SUSPICION: ROUTE TAMPERING") != std::string::npos);
 }
 
 static void testUnwitnessedRouteTamperingDoesNotCreateLocalSuspicion() {
@@ -4235,6 +4293,18 @@ static void testUnwitnessedRouteTamperingDoesNotCreateLocalSuspicion() {
     assert(localSuspicionHudReadout(registry).empty());
     assert(registry.view<LocalSuspicionComponent>().empty());
     assert(!dependencyDisrupted(registry));
+    assert(workerCarryReadout(registry, worker).find("SUSPICION:") == std::string::npos);
+    assert(inheritedGadgetScanResult(registry,
+                                     InspectionTarget{worker, InspectionTargetType::WORKER})
+               .find("SUSPICION:") == std::string::npos);
+    assert(inheritedGadgetScanResult(registry,
+                                     InspectionTarget{signpost, InspectionTargetType::ROUTE_SIGNPOST})
+               .find("SUSPICION:") == std::string::npos);
+    assert(inheritedGadgetScanResult(
+               registry,
+               InspectionTarget{registry.get<RouteSignpostComponent>(signpost).path_entity,
+                                InspectionTargetType::PEDESTRIAN_PATH})
+               .find("SUSPICION:") == std::string::npos);
 }
 
 static void testRouteSignpostRecoveryReadoutAppearsOnlyAfterRestore() {

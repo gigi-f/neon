@@ -11,6 +11,9 @@
 #include "world_config.h"
 #include "world_generation.h"
 
+inline std::string localSuspicionInspectionReadoutForWorker(Registry& registry, Entity worker);
+inline std::string localSuspicionInspectionReadoutForBuilding(Registry& registry, Entity building);
+
 inline int floorsForRole(MicroZoneRole role) {
     switch (role) {
         case MicroZoneRole::HOUSING: return 4;
@@ -1049,6 +1052,13 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
             } else if (workplaceSupplyFlowRecoveredByRoute(registry)) {
                 readout += "; SUPPLY FLOW: CLEAR";
             }
+            {
+                const std::string suspicion =
+                    localSuspicionInspectionReadoutForBuilding(registry, building);
+                if (!suspicion.empty()) {
+                    readout += "; " + suspicion;
+                }
+            }
             break;
         case MicroZoneRole::SUPPLY:
             readout += "; SITE STATUS: STOCK POINT";
@@ -1409,6 +1419,10 @@ inline std::string workerCarryReadout(Registry& registry, Entity worker) {
     if (playerCarryingExpectedSupplyForWorker(registry, worker)) {
         readout += "; " + productionConsequenceReadout(registry);
     }
+    const std::string suspicion = localSuspicionInspectionReadoutForWorker(registry, worker);
+    if (!suspicion.empty()) {
+        readout += "; " + suspicion;
+    }
     return readout;
 }
 
@@ -1492,6 +1506,116 @@ inline std::string localSuspicionHudReadout(Registry& registry) {
     const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
     return std::string("LOCAL NOTICE: WORKER SAW ") +
            localSuspicionCauseLabel(suspicion.cause);
+}
+
+inline Entity localSuspicionWorkerForWorker(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<LocalSuspicionComponent>(worker)) {
+        return MAX_ENTITIES;
+    }
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    return suspicion.active && suspicion.cause != LocalSuspicionCause::NONE ?
+        worker :
+        MAX_ENTITIES;
+}
+
+inline Entity localSuspicionWorkerForBuilding(Registry& registry, Entity building) {
+    if (!registry.alive(building)) {
+        return MAX_ENTITIES;
+    }
+    auto suspicions = registry.view<LocalSuspicionComponent>();
+    for (Entity worker : suspicions) {
+        const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+        if (suspicion.active &&
+            suspicion.cause != LocalSuspicionCause::NONE &&
+            suspicion.workplace_entity == building) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline Entity localSuspicionWorkerForPath(Registry& registry, Entity path) {
+    if (!registry.alive(path)) {
+        return MAX_ENTITIES;
+    }
+    auto suspicions = registry.view<LocalSuspicionComponent>();
+    for (Entity worker : suspicions) {
+        const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+        if (suspicion.active &&
+            suspicion.cause != LocalSuspicionCause::NONE &&
+            suspicion.path_entity == path) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline Entity localSuspicionWorkerForSignpost(Registry& registry, Entity signpost) {
+    if (!registry.alive(signpost)) {
+        return MAX_ENTITIES;
+    }
+    auto suspicions = registry.view<LocalSuspicionComponent>();
+    for (Entity worker : suspicions) {
+        const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+        if (!suspicion.active || suspicion.cause == LocalSuspicionCause::NONE) {
+            continue;
+        }
+        if (suspicion.target_entity == signpost) {
+            return worker;
+        }
+        if (registry.has<RouteSignpostComponent>(signpost) &&
+            suspicion.path_entity == registry.get<RouteSignpostComponent>(signpost).path_entity) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline std::string localSuspicionInspectionReadoutForWorker(Registry& registry, Entity worker) {
+    const Entity suspicion_worker = localSuspicionWorkerForWorker(registry, worker);
+    if (suspicion_worker == MAX_ENTITIES) {
+        return "";
+    }
+    return std::string("SUSPICION: ") +
+           localSuspicionCauseLabel(registry.get<LocalSuspicionComponent>(suspicion_worker).cause);
+}
+
+inline std::string localSuspicionInspectionReadoutForBuilding(Registry& registry, Entity building) {
+    const Entity suspicion_worker = localSuspicionWorkerForBuilding(registry, building);
+    if (suspicion_worker == MAX_ENTITIES) {
+        return "";
+    }
+    return std::string("SUSPICION: ") +
+           localSuspicionCauseLabel(registry.get<LocalSuspicionComponent>(suspicion_worker).cause);
+}
+
+inline const char* localSuspicionTargetLabel(const LocalSuspicionComponent& suspicion) {
+    switch (suspicion.cause) {
+        case LocalSuspicionCause::MISSING_PART:
+            return "WORKPLACE OUTPUT";
+        case LocalSuspicionCause::ROUTE_TAMPERING:
+            return "ROUTE SIGNAL";
+        case LocalSuspicionCause::NONE:
+            return "NONE";
+    }
+    return "NONE";
+}
+
+inline std::string localSuspicionDebuggerReadoutForWorker(Registry& registry,
+                                                          Entity suspicion_worker) {
+    if (suspicion_worker == MAX_ENTITIES ||
+        !registry.alive(suspicion_worker) ||
+        !registry.has<LocalSuspicionComponent>(suspicion_worker)) {
+        return "";
+    }
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(suspicion_worker);
+    if (!suspicion.active || suspicion.cause == LocalSuspicionCause::NONE) {
+        return "";
+    }
+    return std::string("LOCAL WITNESS: WORKER; SUSPICION: ") +
+           localSuspicionCauseLabel(suspicion.cause) +
+           "; TARGET: " +
+           localSuspicionTargetLabel(suspicion);
 }
 
 inline bool workerNearTransform(Registry& registry,
@@ -2728,23 +2852,68 @@ inline const char* inheritedGadgetTargetLabel(InspectionTargetType type) {
     return "NO TARGET";
 }
 
+inline std::string localSuspicionDebuggerReadoutForTarget(Registry& registry,
+                                                          const InspectionTarget& target) {
+    Entity suspicion_worker = MAX_ENTITIES;
+    switch (target.type) {
+        case InspectionTargetType::WORKER:
+            suspicion_worker = localSuspicionWorkerForWorker(registry, target.entity);
+            break;
+        case InspectionTargetType::WORKPLACE:
+        case InspectionTargetType::WORKPLACE_INTERIOR:
+            suspicion_worker = localSuspicionWorkerForBuilding(registry, target.entity);
+            break;
+        case InspectionTargetType::PEDESTRIAN_PATH:
+            suspicion_worker = localSuspicionWorkerForPath(registry, target.entity);
+            break;
+        case InspectionTargetType::ROUTE_SIGNPOST:
+            suspicion_worker = localSuspicionWorkerForSignpost(registry, target.entity);
+            break;
+        case InspectionTargetType::NONE:
+        case InspectionTargetType::HOUSING:
+        case InspectionTargetType::SUPPLY:
+        case InspectionTargetType::MARKET:
+        case InspectionTargetType::CLINIC:
+        case InspectionTargetType::HOUSING_INTERIOR:
+        case InspectionTargetType::SUPPLY_INTERIOR:
+        case InspectionTargetType::CARRYABLE_OBJECT:
+            break;
+    }
+    return localSuspicionDebuggerReadoutForWorker(registry, suspicion_worker);
+}
+
 inline std::string inheritedGadgetWorkerScan(Registry& registry, Entity worker) {
     if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
         return "NO SIGNAL";
     }
 
-    return "WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1";
+    std::string readout = "WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1";
+    const std::string suspicion = localSuspicionDebuggerReadoutForTarget(
+        registry,
+        InspectionTarget{worker, InspectionTargetType::WORKER});
+    if (!suspicion.empty()) {
+        readout += "; " + suspicion;
+    }
+    return readout;
 }
 
 inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
                                                    const InspectionTarget& target) {
+    auto append_suspicion = [&](std::string readout) {
+        const std::string suspicion = localSuspicionDebuggerReadoutForTarget(registry, target);
+        if (!suspicion.empty()) {
+            readout += "; " + suspicion;
+        }
+        return readout;
+    };
+
     auto building_scan = [&](MicroZoneRole role) {
         std::string readout = buildingPurposeScanReadoutForRole(role);
         const std::string dependency = dependencyScanReadout(registry, role);
         if (!dependency.empty()) {
             readout += "; " + dependency;
         }
-        return readout;
+        return append_suspicion(readout);
     };
 
     switch (target.type) {
@@ -2764,16 +2933,17 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
         case InspectionTargetType::ROUTE_SIGNPOST:
             if (registry.alive(target.entity) && registry.has<RouteSignpostComponent>(target.entity)) {
                 const auto& signpost = registry.get<RouteSignpostComponent>(target.entity);
-                return routePurposeDebugReadout(registry,
-                                                signpost.path_entity,
-                                                "SIGNPOST") +
-                       "; POINTS TO " +
-                       roleDisplayName(signpost.target_role);
+                return append_suspicion(
+                    routePurposeDebugReadout(registry,
+                                             signpost.path_entity,
+                                             "SIGNPOST") +
+                    "; POINTS TO " +
+                    roleDisplayName(signpost.target_role));
             }
             return "SIGNPOST ROUTE: UNKNOWN ROUTE; EXPECTED CARGO: UNKNOWN; ACCESS: UNKNOWN";
         case InspectionTargetType::PEDESTRIAN_PATH:
             if (registry.alive(target.entity) && registry.has<PathComponent>(target.entity)) {
-                return routePurposeDebugReadout(registry, target.entity, "PATH");
+                return append_suspicion(routePurposeDebugReadout(registry, target.entity, "PATH"));
             }
             return "PATH ROUTE: UNKNOWN ROUTE; EXPECTED CARGO: UNKNOWN; ACCESS: UNKNOWN";
         case InspectionTargetType::CARRYABLE_OBJECT:
