@@ -962,3 +962,109 @@ Acceptance:
 - [x] The player can see at a glance whether their interference still matters.
 - [x] No quest log, management dashboard, or city alert stack is introduced.
 - [x] The next session can move to building purpose without leaving the current loop opaque.
+
+## Completed Session: Building Purpose Model
+
+Gameplay outcome: buildings have generic purposes that can describe housing, workplace, supply, and future sites without shelter-specific assumptions.
+
+Big Picture: `building` should cover shelter, production, commercial use, public infrastructure, storage, institutions, and capital equipment. Purpose should become data the player can inspect, not a city-builder control surface.
+
+Logical next step: after purposes are generic and inspectable, add one commercial or capital-purpose site.
+
+## Phase 57: Generic Building Purpose Field
+
+Goal: add a small purpose model that can describe current building roles and future site types.
+
+- [x] Add or extend a building-purpose helper/data shape for current roles: housing, workplace, supply.
+- [x] Keep existing `MicroZoneRole` behavior intact unless a narrow refactor is required.
+- [x] Avoid adding ownership, zoning policy, rents, taxes, or economic simulation.
+- [x] Add tests that current roles resolve to stable purpose labels.
+
+Acceptance:
+
+- [x] Building purpose becomes explicit data or a clearly named derived helper.
+- [x] Existing interactions continue to work.
+- [x] Future building types can be added without duplicating shelter-only language.
+
+## Phase 58: Purpose-Aware Building Readouts
+
+Goal: make basic building inspection describe what the site is for.
+
+- [x] Update housing, workplace, and supply inspection/readouts to include purpose language.
+- [x] Keep action prompts unchanged.
+- [x] Ensure the debugger scan can reuse or enrich the same purpose information.
+- [x] Add tests for purpose-aware readouts on all current building roles.
+
+Acceptance:
+
+- [x] Buildings are more legible as social/economic sites.
+- [x] The player does not gain management controls.
+- [x] Readouts prepare for commercial and public sites.
+
+## Phase 59: Generic Building Status Language
+
+Goal: reduce shelter-specific wording where the current mechanic is really building improvement or site condition.
+
+- [x] Rename or wrap player-facing readout helpers so they say `BUILDING`, `SITE`, or another generic term where appropriate.
+- [x] Keep housing-specific text only where the meaning is truly domestic.
+- [x] Do not perform a broad file-wide rename unless needed for the player-facing behavior.
+- [x] Add regression tests for current housing improvement and workplace bench readouts.
+
+Acceptance:
+
+- [x] The code and UI no longer imply all production outcomes are shelter-only.
+- [x] Existing tiny-loop behavior is unchanged.
+- [x] Future building-purpose sessions have clearer entry points.
+
+## Completed Session: Commercial Or Capital Site
+
+Gameplay outcome: the map contains one non-domestic, non-workplace site that represents commercial or capital purpose.
+
+Big Picture: the city should include places that exist for exchange, storage, finance, machinery, or institutional capital, not only survival shelter and production benches.
+
+Logical next step: after one commercial/capital site exists, add one public-purpose site for contrast.
+
+## Phase 60: One Commercial Site Role
+
+Goal: add one current-scope commercial or capital-purpose site type.
+
+- [x] Pick a narrow role such as `MARKET`, `DEPOT`, `MACHINE SHOP`, or `CAPITAL NODE`.
+- [x] Place one site in the authored sandbox without overlapping existing buildings or paths.
+- [x] Give it a glyph, color, and basic inspection label.
+- [x] Add placement/non-overlap tests.
+
+Acceptance:
+
+- [x] The map has a new kind of building purpose.
+- [x] No market prices, buying/selling, ownership, rent, or economy simulation is introduced.
+- [x] The site is visible and inspectable.
+
+## Phase 61: Commercial Site Scan Metadata
+
+Goal: let the inherited debugger reveal one hidden commercial/capital metadata field.
+
+- [x] Add one scan result such as `PURPOSE: EXCHANGE`, `CAPITAL EQUIPMENT`, or `ACCESS: RESTRICTED`.
+- [x] Show the result through the existing gadget result HUD.
+- [x] Keep metadata static or derived.
+- [x] Add tests for valid scan result and no-target behavior.
+
+Acceptance:
+
+- [x] The player learns something beyond ordinary inspection.
+- [x] No financial system, faction owner, shop UI, or transaction verb is introduced.
+- [x] The site points toward later economic/social context.
+
+## Phase 62: Commercial Site Boundary
+
+Goal: make clear what the commercial site can and cannot do in this pass.
+
+- [x] Ensure `E`, `F`, worker delivery, and building improvement do not accidentally treat the site as housing/workplace/supply.
+- [x] Add explicit no-op or unavailable readouts where needed.
+- [x] Add tests for unchanged player and worker loop behavior.
+- [x] Keep the site as observation context only for now.
+
+Acceptance:
+
+- [x] The new site does not break the tiny production loop.
+- [x] The player can observe it but not manage it.
+- [x] Future sessions can choose one real interaction later.

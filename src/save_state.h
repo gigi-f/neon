@@ -74,6 +74,8 @@ inline const char* roleSaveName(MicroZoneRole role) {
         case MicroZoneRole::HOUSING: return "HOUSING";
         case MicroZoneRole::WORKPLACE: return "WORKPLACE";
         case MicroZoneRole::SUPPLY: return "SUPPLY";
+        case MicroZoneRole::MARKET: return "MARKET";
+        case MicroZoneRole::CLINIC: return "CLINIC";
     }
     return "HOUSING";
 }
@@ -89,6 +91,14 @@ inline bool roleFromSaveName(const std::string& name, MicroZoneRole& role) {
     }
     if (name == "SUPPLY") {
         role = MicroZoneRole::SUPPLY;
+        return true;
+    }
+    if (name == "MARKET") {
+        role = MicroZoneRole::MARKET;
+        return true;
+    }
+    if (name == "CLINIC") {
+        role = MicroZoneRole::CLINIC;
         return true;
     }
     return false;

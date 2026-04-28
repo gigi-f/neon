@@ -16,6 +16,8 @@ inline int floorsForRole(MicroZoneRole role) {
         case MicroZoneRole::HOUSING: return 4;
         case MicroZoneRole::WORKPLACE: return 3;
         case MicroZoneRole::SUPPLY: return 1;
+        case MicroZoneRole::MARKET: return 2;
+        case MicroZoneRole::CLINIC: return 2;
     }
     return 1;
 }
@@ -25,6 +27,8 @@ inline char glyphForRole(MicroZoneRole role) {
         case MicroZoneRole::HOUSING: return 'h';
         case MicroZoneRole::WORKPLACE: return 'w';
         case MicroZoneRole::SUPPLY: return 's';
+        case MicroZoneRole::MARKET: return 'm';
+        case MicroZoneRole::CLINIC: return '+';
     }
     return '?';
 }
@@ -34,8 +38,67 @@ inline const char* roleDisplayName(MicroZoneRole role) {
         case MicroZoneRole::HOUSING: return "HOUSING";
         case MicroZoneRole::WORKPLACE: return "WORKPLACE";
         case MicroZoneRole::SUPPLY: return "SUPPLY";
+        case MicroZoneRole::MARKET: return "MARKET";
+        case MicroZoneRole::CLINIC: return "CLINIC";
     }
     return "UNKNOWN";
+}
+
+struct BuildingPurposeInfo {
+    MicroZoneRole role = MicroZoneRole::HOUSING;
+    const char* label = "DWELLING";
+    const char* function = "BUILDING RECOVERY";
+    const char* scan_detail = "HOUSING PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY";
+};
+
+inline BuildingPurposeInfo buildingPurposeForRole(MicroZoneRole role) {
+    switch (role) {
+        case MicroZoneRole::HOUSING:
+            return BuildingPurposeInfo{
+                MicroZoneRole::HOUSING,
+                "DWELLING",
+                "BUILDING RECOVERY",
+                "HOUSING PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY"
+            };
+        case MicroZoneRole::WORKPLACE:
+            return BuildingPurposeInfo{
+                MicroZoneRole::WORKPLACE,
+                "PRODUCTION",
+                "CONVERT SUPPLY TO PART",
+                "WORKPLACE PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART"
+            };
+        case MicroZoneRole::SUPPLY:
+            return BuildingPurposeInfo{
+                MicroZoneRole::SUPPLY,
+                "MATERIAL SOURCE",
+                "SOURCE LOOP MATERIAL",
+                "SUPPLY PURPOSE: MATERIAL SOURCE; FUNCTION: SOURCE LOOP MATERIAL"
+            };
+        case MicroZoneRole::MARKET:
+            return BuildingPurposeInfo{
+                MicroZoneRole::MARKET,
+                "EXCHANGE",
+                "EXCHANGE SITE",
+                "MARKET PURPOSE: EXCHANGE; ACCESS: RESTRICTED"
+            };
+        case MicroZoneRole::CLINIC:
+            return BuildingPurposeInfo{
+                MicroZoneRole::CLINIC,
+                "PUBLIC HEALTH",
+                "MEDICAL SERVICE",
+                "CLINIC PURPOSE: PUBLIC HEALTH; SERVICE: RATIONED; AUTHORITY: MUNICIPAL"
+            };
+    }
+    return BuildingPurposeInfo{};
+}
+
+inline std::string buildingPurposeReadoutForRole(MicroZoneRole role) {
+    const BuildingPurposeInfo purpose = buildingPurposeForRole(role);
+    return std::string("PURPOSE: ") + purpose.label + "; FUNCTION: " + purpose.function;
+}
+
+inline std::string buildingPurposeScanReadoutForRole(MicroZoneRole role) {
+    return buildingPurposeForRole(role).scan_detail;
 }
 
 inline void colorForRole(MicroZoneRole role, uint8_t& r, uint8_t& g, uint8_t& b) {
@@ -55,10 +118,33 @@ inline void colorForRole(MicroZoneRole role, uint8_t& r, uint8_t& g, uint8_t& b)
             g = 230;
             b = 150;
             return;
+        case MicroZoneRole::MARKET:
+            r = 210;
+            g = 120;
+            b = 235;
+            return;
+        case MicroZoneRole::CLINIC:
+            r = 255;
+            g = 90;
+            b = 90;
+            return;
     }
     r = 255;
     g = 255;
     b = 255;
+}
+
+inline bool roleIsEnterable(MicroZoneRole role) {
+    switch (role) {
+        case MicroZoneRole::HOUSING:
+        case MicroZoneRole::WORKPLACE:
+        case MicroZoneRole::SUPPLY:
+            return true;
+        case MicroZoneRole::MARKET:
+        case MicroZoneRole::CLINIC:
+            return false;
+    }
+    return false;
 }
 
 inline Entity buildBuildingUnit(Registry& registry,
@@ -81,7 +167,7 @@ inline Entity buildBuildingUnit(Registry& registry,
     registry.assign<BuildingComponent>(building,
         stable_id,
         floorsForRole(role),
-        true);
+        roleIsEnterable(role));
     registry.assign<BuildingUseComponent>(building, role);
     if (role == MicroZoneRole::HOUSING) {
         registry.assign<ShelterStockComponent>(building);
@@ -171,7 +257,10 @@ inline Entity buildMacroZone(Registry& registry,
     const int housing_micro_count = std::max(0, config.housing_micro_zone_count);
     const int workplace_micro_count = std::max(0, config.workplace_micro_zone_count);
     const int supply_micro_count = std::max(0, config.supply_micro_zone_count);
-    const int total_micro_count = housing_micro_count + workplace_micro_count + supply_micro_count;
+    const int market_micro_count = std::max(0, config.market_micro_zone_count);
+    const int clinic_micro_count = std::max(0, config.clinic_micro_zone_count);
+    const int total_micro_count = housing_micro_count + workplace_micro_count + supply_micro_count +
+        market_micro_count + clinic_micro_count;
     const float inset = 40.0f;
     const float gap = 16.0f;
     const float content_x0 = x0 + inset;
@@ -204,6 +293,33 @@ inline Entity buildMacroZone(Registry& registry,
                 } else if (role == MicroZoneRole::SUPPLY) {
                     layout_index = 3;
                 }
+            } else if (total_micro_count == 4 &&
+                       housing_micro_count == 1 &&
+                       workplace_micro_count == 1 &&
+                       supply_micro_count == 1 &&
+                       market_micro_count == 1) {
+                if (role == MicroZoneRole::MARKET) {
+                    layout_index = 1;
+                } else if (role == MicroZoneRole::WORKPLACE) {
+                    layout_index = 2;
+                } else if (role == MicroZoneRole::SUPPLY) {
+                    layout_index = 3;
+                }
+            } else if (total_micro_count == 5 &&
+                       housing_micro_count == 1 &&
+                       workplace_micro_count == 1 &&
+                       supply_micro_count == 1 &&
+                       market_micro_count == 1 &&
+                       clinic_micro_count == 1) {
+                if (role == MicroZoneRole::WORKPLACE) {
+                    layout_index = 1;
+                } else if (role == MicroZoneRole::MARKET) {
+                    layout_index = 2;
+                } else if (role == MicroZoneRole::SUPPLY) {
+                    layout_index = 4;
+                } else if (role == MicroZoneRole::CLINIC) {
+                    layout_index = 3;
+                }
             }
             const int col = grid_cols > 0 ? layout_index % grid_cols : 0;
             const int row = grid_cols > 0 ? layout_index / grid_cols : 0;
@@ -225,6 +341,12 @@ inline Entity buildMacroZone(Registry& registry,
     build_role_micros(MicroZoneRole::SUPPLY,
                       supply_micro_count,
                       std::max(0, config.supply_building_count));
+    build_role_micros(MicroZoneRole::MARKET,
+                      market_micro_count,
+                      std::max(0, config.market_building_count));
+    build_role_micros(MicroZoneRole::CLINIC,
+                      clinic_micro_count,
+                      std::max(0, config.clinic_building_count));
 
     return macro;
 }
@@ -522,9 +644,13 @@ inline int shelterSupplyCapacity(Registry& registry) {
     return registry.get<ShelterStockComponent>(shelter).capacity;
 }
 
-inline std::string shelterSupplyReadout(Registry& registry) {
-    return "SHELTER SUPPLY: " + std::to_string(shelterSupplyCount(registry)) + "/" +
+inline std::string buildingSupplyReadout(Registry& registry) {
+    return "BUILDING SUPPLY: " + std::to_string(shelterSupplyCount(registry)) + "/" +
            std::to_string(shelterSupplyCapacity(registry));
+}
+
+inline std::string shelterSupplyReadout(Registry& registry) {
+    return buildingSupplyReadout(registry);
 }
 
 inline bool shelterHasStoredSupply(Registry& registry) {
@@ -667,7 +793,187 @@ inline std::string buildingImprovementLoopReadout(Registry& registry) {
 }
 
 inline std::string housingInteriorReadout(Registry& registry) {
-    return shelterSupplyReadout(registry) + "; " + buildingImprovementLoopReadout(registry);
+    return buildingPurposeReadoutForRole(MicroZoneRole::HOUSING) + "; " +
+           buildingSupplyReadout(registry) + "; " +
+           buildingImprovementLoopReadout(registry);
+}
+
+inline const char* siteContextTagForRole(MicroZoneRole role) {
+    switch (role) {
+        case MicroZoneRole::HOUSING: return "HOUSEHOLD";
+        case MicroZoneRole::WORKPLACE: return "PRIVATE";
+        case MicroZoneRole::SUPPLY: return "PRIVATE";
+        case MicroZoneRole::MARKET: return "COMMERCIAL";
+        case MicroZoneRole::CLINIC: return "MUNICIPAL";
+    }
+    return "UNKNOWN";
+}
+
+inline bool roleIsDependencyDependent(MicroZoneRole role,
+                                      const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    return role == dependency.dependent_role;
+}
+
+inline bool roleIsDependencyProvider(MicroZoneRole role,
+                                     const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    return role == dependency.provider_role;
+}
+
+inline bool roleInDependencyEdge(MicroZoneRole role,
+                                 const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    return roleIsDependencyDependent(role, dependency) ||
+           roleIsDependencyProvider(role, dependency);
+}
+
+inline Entity dependencyEndpointForRole(Registry& registry,
+                                        MicroZoneRole role,
+                                        const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    if (!roleInDependencyEdge(role, dependency)) {
+        return MAX_ENTITIES;
+    }
+    return firstWorldBuilderBuildingByRole(registry, role);
+}
+
+inline bool dependencyEdgeResolved(Registry& registry,
+                                   const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    return dependencyEndpointForRole(registry, dependency.dependent_role, dependency) != MAX_ENTITIES &&
+           dependencyEndpointForRole(registry, dependency.provider_role, dependency) != MAX_ENTITIES;
+}
+
+inline Entity dependencyDisruptionStateEntity(Registry& registry,
+                                              const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                              bool create_if_missing = false) {
+    auto disruptions = registry.view<DependencyDisruptionComponent>();
+    for (Entity state : disruptions) {
+        const auto& component = registry.get<DependencyDisruptionComponent>(state);
+        if (component.dependent_role == dependency.dependent_role &&
+            component.provider_role == dependency.provider_role) {
+            return state;
+        }
+    }
+
+    if (!create_if_missing) {
+        return MAX_ENTITIES;
+    }
+
+    Entity state = registry.create();
+    registry.assign<DependencyDisruptionComponent>(state,
+        dependency.dependent_role,
+        dependency.provider_role,
+        false,
+        false);
+    return state;
+}
+
+inline bool dependencyDisrupted(Registry& registry,
+                                const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency);
+    return state != MAX_ENTITIES &&
+           registry.get<DependencyDisruptionComponent>(state).disrupted;
+}
+
+inline bool dependencyRecovered(Registry& registry,
+                                const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency);
+    return state != MAX_ENTITIES &&
+           registry.get<DependencyDisruptionComponent>(state).recovered;
+}
+
+inline bool toggleDependencyDisruption(Registry& registry,
+                                       const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    if (!dependencyEdgeResolved(registry, dependency)) {
+        return false;
+    }
+
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency, true);
+    auto& component = registry.get<DependencyDisruptionComponent>(state);
+    component.disrupted = !component.disrupted;
+    component.recovered = !component.disrupted;
+    return true;
+}
+
+inline std::string dependencyInspectionReadout(Registry& registry,
+                                               MicroZoneRole role,
+                                               const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    const bool disrupted = dependencyDisrupted(registry, dependency);
+    const bool recovered = dependencyRecovered(registry, dependency);
+    const std::string status = disrupted ? "; DEPENDENCY: DISRUPTED" :
+        (recovered ? "; DEPENDENCY: RESTORED" : "");
+
+    if (roleIsDependencyDependent(role, dependency)) {
+        return std::string("DEPENDS ON: ") +
+               (dependencyEndpointForRole(registry, dependency.provider_role, dependency) != MAX_ENTITIES
+                    ? roleDisplayName(dependency.provider_role)
+                    : std::string("MISSING ") + roleDisplayName(dependency.provider_role)) +
+               status;
+    }
+    if (roleIsDependencyProvider(role, dependency)) {
+        return std::string("SUPPORTS: ") +
+               (dependencyEndpointForRole(registry, dependency.dependent_role, dependency) != MAX_ENTITIES
+                    ? roleDisplayName(dependency.dependent_role)
+                    : std::string("NO ") + roleDisplayName(dependency.dependent_role)) +
+               status;
+    }
+    return "DEPENDENCY: NONE";
+}
+
+inline std::string dependencyScanReadout(Registry& registry,
+                                         MicroZoneRole role,
+                                         const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    if (!roleInDependencyEdge(role, dependency)) {
+        return "";
+    }
+
+    std::string readout = std::string("FLOW: ") + dependency.flow_label +
+        "; REQUIRED FOR: " + dependency.required_for;
+    if (!dependencyEdgeResolved(registry, dependency)) {
+        readout += "; TARGET: MISSING";
+    } else if (dependencyDisrupted(registry, dependency)) {
+        readout += "; DEPENDENCY: DISRUPTED; FLOW STATUS: CONFUSED";
+    } else if (dependencyRecovered(registry, dependency)) {
+        readout += "; DEPENDENCY: RESTORED; FLOW STATUS: CLEAR";
+    } else if (roleIsDependencyProvider(role, dependency)) {
+        readout += std::string("; SUPPORTS: ") + roleDisplayName(dependency.dependent_role);
+    } else {
+        readout += std::string("; SOURCE: ") + roleDisplayName(dependency.provider_role);
+    }
+    return readout;
+}
+
+inline std::string buildingInspectionReadout(Registry& registry, Entity building) {
+    if (!registry.alive(building) || !registry.has<BuildingUseComponent>(building)) {
+        return "BUILDING; PURPOSE: UNKNOWN";
+    }
+
+    const MicroZoneRole role = registry.get<BuildingUseComponent>(building).role;
+    std::string readout = std::string(roleDisplayName(role)) + "; " +
+        buildingPurposeReadoutForRole(role);
+    switch (role) {
+        case MicroZoneRole::HOUSING:
+            if (registry.has<BuildingImprovementComponent>(building)) {
+                readout += "; " + buildingImprovementLoopReadout(registry);
+            }
+            break;
+        case MicroZoneRole::WORKPLACE:
+            if (registry.has<WorkplaceBenchComponent>(building)) {
+                readout += "; " + workplaceBenchLoopReadout(registry);
+            }
+            break;
+        case MicroZoneRole::SUPPLY:
+            readout += "; SITE STATUS: STOCK POINT";
+            break;
+        case MicroZoneRole::MARKET:
+            readout += "; SITE STATUS: OBSERVATION ONLY";
+            break;
+        case MicroZoneRole::CLINIC:
+            readout += "; SITE STATUS: OBSERVATION ONLY";
+            break;
+    }
+    if (roleInDependencyEdge(role)) {
+        readout += "; " + dependencyInspectionReadout(registry, role);
+    }
+    readout += std::string("; CONTEXT: ") + siteContextTagForRole(role);
+    return readout;
 }
 
 inline bool routeSignpostSpoofed(Registry& registry, Entity marker) {
@@ -817,6 +1123,9 @@ inline std::string workerBlockedReason(Registry& registry, Entity worker) {
     if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
         return "ROUTE SIGNAL CONFUSED";
     }
+    if (workerCurrentPathHasDisruptedDependency(registry, worker)) {
+        return "DEPENDENCY DISRUPTED";
+    }
     if (buildingImproved(registry)) {
         return "BUILDING ALREADY IMPROVED";
     }
@@ -851,15 +1160,23 @@ inline std::string workerBlockedReason(Registry& registry, Entity worker) {
 }
 
 inline std::string workerConsequenceSourceReadout(Registry& registry, Entity worker) {
-    return workerCurrentPathHasSpoofedRouteSignpost(registry, worker) ?
-        "SOURCE: CORRUPTED ROUTE SIGNAL" :
-        "";
+    if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
+        return "SOURCE: CORRUPTED ROUTE SIGNAL";
+    }
+    if (workerCurrentPathHasDisruptedDependency(registry, worker)) {
+        return "SOURCE: DISRUPTED DEPENDENCY";
+    }
+    return "";
 }
 
 inline std::string workerRouteConsequenceReadout(Registry& registry, Entity worker) {
-    return workerCurrentPathHasSpoofedRouteSignpost(registry, worker) ?
-        "WAITING ON ROUTE SIGNAL" :
-        "";
+    if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
+        return "WAITING ON ROUTE SIGNAL";
+    }
+    if (workerCurrentPathHasDisruptedDependency(registry, worker)) {
+        return "WAITING ON SUPPLY FLOW";
+    }
+    return "";
 }
 
 inline std::string workerCarryReadout(Registry& registry, Entity worker) {
@@ -894,6 +1211,9 @@ inline std::string workerCarryReadout(Registry& registry, Entity worker) {
 }
 
 inline std::string productionLoopSummaryReadout(Registry& registry) {
+    if (dependencyDisrupted(registry)) {
+        return "LOOP: DISRUPTED; INTERFERENCE: DEPENDENCY; CONSEQUENCE: SUPPLY FLOW CONFUSED";
+    }
     if (anyRouteSignpostSpoofed(registry)) {
         return "LOOP: SPOOFED; INTERFERENCE: ROUTE; CONSEQUENCE: ROUTE SIGNAL CONFUSED";
     }
@@ -1077,6 +1397,9 @@ inline bool workerReturningToSupply(Registry& registry, Entity worker) {
     if (workplace == MAX_ENTITIES || supply == MAX_ENTITIES) {
         return false;
     }
+    if (dependencyDisrupted(registry)) {
+        return false;
+    }
 
     const float supply_t = routeTForPathEndpoint(registry, worker_component.path_entity, supply);
     return std::fabs(worker_component.route_t - supply_t) > 0.001f;
@@ -1191,6 +1514,10 @@ inline bool workerCanTakeSupplyObject(Registry& registry, Entity worker) {
         return false;
     }
 
+    if (dependencyDisrupted(registry)) {
+        return false;
+    }
+
     if (registry.get<FixedActorComponent>(worker).carried_object != MAX_ENTITIES) {
         return false;
     }
@@ -1248,6 +1575,11 @@ inline bool routeWorkerCarryingSupplyTowardWorkplace(Registry& registry, Entity 
     if (workplace == MAX_ENTITIES || supply == MAX_ENTITIES) {
         refreshWorkerCarryVisual(registry, worker);
         return false;
+    }
+    if (dependencyDisrupted(registry)) {
+        worker_component.direction = 0.0f;
+        refreshWorkerCarryVisual(registry, worker);
+        return true;
     }
 
     const float target_t =
@@ -1320,6 +1652,9 @@ inline size_t updateWorkerSupplyDeliveryRoutes(Registry& registry, float dt) {
 inline bool workerCanStockWorkplaceBench(Registry& registry, Entity worker) {
     if (!workerAtWorkplaceEndpoint(registry, worker) ||
         !workerCarryingSupplyObject(registry, worker)) {
+        return false;
+    }
+    if (dependencyDisrupted(registry)) {
         return false;
     }
 
@@ -1889,6 +2224,8 @@ inline InspectionTargetType inspectionTypeForRole(MicroZoneRole role) {
         case MicroZoneRole::HOUSING: return InspectionTargetType::HOUSING;
         case MicroZoneRole::WORKPLACE: return InspectionTargetType::WORKPLACE;
         case MicroZoneRole::SUPPLY: return InspectionTargetType::SUPPLY;
+        case MicroZoneRole::MARKET: return InspectionTargetType::MARKET;
+        case MicroZoneRole::CLINIC: return InspectionTargetType::CLINIC;
     }
     return InspectionTargetType::NONE;
 }
@@ -2035,6 +2372,10 @@ inline const char* inheritedGadgetTargetLabel(InspectionTargetType type) {
             return "WORKPLACE";
         case InspectionTargetType::SUPPLY:
             return "SUPPLY";
+        case InspectionTargetType::MARKET:
+            return "MARKET";
+        case InspectionTargetType::CLINIC:
+            return "CLINIC";
         case InspectionTargetType::PEDESTRIAN_PATH:
             return "PATH";
         case InspectionTargetType::ROUTE_SIGNPOST:
@@ -2065,16 +2406,29 @@ inline std::string inheritedGadgetWorkerScan(Registry& registry, Entity worker) 
 
 inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
                                                    const InspectionTarget& target) {
+    auto building_scan = [&](MicroZoneRole role) {
+        std::string readout = buildingPurposeScanReadoutForRole(role);
+        const std::string dependency = dependencyScanReadout(registry, role);
+        if (!dependency.empty()) {
+            readout += "; " + dependency;
+        }
+        return readout;
+    };
+
     switch (target.type) {
         case InspectionTargetType::HOUSING:
         case InspectionTargetType::HOUSING_INTERIOR:
-            return "HOUSING PURPOSE: BUILDING RECOVERY";
+            return building_scan(MicroZoneRole::HOUSING);
         case InspectionTargetType::WORKPLACE:
         case InspectionTargetType::WORKPLACE_INTERIOR:
-            return "WORKPLACE PURPOSE: CONVERT SUPPLY TO PART";
+            return building_scan(MicroZoneRole::WORKPLACE);
         case InspectionTargetType::SUPPLY:
         case InspectionTargetType::SUPPLY_INTERIOR:
-            return "SUPPLY PURPOSE: SOURCE LOOP MATERIAL";
+            return building_scan(MicroZoneRole::SUPPLY);
+        case InspectionTargetType::MARKET:
+            return building_scan(MicroZoneRole::MARKET);
+        case InspectionTargetType::CLINIC:
+            return building_scan(MicroZoneRole::CLINIC);
         case InspectionTargetType::ROUTE_SIGNPOST:
             if (registry.alive(target.entity) && registry.has<RouteSignpostComponent>(target.entity)) {
                 return std::string("SIGNPOST ROUTE CARRIES: SUPPLY/PART; POINTS TO ") +
@@ -2102,8 +2456,31 @@ inline std::string inheritedGadgetScanResult(Registry& registry, const Inspectio
     return inheritedGadgetSiteMetadataScan(registry, target);
 }
 
+inline bool inspectionTargetIsDependencyTarget(const InspectionTarget& target) {
+    switch (target.type) {
+        case InspectionTargetType::WORKPLACE:
+        case InspectionTargetType::WORKPLACE_INTERIOR:
+        case InspectionTargetType::SUPPLY:
+        case InspectionTargetType::SUPPLY_INTERIOR:
+            return target.entity != MAX_ENTITIES;
+        case InspectionTargetType::NONE:
+        case InspectionTargetType::HOUSING:
+        case InspectionTargetType::MARKET:
+        case InspectionTargetType::CLINIC:
+        case InspectionTargetType::PEDESTRIAN_PATH:
+        case InspectionTargetType::ROUTE_SIGNPOST:
+        case InspectionTargetType::WORKER:
+        case InspectionTargetType::HOUSING_INTERIOR:
+        case InspectionTargetType::CARRYABLE_OBJECT:
+            return false;
+    }
+    return false;
+}
+
 inline bool inheritedGadgetCanSpoofTarget(const InspectionTarget& target) {
-    return target.entity != MAX_ENTITIES && target.type == InspectionTargetType::ROUTE_SIGNPOST;
+    return target.entity != MAX_ENTITIES &&
+           (target.type == InspectionTargetType::ROUTE_SIGNPOST ||
+            inspectionTargetIsDependencyTarget(target));
 }
 
 inline bool playerCanUseInheritedGadget(Registry& registry, Entity player) {
@@ -2134,6 +2511,11 @@ inline std::string inheritedGadgetSpoofPromptReadout(Registry& registry,
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
     if (!inheritedGadgetCanSpoofTarget(target)) {
         return "SHIFT+G SPOOF:N/A";
+    }
+    if (inspectionTargetIsDependencyTarget(target)) {
+        return dependencyDisrupted(registry) ?
+            "SHIFT+G RESTORE DEPENDENCY" :
+            "SHIFT+G DISRUPT DEPENDENCY";
     }
     return routeSignpostSpoofed(registry, target.entity) ?
         "SHIFT+G RESTORE SIGNPOST" :
@@ -2167,8 +2549,23 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
         gadget.last_result = "SPOOF FAILED: NO SIGNAL";
         return false;
     }
-    if (!inheritedGadgetCanSpoofTarget(target) ||
-        !registry.alive(target.entity) ||
+    if (!inheritedGadgetCanSpoofTarget(target)) {
+        gadget.last_result = "SPOOF FAILED: SIGNPOST REQUIRED";
+        return false;
+    }
+
+    if (inspectionTargetIsDependencyTarget(target)) {
+        if (!toggleDependencyDisruption(registry)) {
+            gadget.last_result = "SPOOF FAILED: DEPENDENCY UNRESOLVED";
+            return false;
+        }
+        gadget.last_result = dependencyDisrupted(registry) ?
+            "DISRUPTED DEPENDENCY: SUPPLY FLOW CONFUSED" :
+            "RESTORED DEPENDENCY: SUPPLY FLOW CLEAR";
+        return true;
+    }
+
+    if (!registry.alive(target.entity) ||
         !registry.has<RouteSignpostComponent>(target.entity)) {
         gadget.last_result = "SPOOF FAILED: SIGNPOST REQUIRED";
         return false;
@@ -2191,6 +2588,9 @@ inline PlayerLocationState locationStateForRole(MicroZoneRole role, bool inside)
             return inside ? PlayerLocationState::INSIDE_WORKPLACE : PlayerLocationState::NEAR_WORKPLACE;
         case MicroZoneRole::SUPPLY:
             return inside ? PlayerLocationState::INSIDE_SUPPLY : PlayerLocationState::NEAR_SUPPLY;
+        case MicroZoneRole::MARKET:
+        case MicroZoneRole::CLINIC:
+            return PlayerLocationState::OUTSIDE;
     }
     return PlayerLocationState::OUTSIDE;
 }
@@ -2243,12 +2643,16 @@ inline bool validateWorld(Registry& registry, const WorldConfig& config) {
         expected_macros * static_cast<size_t>(
             std::max(0, config.housing_micro_zone_count) +
             std::max(0, config.workplace_micro_zone_count) +
-            std::max(0, config.supply_micro_zone_count));
+            std::max(0, config.supply_micro_zone_count) +
+            std::max(0, config.market_micro_zone_count) +
+            std::max(0, config.clinic_micro_zone_count));
     const size_t expected_buildings =
         expected_macros * static_cast<size_t>(
             std::max(0, config.housing_building_count) +
             std::max(0, config.workplace_building_count) +
-            std::max(0, config.supply_building_count));
+            std::max(0, config.supply_building_count) +
+            std::max(0, config.market_building_count) +
+            std::max(0, config.clinic_building_count));
 
     if (macros.size() != expected_macros) return false;
     if (micros.size() != expected_micros) return false;
@@ -2261,6 +2665,8 @@ inline bool validateWorld(Registry& registry, const WorldConfig& config) {
     size_t housing_micros = 0;
     size_t workplace_micros = 0;
     size_t supply_micros = 0;
+    size_t market_micros = 0;
+    size_t clinic_micros = 0;
     for (Entity micro : micros) {
         const auto& micro_component = registry.get<MicroZoneComponent>(micro);
         if (micro_component.parent_macro == MAX_ENTITIES || !registry.alive(micro_component.parent_macro)) return false;
@@ -2274,16 +2680,26 @@ inline bool validateWorld(Registry& registry, const WorldConfig& config) {
             case MicroZoneRole::SUPPLY:
                 ++supply_micros;
                 break;
+            case MicroZoneRole::MARKET:
+                ++market_micros;
+                break;
+            case MicroZoneRole::CLINIC:
+                ++clinic_micros;
+                break;
         }
     }
 
     if (housing_micros != expected_macros * static_cast<size_t>(std::max(0, config.housing_micro_zone_count))) return false;
     if (workplace_micros != expected_macros * static_cast<size_t>(std::max(0, config.workplace_micro_zone_count))) return false;
     if (supply_micros != expected_macros * static_cast<size_t>(std::max(0, config.supply_micro_zone_count))) return false;
+    if (market_micros != expected_macros * static_cast<size_t>(std::max(0, config.market_micro_zone_count))) return false;
+    if (clinic_micros != expected_macros * static_cast<size_t>(std::max(0, config.clinic_micro_zone_count))) return false;
 
     size_t housing_buildings = 0;
     size_t workplace_buildings = 0;
     size_t supply_buildings = 0;
+    size_t market_buildings = 0;
+    size_t clinic_buildings = 0;
     for (Entity building : buildings) {
         const auto& use = registry.get<BuildingUseComponent>(building);
         const auto& transform = registry.get<TransformComponent>(building);
@@ -2297,6 +2713,12 @@ inline bool validateWorld(Registry& registry, const WorldConfig& config) {
                 break;
             case MicroZoneRole::SUPPLY:
                 ++supply_buildings;
+                break;
+            case MicroZoneRole::MARKET:
+                ++market_buildings;
+                break;
+            case MicroZoneRole::CLINIC:
+                ++clinic_buildings;
                 break;
         }
 
@@ -2314,6 +2736,8 @@ inline bool validateWorld(Registry& registry, const WorldConfig& config) {
     if (housing_buildings != expected_macros * static_cast<size_t>(std::max(0, config.housing_building_count))) return false;
     if (workplace_buildings != expected_macros * static_cast<size_t>(std::max(0, config.workplace_building_count))) return false;
     if (supply_buildings != expected_macros * static_cast<size_t>(std::max(0, config.supply_building_count))) return false;
+    if (market_buildings != expected_macros * static_cast<size_t>(std::max(0, config.market_building_count))) return false;
+    if (clinic_buildings != expected_macros * static_cast<size_t>(std::max(0, config.clinic_building_count))) return false;
 
     if (!buildingsDoNotOverlap(registry)) return false;
 

@@ -245,6 +245,8 @@ static const char* inspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::HOUSING: return "HOUSING";
         case InspectionTargetType::WORKPLACE: return "WORKPLACE";
         case InspectionTargetType::SUPPLY: return "SUPPLY";
+        case InspectionTargetType::MARKET: return "MARKET";
+        case InspectionTargetType::CLINIC: return "CLINIC";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
         case InspectionTargetType::ROUTE_SIGNPOST: return "SIGNPOST";
         case InspectionTargetType::WORKER: return "WORKER";
@@ -266,6 +268,10 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "Work site. Enterable. Linked to housing.";
         case InspectionTargetType::SUPPLY:
             return "Supply cache. Visible stock point. Linked through workplace.";
+        case InspectionTargetType::MARKET:
+            return "Commercial site. Observation only in this pass.";
+        case InspectionTargetType::CLINIC:
+            return "Public clinic. Municipal authority. Observation only.";
         case InspectionTargetType::PEDESTRIAN_PATH:
             return "Foot path. Non-solid access between buildings.";
         case InspectionTargetType::ROUTE_SIGNPOST:
@@ -293,6 +299,16 @@ static const char* inspectionDetail(Registry& registry, const InspectionComponen
     }
 
     static std::string dynamic_detail;
+    if ((inspection.target_type == InspectionTargetType::HOUSING ||
+         inspection.target_type == InspectionTargetType::WORKPLACE ||
+         inspection.target_type == InspectionTargetType::SUPPLY ||
+         inspection.target_type == InspectionTargetType::MARKET ||
+         inspection.target_type == InspectionTargetType::CLINIC) &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<BuildingUseComponent>(inspection.target_entity)) {
+        dynamic_detail = buildingInspectionReadout(registry, inspection.target_entity);
+        return dynamic_detail.c_str();
+    }
     if (inspection.target_type == InspectionTargetType::HOUSING_INTERIOR &&
         registry.alive(inspection.target_entity) &&
         registry.has<BuildingImprovementComponent>(inspection.target_entity)) {
@@ -565,6 +581,10 @@ int main(int, char**) {
     world_config.workplace_building_count = 1;
     world_config.supply_micro_zone_count = 1;
     world_config.supply_building_count = 1;
+    world_config.market_micro_zone_count = 1;
+    world_config.market_building_count = 1;
+    world_config.clinic_micro_zone_count = 1;
+    world_config.clinic_building_count = 1;
     world_config.fixed_worker_count = 1;
     world_config.carryable_object_count = 1;
     buildWorld(registry, world_config);
@@ -718,7 +738,7 @@ int main(int, char**) {
             SDL_Color hud{140, 230, 180, 230};
             char line[220];
             float fps = dt > 0.0f ? 1.0f / dt : 0.0f;
-            std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + SUPPLY + WORKER", fps, registry.entity_count());
+            std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + SUPPLY + MARKET + CLINIC + WORKER", fps, registry.entity_count());
             drawText(renderer, font, line, 6, 6, hud, 0.7f);
             std::snprintf(line, sizeof(line), "WASD MOVE  E ACT/DOORS  F PICK/DROP  SPACE INSPECT  G SCAN  SHIFT+G SPOOF  F5 SAVE  F9 LOAD  CAM:%.0f,%.0f Z:%.2f",
                           active_camera.x, active_camera.y, active_camera.scale);

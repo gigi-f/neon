@@ -14,6 +14,13 @@ struct ConnectionSpec {
     PathKind path_kind = PathKind::PEDESTRIAN;
 };
 
+struct DependencySpec {
+    MicroZoneRole dependent_role = MicroZoneRole::WORKPLACE;
+    MicroZoneRole provider_role = MicroZoneRole::SUPPLY;
+    const char* flow_label = "MATERIAL";
+    const char* required_for = "BENCH STOCK";
+};
+
 inline constexpr ConnectionSpec kHousingToWorkplacePedestrianAccess{
     MicroZoneRole::HOUSING,
     MicroZoneRole::WORKPLACE,
@@ -26,6 +33,13 @@ inline constexpr ConnectionSpec kWorkplaceToSupplyPedestrianAccess{
     PathKind::PEDESTRIAN
 };
 
+inline constexpr DependencySpec kWorkplaceDependsOnSupply{
+    MicroZoneRole::WORKPLACE,
+    MicroZoneRole::SUPPLY,
+    "MATERIAL",
+    "BENCH STOCK"
+};
+
 struct WorldConfig {
     int macro_count_x = MACRO_ZONE_COUNT_X;
     int macro_count_y = MACRO_ZONE_COUNT_Y;
@@ -36,6 +50,10 @@ struct WorldConfig {
     int workplace_building_count = 0;
     int supply_micro_zone_count = 0;
     int supply_building_count = 0;
+    int market_micro_zone_count = 0;
+    int market_building_count = 0;
+    int clinic_micro_zone_count = 0;
+    int clinic_building_count = 0;
     int fixed_worker_count = 0;
     int carryable_object_count = 0;
     uint32_t seed = kDefaultWorldSeed;

@@ -47,6 +47,42 @@ inline bool pathHasSpoofedRouteSignpost(Registry& registry, Entity path_entity) 
     return false;
 }
 
+inline bool pathConnectsRoles(Registry& registry,
+                              Entity path_entity,
+                              MicroZoneRole a,
+                              MicroZoneRole b) {
+    if (!registry.alive(path_entity) || !registry.has<PathComponent>(path_entity)) {
+        return false;
+    }
+
+    const auto& path = registry.get<PathComponent>(path_entity);
+    if (!registry.alive(path.from) ||
+        !registry.alive(path.to) ||
+        !registry.has<BuildingUseComponent>(path.from) ||
+        !registry.has<BuildingUseComponent>(path.to)) {
+        return false;
+    }
+
+    const MicroZoneRole from = registry.get<BuildingUseComponent>(path.from).role;
+    const MicroZoneRole to = registry.get<BuildingUseComponent>(path.to).role;
+    return (from == a && to == b) || (from == b && to == a);
+}
+
+inline bool pathHasDisruptedDependency(Registry& registry, Entity path_entity) {
+    auto disruptions = registry.view<DependencyDisruptionComponent>();
+    for (Entity disruption : disruptions) {
+        const auto& component = registry.get<DependencyDisruptionComponent>(disruption);
+        if (component.disrupted &&
+            pathConnectsRoles(registry,
+                              path_entity,
+                              component.dependent_role,
+                              component.provider_role)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline bool workerCurrentPathHasSpoofedRouteSignpost(Registry& registry, Entity worker) {
     if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
         return false;
@@ -54,6 +90,15 @@ inline bool workerCurrentPathHasSpoofedRouteSignpost(Registry& registry, Entity 
     const auto& worker_component = registry.get<FixedActorComponent>(worker);
     return worker_component.kind == FixedActorKind::WORKER &&
            pathHasSpoofedRouteSignpost(registry, worker_component.path_entity);
+}
+
+inline bool workerCurrentPathHasDisruptedDependency(Registry& registry, Entity worker) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker)) {
+        return false;
+    }
+    const auto& worker_component = registry.get<FixedActorComponent>(worker);
+    return worker_component.kind == FixedActorKind::WORKER &&
+           pathHasDisruptedDependency(registry, worker_component.path_entity);
 }
 
 inline TransformComponent transformOnPath(const TransformComponent& path, float route_t) {
@@ -178,6 +223,9 @@ inline void updateFixedActors(Registry& registry, float dt) {
             continue;
         }
         if (pathHasSpoofedRouteSignpost(registry, component.path_entity)) {
+            continue;
+        }
+        if (pathHasDisruptedDependency(registry, component.path_entity)) {
             continue;
         }
 

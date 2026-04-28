@@ -38,6 +38,16 @@ inline InteriorLayout interiorLayoutForRole(MicroZoneRole role) {
             layout.height = 72.0f;
             layout.spawn = TransformComponent{0.0f, 20.0f, 12.0f, 12.0f};
             break;
+        case MicroZoneRole::MARKET:
+            layout.width = 112.0f;
+            layout.height = 78.0f;
+            layout.spawn = TransformComponent{0.0f, 20.0f, 12.0f, 12.0f};
+            break;
+        case MicroZoneRole::CLINIC:
+            layout.width = 100.0f;
+            layout.height = 72.0f;
+            layout.spawn = TransformComponent{0.0f, 20.0f, 12.0f, 12.0f};
+            break;
     }
     return layout;
 }
