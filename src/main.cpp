@@ -291,14 +291,14 @@ static const char* inspectionDetail(InspectionTargetType type) {
 }
 
 static const char* inspectionDetail(Registry& registry, const InspectionComponent& inspection) {
+    static std::string dynamic_detail;
     if (inspection.target_type == InspectionTargetType::PEDESTRIAN_PATH &&
         registry.alive(inspection.target_entity) &&
-        registry.has<PathStateComponent>(inspection.target_entity)) {
-        return pathStateInspectionDetail(
-            registry.get<PathStateComponent>(inspection.target_entity).state);
+        registry.has<PathComponent>(inspection.target_entity)) {
+        dynamic_detail = pathInspectionReadout(registry, inspection.target_entity);
+        return dynamic_detail.c_str();
     }
 
-    static std::string dynamic_detail;
     if ((inspection.target_type == InspectionTargetType::HOUSING ||
          inspection.target_type == InspectionTargetType::WORKPLACE ||
          inspection.target_type == InspectionTargetType::SUPPLY ||

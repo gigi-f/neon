@@ -359,6 +359,10 @@ static void testPedestrianPathRequiresHousingAndWorkplace() {
     assert(registry_with_workplace.get<PathStateComponent>(paths.front()).state == PathState::LIT);
     assert(pathStateName(registry_with_workplace.get<PathStateComponent>(paths.front()).state) == std::string("LIT"));
     assert(pathStateInspectionDetail(registry_with_workplace.get<PathStateComponent>(paths.front()).state) == std::string("Foot path. LIT: low amber markers make the route easier to follow."));
+    assert(pathInspectionReadout(registry_with_workplace, paths.front()).find("ROUTE: LABOR ROUTE") !=
+           std::string::npos);
+    assert(pathInspectionReadout(registry_with_workplace, paths.front()).find("CARRIES: LABOR") !=
+           std::string::npos);
     assert(registry_with_workplace.alive(path.from));
     assert(registry_with_workplace.alive(path.to));
     assert(registry_with_workplace.get<BuildingUseComponent>(path.from).role == MicroZoneRole::HOUSING);
@@ -384,6 +388,8 @@ static void testPedestrianPathRequiresHousingAndWorkplace() {
         const std::string readout = routeSignpostReadout(registry_with_workplace, marker);
         if (readout.rfind("TO HOUSING", 0) == 0) found_to_housing = true;
         if (readout.rfind("TO WORKPLACE", 0) == 0) found_to_workplace = true;
+        assert(readout.find("ROUTE: LABOR ROUTE") != std::string::npos);
+        assert(readout.find("CARRIES: LABOR") != std::string::npos);
         assert(readout.find("SIGNAL: CLEAR") != std::string::npos);
         assert(readout.find("CONSEQUENCE: NONE") != std::string::npos);
     }
@@ -427,6 +433,13 @@ static void testSupplyPathRequiresConfiguredSupply() {
         const auto to_role = with_supply.get<BuildingUseComponent>(path.to).role;
         if (from_role == MicroZoneRole::WORKPLACE && to_role == MicroZoneRole::SUPPLY) {
             found_workplace_supply = true;
+            assert(pathInspectionReadout(with_supply, path_entity).find("ROUTE: SUPPLY ROUTE") !=
+                   std::string::npos);
+            assert(pathInspectionReadout(with_supply, path_entity).find("CARRIES: MATERIAL") !=
+                   std::string::npos);
+        } else {
+            assert(pathInspectionReadout(with_supply, path_entity).find("ROUTE: LABOR ROUTE") !=
+                   std::string::npos);
         }
     }
     assert(found_workplace_supply);
@@ -450,6 +463,8 @@ static void testSupplyPathRequiresConfiguredSupply() {
         if (readout.rfind("TO HOUSING", 0) == 0) found_to_housing = true;
         if (readout.rfind("TO WORKPLACE", 0) == 0) found_to_workplace = true;
         if (readout.rfind("TO SUPPLY", 0) == 0) found_to_supply = true;
+        assert(readout.find("ROUTE: ") != std::string::npos);
+        assert(readout.find("CARRIES: ") != std::string::npos);
         assert(readout.find("SIGNAL: CLEAR") != std::string::npos);
         assert(readout.find("CONSEQUENCE: NONE") != std::string::npos);
     }
@@ -3942,7 +3957,9 @@ static void testInheritedGadgetSiteMetadataScan() {
     registry.get<TransformComponent>(player) = registry.get<TransformComponent>(marker);
 
     assert(useInheritedGadget(registry, player, 22.0f));
-    assert(inheritedGadgetResultReadout(registry, player).find("ROUTE CARRIES: SUPPLY/PART") !=
+    assert(inheritedGadgetResultReadout(registry, player).find("SIGNPOST ROUTE:") !=
+           std::string::npos);
+    assert(inheritedGadgetResultReadout(registry, player).find("EXPECTED CARGO:") !=
            std::string::npos);
 }
 
@@ -4160,6 +4177,223 @@ static void testProductionLoopSummaryReadoutCoversRouteInterferenceStates() {
     assert(routeSignpostReadout(registry, marker).find("RECOVERY: ROUTE SIGNAL CLEAR") !=
            std::string::npos);
     assert(productionLoopSummaryReadout(registry) == "LOOP: RUNNING");
+}
+
+static void testRoutePurposeReadoutsAndDebuggerScanEnrichment() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    const Entity labor_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    const Entity supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(labor_path != MAX_ENTITIES);
+    assert(supply_path != MAX_ENTITIES);
+
+    RoutePurposeInfo labor = routePurposeForPath(registry, labor_path);
+    assert(std::string(labor.purpose) == "LABOR ROUTE");
+    assert(std::string(labor.carries) == "LABOR");
+    assert(std::string(labor.expected_cargo) == "WORKER");
+    assert(std::string(labor.access) == "WORKER ROUTE");
+
+    RoutePurposeInfo supply = routePurposeForPath(registry, supply_path);
+    assert(std::string(supply.purpose) == "SUPPLY ROUTE");
+    assert(std::string(supply.carries) == "MATERIAL");
+    assert(std::string(supply.expected_cargo) == "SUPPLY/PART");
+    assert(std::string(supply.access) == "WORKER ONLY");
+
+    InspectionTarget path_target;
+    path_target.entity = supply_path;
+    path_target.type = InspectionTargetType::PEDESTRIAN_PATH;
+    const std::string path_scan = inheritedGadgetScanResult(registry, path_target);
+    assert(path_scan.find("PATH ROUTE: SUPPLY ROUTE") != std::string::npos);
+    assert(path_scan.find("EXPECTED CARGO: SUPPLY/PART") != std::string::npos);
+    assert(path_scan.find("ACCESS: WORKER ONLY") != std::string::npos);
+
+    const Entity signpost = firstRouteSignpostForPath(registry, supply_path);
+    assert(signpost != MAX_ENTITIES);
+    InspectionTarget signpost_target;
+    signpost_target.entity = signpost;
+    signpost_target.type = InspectionTargetType::ROUTE_SIGNPOST;
+    const std::string signpost_scan = inheritedGadgetScanResult(registry, signpost_target);
+    assert(signpost_scan.find("SIGNPOST ROUTE: SUPPLY ROUTE") != std::string::npos);
+    assert(signpost_scan.find("EXPECTED CARGO: SUPPLY/PART") != std::string::npos);
+    assert(signpost_scan.find("ACCESS: WORKER ONLY") != std::string::npos);
+    assert(signpost_scan.find("POINTS TO ") != std::string::npos);
+}
+
+static void testSpoofedRouteSignpostCorruptsFlowLabel() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    const Entity supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(supply_path != MAX_ENTITIES);
+    const Entity signpost = firstRouteSignpostForPath(registry, supply_path);
+    assert(signpost != MAX_ENTITIES);
+
+    std::string readout = routeSignpostReadout(registry, signpost);
+    assert(readout.find("ROUTE: SUPPLY ROUTE") != std::string::npos);
+    assert(readout.find("CARRIES: MATERIAL") != std::string::npos);
+
+    registry.get<RouteSignpostComponent>(signpost).spoofed = true;
+    readout = routeSignpostReadout(registry, signpost);
+    assert(readout.rfind("TO ", 0) == 0);
+    assert(readout.find("ROUTE: SUPPLY ROUTE") != std::string::npos);
+    assert(readout.find("CARRIES: ???") != std::string::npos);
+    assert(readout.find("CARRIES: MATERIAL") == std::string::npos);
+    assert(readout.find("SPOOFED: ROUTE SIGNAL CONFUSED") != std::string::npos);
+
+    registry.get<RouteSignpostComponent>(signpost).spoofed = false;
+    registry.get<RouteSignpostComponent>(signpost).signal_recovered = true;
+    readout = routeSignpostReadout(registry, signpost);
+    assert(readout.find("CARRIES: MATERIAL") != std::string::npos);
+    assert(readout.find("CARRIES: ???") == std::string::npos);
+    assert(readout.find("RECOVERY: ROUTE SIGNAL CLEAR") != std::string::npos);
+}
+
+static void testSpoofedSupplyRouteShowsAndClearsWorkplaceFlowConsequence() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    const Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    const Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    const Entity supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(supply_path != MAX_ENTITIES);
+    const Entity signpost = firstRouteSignpostForPath(registry, supply_path);
+    assert(signpost != MAX_ENTITIES);
+
+    assert(!workplaceSupplyFlowDisruptedBySpoofedRoute(registry));
+    assert(buildingInspectionReadout(registry, workplace).find("SUPPLY FLOW: DISRUPTED") ==
+           std::string::npos);
+
+    registry.get<RouteSignpostComponent>(signpost).spoofed = true;
+    assert(workplaceSupplyFlowDisruptedBySpoofedRoute(registry));
+    assert(buildingInspectionReadout(registry, workplace).find("SUPPLY FLOW: DISRUPTED") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, supply).find("SUPPLY FLOW: DISRUPTED") ==
+           std::string::npos);
+
+    registry.get<RouteSignpostComponent>(signpost).spoofed = false;
+    registry.get<RouteSignpostComponent>(signpost).signal_recovered = true;
+    assert(!workplaceSupplyFlowDisruptedBySpoofedRoute(registry));
+    assert(buildingInspectionReadout(registry, workplace).find("SUPPLY FLOW: DISRUPTED") ==
+           std::string::npos);
+}
+
+static void testSpoofedRouteShowsAndClearsLocalFlowBlockageReadouts() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    const Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    const Entity labor_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    const Entity supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(labor_path != MAX_ENTITIES);
+    assert(supply_path != MAX_ENTITIES);
+
+    const Entity labor_signpost = firstRouteSignpostForPath(registry, labor_path);
+    const Entity supply_signpost = firstRouteSignpostForPath(registry, supply_path);
+    assert(labor_signpost != MAX_ENTITIES);
+    assert(supply_signpost != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(supply_signpost));
+
+    assert(!routeFlowBlockedBySpoofedSignpost(registry, supply_path));
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: BLOCKED") ==
+           std::string::npos);
+    assert(routeSignpostReadout(registry, supply_signpost).find("FLOW: BLOCKED") ==
+           std::string::npos);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(routeFlowBlockedBySpoofedSignpost(registry, supply_path));
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: BLOCKED") !=
+           std::string::npos);
+    assert(routeSignpostReadout(registry, supply_signpost).find("FLOW: BLOCKED") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace).find("SUPPLY FLOW: DISRUPTED") !=
+           std::string::npos);
+    assert(pathInspectionReadout(registry, labor_path).find("FLOW: BLOCKED") ==
+           std::string::npos);
+    assert(routeSignpostReadout(registry, labor_signpost).find("FLOW: BLOCKED") ==
+           std::string::npos);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(!routeFlowBlockedBySpoofedSignpost(registry, supply_path));
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: BLOCKED") ==
+           std::string::npos);
+    assert(routeSignpostReadout(registry, supply_signpost).find("FLOW: BLOCKED") ==
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace).find("SUPPLY FLOW: DISRUPTED") ==
+           std::string::npos);
+}
+
+static void testSpoofedLaborRouteDoesNotDisruptSupplyFlowReadout() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    const Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    const Entity labor_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    const Entity supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(labor_path != MAX_ENTITIES);
+    assert(supply_path != MAX_ENTITIES);
+
+    const Entity labor_signpost = firstRouteSignpostForPath(registry, labor_path);
+    assert(labor_signpost != MAX_ENTITIES);
+    registry.get<RouteSignpostComponent>(labor_signpost).spoofed = true;
+
+    assert(routeBetweenRolesHasSpoofedSignpost(registry,
+                                               MicroZoneRole::HOUSING,
+                                               MicroZoneRole::WORKPLACE));
+    assert(!workplaceSupplyFlowDisruptedBySpoofedRoute(registry));
+    assert(buildingInspectionReadout(registry, workplace).find("SUPPLY FLOW: DISRUPTED") ==
+           std::string::npos);
+
+    const Entity supply_signpost = firstRouteSignpostForPath(registry, supply_path);
+    assert(supply_signpost != MAX_ENTITIES);
+    registry.get<RouteSignpostComponent>(supply_signpost).spoofed = true;
+    assert(workplaceSupplyFlowDisruptedBySpoofedRoute(registry));
 }
 
 static void testInheritedGadgetSpoofLeavesWorkerAndLoopStateUnchanged() {
@@ -4560,6 +4794,11 @@ int main() {
     testRouteSignpostRecoveryReadoutAppearsOnlyAfterRestore();
     testRouteSignpostConsequenceReadoutCoversLocalStates();
     testProductionLoopSummaryReadoutCoversRouteInterferenceStates();
+    testRoutePurposeReadoutsAndDebuggerScanEnrichment();
+    testSpoofedRouteSignpostCorruptsFlowLabel();
+    testSpoofedSupplyRouteShowsAndClearsWorkplaceFlowConsequence();
+    testSpoofedRouteShowsAndClearsLocalFlowBlockageReadouts();
+    testSpoofedLaborRouteDoesNotDisruptSupplyFlowReadout();
     testInheritedGadgetSpoofLeavesWorkerAndLoopStateUnchanged();
     testSpoofedRouteSignalAffectsOnlyRelevantWorkerPathReadout();
     testSpoofedRouteSignalSourceLabelAppearsAndClears();

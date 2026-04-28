@@ -940,6 +940,47 @@ inline std::string dependencyScanReadout(Registry& registry,
     return readout;
 }
 
+inline bool pathConnectsReadoutRoles(Registry& registry,
+                                     Entity path_entity,
+                                     MicroZoneRole a,
+                                     MicroZoneRole b) {
+    if (!registry.alive(path_entity) || !registry.has<PathComponent>(path_entity)) {
+        return false;
+    }
+
+    const auto& path = registry.get<PathComponent>(path_entity);
+    if (path.kind != PathKind::PEDESTRIAN ||
+        !registry.alive(path.from) ||
+        !registry.alive(path.to) ||
+        !registry.has<BuildingUseComponent>(path.from) ||
+        !registry.has<BuildingUseComponent>(path.to)) {
+        return false;
+    }
+
+    const MicroZoneRole from = registry.get<BuildingUseComponent>(path.from).role;
+    const MicroZoneRole to = registry.get<BuildingUseComponent>(path.to).role;
+    return (from == a && to == b) || (from == b && to == a);
+}
+
+inline bool routeBetweenRolesHasSpoofedSignpost(Registry& registry,
+                                                MicroZoneRole a,
+                                                MicroZoneRole b) {
+    auto paths = registry.view<PathComponent>();
+    for (Entity path_entity : paths) {
+        if (pathConnectsReadoutRoles(registry, path_entity, a, b) &&
+            pathHasSpoofedRouteSignpost(registry, path_entity)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool workplaceSupplyFlowDisruptedBySpoofedRoute(Registry& registry) {
+    return routeBetweenRolesHasSpoofedSignpost(registry,
+                                               MicroZoneRole::WORKPLACE,
+                                               MicroZoneRole::SUPPLY);
+}
+
 inline std::string buildingInspectionReadout(Registry& registry, Entity building) {
     if (!registry.alive(building) || !registry.has<BuildingUseComponent>(building)) {
         return "BUILDING; PURPOSE: UNKNOWN";
@@ -958,6 +999,9 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
             if (registry.has<WorkplaceBenchComponent>(building)) {
                 readout += "; " + workplaceBenchLoopReadout(registry);
             }
+            if (workplaceSupplyFlowDisruptedBySpoofedRoute(registry)) {
+                readout += "; SUPPLY FLOW: DISRUPTED";
+            }
             break;
         case MicroZoneRole::SUPPLY:
             readout += "; SITE STATUS: STOCK POINT";
@@ -974,6 +1018,108 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
     }
     readout += std::string("; CONTEXT: ") + siteContextTagForRole(role);
     return readout;
+}
+
+struct RoutePurposeInfo {
+    const char* purpose = "PUBLIC ACCESS";
+    const char* carries = "ACCESS";
+    const char* expected_cargo = "PUBLIC";
+    const char* access = "OPEN";
+};
+
+inline bool pathEndpointRoles(Registry& registry,
+                              Entity path_entity,
+                              MicroZoneRole& from_role,
+                              MicroZoneRole& to_role) {
+    if (!registry.alive(path_entity) || !registry.has<PathComponent>(path_entity)) {
+        return false;
+    }
+
+    const auto& path = registry.get<PathComponent>(path_entity);
+    if (!registry.alive(path.from) ||
+        !registry.alive(path.to) ||
+        !registry.has<BuildingUseComponent>(path.from) ||
+        !registry.has<BuildingUseComponent>(path.to)) {
+        return false;
+    }
+
+    from_role = registry.get<BuildingUseComponent>(path.from).role;
+    to_role = registry.get<BuildingUseComponent>(path.to).role;
+    return true;
+}
+
+inline RoutePurposeInfo routePurposeForRoles(MicroZoneRole a, MicroZoneRole b) {
+    const bool housing_workplace =
+        (a == MicroZoneRole::HOUSING && b == MicroZoneRole::WORKPLACE) ||
+        (a == MicroZoneRole::WORKPLACE && b == MicroZoneRole::HOUSING);
+    if (housing_workplace) {
+        return RoutePurposeInfo{
+            "LABOR ROUTE",
+            "LABOR",
+            "WORKER",
+            "WORKER ROUTE"
+        };
+    }
+
+    const bool workplace_supply =
+        (a == MicroZoneRole::WORKPLACE && b == MicroZoneRole::SUPPLY) ||
+        (a == MicroZoneRole::SUPPLY && b == MicroZoneRole::WORKPLACE);
+    if (workplace_supply) {
+        return RoutePurposeInfo{
+            "SUPPLY ROUTE",
+            "MATERIAL",
+            "SUPPLY/PART",
+            "WORKER ONLY"
+        };
+    }
+
+    return RoutePurposeInfo{};
+}
+
+inline RoutePurposeInfo routePurposeForPath(Registry& registry, Entity path_entity) {
+    MicroZoneRole from_role = MicroZoneRole::HOUSING;
+    MicroZoneRole to_role = MicroZoneRole::HOUSING;
+    if (!pathEndpointRoles(registry, path_entity, from_role, to_role)) {
+        return RoutePurposeInfo{
+            "UNKNOWN ROUTE",
+            "UNKNOWN",
+            "UNKNOWN",
+            "UNKNOWN"
+        };
+    }
+    return routePurposeForRoles(from_role, to_role);
+}
+
+inline bool routeFlowBlockedBySpoofedSignpost(Registry& registry, Entity path_entity) {
+    return pathHasSpoofedRouteSignpost(registry, path_entity);
+}
+
+inline std::string pathInspectionReadout(Registry& registry, Entity path_entity) {
+    std::string readout = "Foot path. Non-solid access between buildings.";
+    if (registry.alive(path_entity) && registry.has<PathStateComponent>(path_entity)) {
+        switch (registry.get<PathStateComponent>(path_entity).state) {
+            case PathState::LIT:
+                readout = "Foot path. LIT: low amber markers make the route easier to follow.";
+                break;
+        }
+    }
+
+    const RoutePurposeInfo purpose = routePurposeForPath(registry, path_entity);
+    readout += std::string(" ROUTE: ") + purpose.purpose +
+        "; CARRIES: " + purpose.carries;
+    if (routeFlowBlockedBySpoofedSignpost(registry, path_entity)) {
+        readout += "; FLOW: BLOCKED";
+    }
+    return readout;
+}
+
+inline std::string routePurposeDebugReadout(Registry& registry,
+                                            Entity path_entity,
+                                            const char* prefix) {
+    const RoutePurposeInfo purpose = routePurposeForPath(registry, path_entity);
+    return std::string(prefix) + " ROUTE: " + purpose.purpose +
+        "; EXPECTED CARGO: " + purpose.expected_cargo +
+        "; ACCESS: " + purpose.access;
 }
 
 inline bool routeSignpostSpoofed(Registry& registry, Entity marker) {
@@ -997,9 +1143,17 @@ inline std::string routeSignpostReadout(Registry& registry, Entity marker) {
         return "TO UNKNOWN";
     }
     const auto& signpost = registry.get<RouteSignpostComponent>(marker);
+    const RoutePurposeInfo purpose = routePurposeForPath(registry, signpost.path_entity);
     std::string readout = std::string("TO ") +
         roleDisplayName(signpost.target_role) +
-        "; SIGNAL: ";
+        "; ROUTE: " +
+        purpose.purpose +
+        "; CARRIES: " +
+        (signpost.spoofed ? "???" : purpose.carries);
+    if (signpost.spoofed) {
+        readout += "; FLOW: BLOCKED";
+    }
+    readout += "; SIGNAL: ";
     if (signpost.spoofed) {
         readout += "CORRUPTED; SPOOFED: ROUTE SIGNAL CONFUSED; CONSEQUENCE: ROUTE DELAY";
     } else if (signpost.signal_recovered) {
@@ -2431,12 +2585,19 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
             return building_scan(MicroZoneRole::CLINIC);
         case InspectionTargetType::ROUTE_SIGNPOST:
             if (registry.alive(target.entity) && registry.has<RouteSignpostComponent>(target.entity)) {
-                return std::string("SIGNPOST ROUTE CARRIES: SUPPLY/PART; POINTS TO ") +
-                       roleDisplayName(registry.get<RouteSignpostComponent>(target.entity).target_role);
+                const auto& signpost = registry.get<RouteSignpostComponent>(target.entity);
+                return routePurposeDebugReadout(registry,
+                                                signpost.path_entity,
+                                                "SIGNPOST") +
+                       "; POINTS TO " +
+                       roleDisplayName(signpost.target_role);
             }
-            return "SIGNPOST ROUTE CARRIES: SUPPLY/PART";
+            return "SIGNPOST ROUTE: UNKNOWN ROUTE; EXPECTED CARGO: UNKNOWN; ACCESS: UNKNOWN";
         case InspectionTargetType::PEDESTRIAN_PATH:
-            return "PATH PURPOSE: WORKER ACCESS ROUTE";
+            if (registry.alive(target.entity) && registry.has<PathComponent>(target.entity)) {
+                return routePurposeDebugReadout(registry, target.entity, "PATH");
+            }
+            return "PATH ROUTE: UNKNOWN ROUTE; EXPECTED CARGO: UNKNOWN; ACCESS: UNKNOWN";
         case InspectionTargetType::CARRYABLE_OBJECT:
             return "OBJECT PURPOSE: LOOP MATERIAL";
         case InspectionTargetType::WORKER:

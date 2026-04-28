@@ -63,6 +63,10 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - Tiny save/load persists spoofed signpost state as current-scope mechanical state.
 - The player can use `Shift+G` on the workplace/supply dependency to disrupt or restore supply flow.
 - A disrupted dependency is inspectable from workplace and supply, appears in debugger scans, and pauses worker supply flow until restored.
+- Pedestrian paths and signposts derive readable route purpose labels such as `LABOR ROUTE` and `SUPPLY ROUTE`.
+- The inherited debugger reveals route expected cargo and access details on path/signpost scans.
+- Spoofed signposts corrupt their carried-flow label, and spoofing the workplace/supply route shows `SUPPLY FLOW: DISRUPTED` on the workplace.
+- Spoofed route signposts now derive an explicit local `FLOW: BLOCKED` label on the affected path/signpost, and restoring the signpost clears it.
 
 ## Session: Public Site With Context
 
@@ -157,33 +161,33 @@ Logical next step: after route purpose and enriched spoofing exist, add one expl
 
 Goal: derive and display purpose labels for paths and signposts.
 
-- [ ] Use connected building/site roles to derive path labels such as `LABOR ROUTE`, `SUPPLY ROUTE`, or `PUBLIC ACCESS`.
-- [ ] Extend signpost readout with route purpose in addition to destination, such as `TO WORKPLACE; CARRIES: LABOR`.
-- [ ] Add one debugger scan result for routes, such as `EXPECTED CARGO: SUPPLY/PART` or `ACCESS: WORKER ONLY`.
-- [ ] Ensure spoofed signpost text still reads coherently with purpose labels.
-- [ ] Add tests for purpose derivation, signpost readouts (normal and spoofed), and scan enrichment.
+- [x] Use connected building/site roles to derive path labels such as `LABOR ROUTE`, `SUPPLY ROUTE`, or `PUBLIC ACCESS`.
+- [x] Extend signpost readout with route purpose in addition to destination, such as `TO WORKPLACE; CARRIES: LABOR`.
+- [x] Add one debugger scan result for routes, such as `EXPECTED CARGO: SUPPLY/PART` or `ACCESS: WORKER ONLY`.
+- [x] Ensure spoofed signpost text still reads coherently with purpose labels.
+- [x] Add tests for purpose derivation, signpost readouts (normal and spoofed), and scan enrichment.
 
 Acceptance:
 
-- [ ] Paths and signposts have readable purpose derived from map topology.
-- [ ] The debugger reveals hidden route detail beyond ordinary inspection.
-- [ ] No route planner, minimap, or traffic system is introduced.
+- [x] Paths and signposts have readable purpose derived from map topology.
+- [x] The debugger reveals hidden route detail beyond ordinary inspection.
+- [x] No route planner, minimap, or traffic system is introduced.
 
 ## Phase 68: Spoof Enrichment — Flow Label Disruption
 
 Goal: make signpost spoofing disrupt the flow label, not just block movement.
 
-- [ ] When a signpost is spoofed, change or corrupt the route purpose label visible in inspection, such as `ROUTE: CONFUSED` or `CARRIES: ???`.
-- [ ] Derive a flow-level consequence: worker or site readout shows flow disruption, such as `SUPPLY FLOW: DISRUPTED` on the dependent site.
-- [ ] Keep the existing movement-blocking behavior and add the flow-label disruption on top.
-- [ ] Ensure restoring the signpost clears the flow disruption readout.
-- [ ] Add tests for spoofed flow labels, site-level flow consequence, restoration, and boundary (unrelated flows unchanged).
+- [x] When a signpost is spoofed, change or corrupt the route purpose label visible in inspection, such as `ROUTE: CONFUSED` or `CARRIES: ???`.
+- [x] Derive a flow-level consequence: worker or site readout shows flow disruption, such as `SUPPLY FLOW: DISRUPTED` on the dependent site.
+- [x] Keep the existing movement-blocking behavior and add the flow-label disruption on top.
+- [x] Ensure restoring the signpost clears the flow disruption readout.
+- [x] Add tests for spoofed flow labels, site-level flow consequence, restoration, and boundary (unrelated flows unchanged).
 
 Acceptance:
 
-- [ ] Spoofing now has a richer effect: movement block plus flow-label corruption.
-- [ ] The player can see flow disruption propagate to a dependent site.
-- [ ] No new controls are introduced; the existing `Shift+G` verb gains depth.
+- [x] Spoofing now has a richer effect: movement block plus flow-label corruption.
+- [x] The player can see flow disruption propagate to a dependent site.
+- [x] No new controls are introduced; the existing `Shift+G` verb gains depth.
 
 ## Session: Flow Interruption And Recovery
 
@@ -197,17 +201,17 @@ Logical next step: after local flow interruption and recovery work, consider loc
 
 Goal: create one explicit flow blockage from an existing player verb, with readable consequences on affected objects.
 
-- [ ] Use an existing action such as carrying expected supply, holding finished part, or spoofing a route signpost.
-- [ ] Derive one blockage label from that state, such as `FLOW: BLOCKED` or `SUPPLY FLOW: INTERRUPTED`.
-- [ ] Show the blockage on the affected site, path, signpost, or worker inspection/readout.
-- [ ] Add tests proving the blockage is local (unrelated sites and routes remain normal), reversible, and deterministic.
+- [x] Use an existing action such as carrying expected supply, holding finished part, or spoofing a route signpost.
+- [x] Derive one blockage label from that state, such as `FLOW: BLOCKED` or `SUPPLY FLOW: INTERRUPTED`.
+- [x] Show the blockage on the affected site, path, signpost, or worker inspection/readout.
+- [x] Add tests proving the blockage is local (unrelated sites and routes remain normal), reversible, and deterministic.
 
 Acceptance:
 
-- [ ] The player can create a visible blockage using existing verbs.
-- [ ] The blockage is inspectable from the relevant objects.
-- [ ] No new job system, economy, crisis state, alert feed, or objective marker is introduced.
-- [ ] The blockage has a small blast radius; no cascading city-wide effects.
+- [x] The player can create a visible blockage using existing verbs.
+- [x] The blockage is inspectable from the relevant objects.
+- [x] No new job system, economy, crisis state, alert feed, or objective marker is introduced.
+- [x] The blockage has a small blast radius; no cascading city-wide effects.
 
 ## Phase 70: Flow Recovery And Persistence Boundary
 
