@@ -35,6 +35,45 @@ static Entity firstPathBetweenRoles(Registry& registry, MicroZoneRole from_role,
     return MAX_ENTITIES;
 }
 
+static bool pathTouchesEndpointTransform(const TransformComponent& path,
+                                         const TransformComponent& endpoint) {
+    constexpr float eps = 0.01f;
+    const AabbRect path_box = aabbFromTransform(path);
+    const AabbRect endpoint_box = aabbFromTransform(endpoint);
+    const bool vertical = path.height >= path.width;
+    if (vertical) {
+        const bool x_aligned = path_box.left >= endpoint_box.left - eps &&
+                               path_box.right <= endpoint_box.right + eps;
+        const bool y_touches = std::fabs(path_box.top - endpoint_box.bottom) <= eps ||
+                               std::fabs(path_box.bottom - endpoint_box.top) <= eps;
+        return x_aligned && y_touches;
+    }
+
+    const bool y_aligned = path_box.top >= endpoint_box.top - eps &&
+                           path_box.bottom <= endpoint_box.bottom + eps;
+    const bool x_touches = std::fabs(path_box.left - endpoint_box.right) <= eps ||
+                           std::fabs(path_box.right - endpoint_box.left) <= eps;
+    return y_aligned && x_touches;
+}
+
+static bool pathTouchesBothEndpoints(Registry& registry, Entity path_entity) {
+    if (!registry.alive(path_entity) ||
+        !registry.has<PathComponent>(path_entity) ||
+        !registry.has<TransformComponent>(path_entity)) {
+        return false;
+    }
+
+    const auto& path = registry.get<PathComponent>(path_entity);
+    return registry.alive(path.from) &&
+           registry.alive(path.to) &&
+           registry.has<TransformComponent>(path.from) &&
+           registry.has<TransformComponent>(path.to) &&
+           pathTouchesEndpointTransform(registry.get<TransformComponent>(path_entity),
+                                        registry.get<TransformComponent>(path.from)) &&
+           pathTouchesEndpointTransform(registry.get<TransformComponent>(path_entity),
+                                        registry.get<TransformComponent>(path.to));
+}
+
 static Entity routeSignpostTargetEntity(Registry& registry, Entity marker) {
     const auto& signpost = registry.get<RouteSignpostComponent>(marker);
     const auto& path = registry.get<PathComponent>(signpost.path_entity);
@@ -189,6 +228,108 @@ static void testThreeRoleLayoutKeepsUsableBuildingFootprints() {
         assert(transform.width >= 48.0f);
         assert(transform.height >= 48.0f);
     }
+}
+
+static void testCommercialSiteRolePlacementAndInspection() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    assert(validateWorld(registry, config));
+    Entity market = firstBuildingByRole(registry, MicroZoneRole::MARKET);
+    assert(market != MAX_ENTITIES);
+    assert(registry.get<BuildingUseComponent>(market).role == MicroZoneRole::MARKET);
+    assert(!registry.get<BuildingComponent>(market).is_enterable);
+    assert(!registry.has<ShelterStockComponent>(market));
+    assert(!registry.has<WorkplaceBenchComponent>(market));
+    assert(!registry.has<BuildingImprovementComponent>(market));
+
+    const auto& glyph = registry.get<GlyphComponent>(market);
+    assert(glyph.chars == "m");
+    assert(glyph.r == 210);
+    assert(glyph.g == 120);
+    assert(glyph.b == 235);
+
+    size_t market_micros = 0;
+    for (Entity micro : registry.view<MicroZoneComponent>()) {
+        if (registry.get<MicroZoneComponent>(micro).role == MicroZoneRole::MARKET) {
+            ++market_micros;
+        }
+    }
+    assert(market_micros == 1);
+    assert(buildingsDoNotOverlap(registry));
+
+    const auto market_box = aabbFromTransform(registry.get<TransformComponent>(market));
+    for (Entity path : registry.view<PathComponent, TransformComponent>()) {
+        assert(!aabbOverlap(market_box, aabbFromTransform(registry.get<TransformComponent>(path))));
+    }
+
+    const TransformComponent player_at_market = registry.get<TransformComponent>(market);
+    assert(nearestInspectionTargetInRange(registry, player_at_market, 22.0f).type ==
+           InspectionTargetType::MARKET);
+    assert(nearestInteractableBuildingInRange(registry, player_at_market, 22.0f) == MAX_ENTITIES);
+
+    const std::string readout = buildingInspectionReadout(registry, market);
+    assert(readout.find("MARKET; PURPOSE: EXCHANGE") != std::string::npos);
+    assert(readout.find("FUNCTION: EXCHANGE SITE") != std::string::npos);
+    assert(readout.find("SITE STATUS: OBSERVATION ONLY") != std::string::npos);
+}
+
+static void testFiveRoleLayoutKeepsWorkerPathsConnectedAndMarketClear() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+
+    buildWorld(registry, config);
+    assert(validateWorld(registry, config));
+    assert(deriveInfrastructure(registry, config) == 2);
+    assert(spawnFixedActors(registry, config) == 1);
+
+    Entity market = firstBuildingByRole(registry, MicroZoneRole::MARKET);
+    Entity housing_workplace =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    Entity worker = firstFixedWorker(registry);
+    assert(market != MAX_ENTITIES);
+    assert(housing_workplace != MAX_ENTITIES);
+    assert(workplace_supply != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+
+    const auto market_box = aabbFromTransform(registry.get<TransformComponent>(market));
+    for (Entity path : registry.view<PathComponent, TransformComponent>()) {
+        assert(pathTouchesBothEndpoints(registry, path));
+        assert(!aabbOverlap(market_box, aabbFromTransform(registry.get<TransformComponent>(path))));
+    }
+
+    updateFixedActors(registry, 10.0f);
+
+    const auto& worker_component = registry.get<FixedActorComponent>(worker);
+    assert(worker_component.path_entity == workplace_supply);
+    assert(pathTouchesBothEndpoints(registry, worker_component.path_entity));
+
+    const Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    const auto& worker_transform = registry.get<TransformComponent>(worker);
+    const auto workplace_box = aabbFromTransform(registry.get<TransformComponent>(workplace));
+    assert(worker_transform.x >= workplace_box.left - 0.01f);
+    assert(worker_transform.x <= workplace_box.right + 0.01f);
 }
 
 static void testPedestrianPathRequiresHousingAndWorkplace() {
@@ -1176,7 +1317,7 @@ static void testShelterDropOffStoresSupplyOnlyInHousing() {
     assert(workplace != MAX_ENTITIES);
     assert(supply != MAX_ENTITIES);
     assert(registry.has<ShelterStockComponent>(housing));
-    assert(shelterSupplyReadout(registry) == "SHELTER SUPPLY: 0/1");
+    assert(shelterSupplyReadout(registry) == "BUILDING SUPPLY: 0/1");
 
     Entity player = registry.create();
     registry.assign<PlayerComponent>(player);
@@ -1204,7 +1345,7 @@ static void testShelterDropOffStoresSupplyOnlyInHousing() {
 
     assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
     assert(shelterSupplyCount(registry) == 1);
-    assert(shelterSupplyReadout(registry) == "SHELTER SUPPLY: 1/1");
+    assert(shelterSupplyReadout(registry) == "BUILDING SUPPLY: 1/1");
     assert(registry.get<TransformComponent>(object).x == 99999.0f);
     assert(registry.get<TransformComponent>(object).y == 99999.0f);
     assert(!playerCanTakeSupplyObject(registry, player));
@@ -1268,11 +1409,11 @@ static void testTinySaveRoundTripRestoresShelterStock() {
     assert(deserializeTinySaveState(serialized, parsed) == TinySaveStatus::OK);
 
     registry.get<ShelterStockComponent>(housing).current_supply = 0;
-    assert(shelterSupplyReadout(registry) == "SHELTER SUPPLY: 0/1");
+    assert(shelterSupplyReadout(registry) == "BUILDING SUPPLY: 0/1");
 
     assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
     assert(shelterSupplyCount(registry) == 1);
-    assert(shelterSupplyReadout(registry) == "SHELTER SUPPLY: 1/1");
+    assert(shelterSupplyReadout(registry) == "BUILDING SUPPLY: 1/1");
     assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
     assert(!playerCanTakeSupplyObject(registry, player));
 }
@@ -1567,7 +1708,7 @@ static void testPlayerImprovesBuildingWithFinishedItemOnly() {
     assert(buildingImproved(registry));
     assert(buildingImprovementReadout(registry) == "BUILDING IMPROVED: YES");
     assert(housingInteriorReadout(registry) ==
-           "SHELTER SUPPLY: 0/1; BUILDING: IMPROVED; BUILDING IMPROVED: YES");
+           "PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY; BUILDING SUPPLY: 0/1; BUILDING: IMPROVED; BUILDING IMPROVED: YES");
     assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
     assert(shelterSupplyCount(registry) == 0);
     assert(!playerCanImproveBuilding(registry, player));
@@ -1579,6 +1720,571 @@ static void testPlayerImprovesBuildingWithFinishedItemOnly() {
     registry.get<BuildingImprovementComponent>(housing).improved = false;
     assert(applyTinySaveState(registry, player, parsed) == TinySaveStatus::OK);
     assert(buildingImproved(registry));
+}
+
+static void testBuildingPurposeForCurrentRoles() {
+    const BuildingPurposeInfo housing = buildingPurposeForRole(MicroZoneRole::HOUSING);
+    const BuildingPurposeInfo workplace = buildingPurposeForRole(MicroZoneRole::WORKPLACE);
+    const BuildingPurposeInfo supply = buildingPurposeForRole(MicroZoneRole::SUPPLY);
+    const BuildingPurposeInfo market = buildingPurposeForRole(MicroZoneRole::MARKET);
+
+    assert(housing.role == MicroZoneRole::HOUSING);
+    assert(std::string(housing.label) == "DWELLING");
+    assert(std::string(housing.function) == "BUILDING RECOVERY");
+    assert(buildingPurposeReadoutForRole(MicroZoneRole::HOUSING) ==
+           "PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY");
+
+    assert(workplace.role == MicroZoneRole::WORKPLACE);
+    assert(std::string(workplace.label) == "PRODUCTION");
+    assert(std::string(workplace.function) == "CONVERT SUPPLY TO PART");
+    assert(buildingPurposeReadoutForRole(MicroZoneRole::WORKPLACE) ==
+           "PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART");
+
+    assert(supply.role == MicroZoneRole::SUPPLY);
+    assert(std::string(supply.label) == "MATERIAL SOURCE");
+    assert(std::string(supply.function) == "SOURCE LOOP MATERIAL");
+    assert(buildingPurposeReadoutForRole(MicroZoneRole::SUPPLY) ==
+           "PURPOSE: MATERIAL SOURCE; FUNCTION: SOURCE LOOP MATERIAL");
+
+    assert(market.role == MicroZoneRole::MARKET);
+    assert(std::string(market.label) == "EXCHANGE");
+    assert(std::string(market.function) == "EXCHANGE SITE");
+    assert(buildingPurposeReadoutForRole(MicroZoneRole::MARKET) ==
+           "PURPOSE: EXCHANGE; FUNCTION: EXCHANGE SITE");
+}
+
+static void testBuildingInspectionReadoutsIncludePurposeForCurrentRoles() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    buildWorld(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity market = firstBuildingByRole(registry, MicroZoneRole::MARKET);
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(market != MAX_ENTITIES);
+
+    std::string readout = buildingInspectionReadout(registry, housing);
+    assert(readout.find("HOUSING; PURPOSE: DWELLING") != std::string::npos);
+    assert(readout.find("FUNCTION: BUILDING RECOVERY") != std::string::npos);
+    assert(readout.find("BUILDING: NEEDS PART") != std::string::npos);
+
+    readout = buildingInspectionReadout(registry, workplace);
+    assert(readout.find("WORKPLACE; PURPOSE: PRODUCTION") != std::string::npos);
+    assert(readout.find("FUNCTION: CONVERT SUPPLY TO PART") != std::string::npos);
+    assert(readout.find("WORK BENCH: EMPTY") != std::string::npos);
+
+    readout = buildingInspectionReadout(registry, supply);
+    assert(readout.find("SUPPLY; PURPOSE: MATERIAL SOURCE") != std::string::npos);
+    assert(readout.find("FUNCTION: SOURCE LOOP MATERIAL") != std::string::npos);
+    assert(readout.find("SITE STATUS: STOCK POINT") != std::string::npos);
+
+    readout = buildingInspectionReadout(registry, market);
+    assert(readout.find("MARKET; PURPOSE: EXCHANGE") != std::string::npos);
+    assert(readout.find("FUNCTION: EXCHANGE SITE") != std::string::npos);
+    assert(readout.find("SITE STATUS: OBSERVATION ONLY") != std::string::npos);
+
+    assert(buildingPurposeScanReadoutForRole(MicroZoneRole::HOUSING) ==
+           "HOUSING PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY");
+    assert(inheritedGadgetSiteMetadataScan(
+        registry,
+        InspectionTarget{housing, InspectionTargetType::HOUSING}) ==
+           "HOUSING PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY");
+    assert(inheritedGadgetSiteMetadataScan(
+        registry,
+        InspectionTarget{supply, InspectionTargetType::SUPPLY}) ==
+           "SUPPLY PURPOSE: MATERIAL SOURCE; FUNCTION: SOURCE LOOP MATERIAL; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SUPPORTS: WORKPLACE");
+    assert(inheritedGadgetSiteMetadataScan(
+        registry,
+        InspectionTarget{market, InspectionTargetType::MARKET}) ==
+           "MARKET PURPOSE: EXCHANGE; ACCESS: RESTRICTED");
+}
+
+static void testCommercialSiteDebuggerScanMetadataAndNoTarget() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    buildWorld(registry, config);
+
+    Entity market = firstBuildingByRole(registry, MicroZoneRole::MARKET);
+    assert(market != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(market));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(playerInspectionTarget(registry, player, 22.0f).type == InspectionTargetType::MARKET);
+    assert(inheritedGadgetPromptReadout(registry, player, 22.0f) ==
+           "G USE DEBUGGER ON MARKET");
+    assert(useInheritedGadget(registry, player, 22.0f));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "GADGET RESULT: MARKET PURPOSE: EXCHANGE; ACCESS: RESTRICTED");
+
+    registry.get<TransformComponent>(player) = TransformComponent{4000.0f, 4000.0f, 12.0f, 12.0f};
+    assert(inheritedGadgetPromptReadout(registry, player, 22.0f) ==
+           "G USE DEBUGGER: NO SIGNAL");
+    assert(!useInheritedGadget(registry, player, 22.0f));
+    assert(inheritedGadgetResultReadout(registry, player) == "GADGET RESULT: NO SIGNAL");
+}
+
+static void testCommercialSiteObservationOnlyBoundary() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity market = firstBuildingByRole(registry, MicroZoneRole::MARKET);
+    Entity worker = firstFixedWorker(registry);
+    Entity housing_workplace_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(market != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+    assert(housing_workplace_path != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+    assert(firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::MARKET) ==
+           MAX_ENTITIES);
+    assert(firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::MARKET) ==
+           MAX_ENTITIES);
+    assert(firstPathBetweenRoles(registry, MicroZoneRole::SUPPLY, MicroZoneRole::MARKET) ==
+           MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(market));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    const auto worker_before = registry.get<FixedActorComponent>(worker);
+    const WorkplaceBenchState bench_before =
+        registry.get<WorkplaceBenchComponent>(firstWorkplaceBenchBuilding(registry)).state;
+    const bool building_improved_before = buildingImproved(registry);
+    const size_t path_count_before = registry.view<PathComponent>().size();
+
+    assert(!enterBuildingInterior(registry, player, market));
+    assert(playerLocationState(registry, player, 22.0f) == PlayerLocationState::OUTSIDE);
+    assert(!playerCanTakeSupplyObject(registry, player));
+    assert(!takeSupplyObjectFromInterior(registry, player));
+    assert(!playerCanStoreSupplyAtShelter(registry, player));
+    assert(!playerCanStockWorkplaceBench(registry, player));
+    assert(!playerCanWorkWorkplaceBench(registry, player));
+    assert(!playerCanTakeWorkplaceOutput(registry, player));
+    assert(!playerCanImproveBuilding(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+
+    assert(updateWorkerSupplyPickups(registry) == 0);
+    assert(updateWorkerWorkplaceBenchDropOffs(registry) == 0);
+    assert(updateWorkerWorkplaceBenchWork(registry) == 0);
+    assert(updateWorkerWorkplaceOutputPickups(registry) == 0);
+    assert(updateWorkerBuildingDeliveries(registry) == 0);
+
+    const auto& worker_after = registry.get<FixedActorComponent>(worker);
+    assert(worker_after.path_entity == worker_before.path_entity);
+    assert(worker_after.carried_object == worker_before.carried_object);
+    assert(closeTo(worker_after.route_t, worker_before.route_t));
+    assert(closeTo(worker_after.direction, worker_before.direction));
+    assert(registry.get<WorkplaceBenchComponent>(firstWorkplaceBenchBuilding(registry)).state ==
+           bench_before);
+    assert(buildingImproved(registry) == building_improved_before);
+    assert(registry.view<PathComponent>().size() == path_count_before);
+}
+
+static void testPublicSitePlacementAndInspection() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    assert(validateWorld(registry, config));
+    Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+    assert(clinic != MAX_ENTITIES);
+    assert(registry.get<BuildingUseComponent>(clinic).role == MicroZoneRole::CLINIC);
+    assert(!registry.get<BuildingComponent>(clinic).is_enterable);
+    assert(!registry.has<ShelterStockComponent>(clinic));
+    assert(!registry.has<WorkplaceBenchComponent>(clinic));
+    assert(!registry.has<BuildingImprovementComponent>(clinic));
+
+    const auto& glyph = registry.get<GlyphComponent>(clinic);
+    assert(glyph.chars == "+");
+    assert(glyph.r == 255);
+    assert(glyph.g == 90);
+    assert(glyph.b == 90);
+
+    size_t clinic_micros = 0;
+    for (Entity micro : registry.view<MicroZoneComponent>()) {
+        if (registry.get<MicroZoneComponent>(micro).role == MicroZoneRole::CLINIC) {
+            ++clinic_micros;
+        }
+    }
+    assert(clinic_micros == 1);
+    assert(buildingsDoNotOverlap(registry));
+
+    assert(inspectionTypeForRole(MicroZoneRole::CLINIC) == InspectionTargetType::CLINIC);
+    assert(nearestInteractableBuildingInRange(registry,
+        registry.get<TransformComponent>(clinic), 22.0f) == MAX_ENTITIES);
+
+    const std::string readout = buildingInspectionReadout(registry, clinic);
+    assert(readout.find("CLINIC; PURPOSE: PUBLIC HEALTH") != std::string::npos);
+    assert(readout.find("FUNCTION: MEDICAL SERVICE") != std::string::npos);
+    assert(readout.find("SITE STATUS: OBSERVATION ONLY") != std::string::npos);
+    assert(readout.find("CONTEXT: MUNICIPAL") != std::string::npos);
+}
+
+static void testSiteContextTagsInInspectionReadout() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    buildWorld(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity market = firstBuildingByRole(registry, MicroZoneRole::MARKET);
+    Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+
+    assert(buildingInspectionReadout(registry, housing).find("CONTEXT: HOUSEHOLD") != std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace).find("CONTEXT: PRIVATE") != std::string::npos);
+    assert(buildingInspectionReadout(registry, supply).find("CONTEXT: PRIVATE") != std::string::npos);
+    assert(buildingInspectionReadout(registry, market).find("CONTEXT: COMMERCIAL") != std::string::npos);
+    assert(buildingInspectionReadout(registry, clinic).find("CONTEXT: MUNICIPAL") != std::string::npos);
+
+    assert(std::string(siteContextTagForRole(MicroZoneRole::HOUSING)) == "HOUSEHOLD");
+    assert(std::string(siteContextTagForRole(MicroZoneRole::WORKPLACE)) == "PRIVATE");
+    assert(std::string(siteContextTagForRole(MicroZoneRole::SUPPLY)) == "PRIVATE");
+    assert(std::string(siteContextTagForRole(MicroZoneRole::MARKET)) == "COMMERCIAL");
+    assert(std::string(siteContextTagForRole(MicroZoneRole::CLINIC)) == "MUNICIPAL");
+}
+
+static void testPublicSiteDebuggerScanMetadata() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    buildWorld(registry, config);
+
+    Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+    assert(clinic != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(clinic));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(playerInspectionTarget(registry, player, 22.0f).type == InspectionTargetType::CLINIC);
+    assert(inheritedGadgetPromptReadout(registry, player, 22.0f) ==
+           "G USE DEBUGGER ON CLINIC");
+    assert(useInheritedGadget(registry, player, 22.0f));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "GADGET RESULT: CLINIC PURPOSE: PUBLIC HEALTH; SERVICE: RATIONED; AUTHORITY: MUNICIPAL");
+}
+
+static void testPublicSiteBoundaryDoesNotBreakLoop() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+    Entity worker = firstFixedWorker(registry);
+    assert(clinic != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+
+    assert(firstPathBetweenRoles(registry, MicroZoneRole::HOUSING, MicroZoneRole::CLINIC) ==
+           MAX_ENTITIES);
+    assert(firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::CLINIC) ==
+           MAX_ENTITIES);
+    assert(firstPathBetweenRoles(registry, MicroZoneRole::SUPPLY, MicroZoneRole::CLINIC) ==
+           MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(clinic));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    const auto worker_before = registry.get<FixedActorComponent>(worker);
+    const WorkplaceBenchState bench_before =
+        registry.get<WorkplaceBenchComponent>(firstWorkplaceBenchBuilding(registry)).state;
+    const bool building_improved_before = buildingImproved(registry);
+    const size_t path_count_before = registry.view<PathComponent>().size();
+
+    assert(!enterBuildingInterior(registry, player, clinic));
+    assert(playerLocationState(registry, player, 22.0f) == PlayerLocationState::OUTSIDE);
+    assert(!playerCanTakeSupplyObject(registry, player));
+    assert(!takeSupplyObjectFromInterior(registry, player));
+    assert(!playerCanStoreSupplyAtShelter(registry, player));
+    assert(!playerCanStockWorkplaceBench(registry, player));
+    assert(!playerCanWorkWorkplaceBench(registry, player));
+    assert(!playerCanTakeWorkplaceOutput(registry, player));
+    assert(!playerCanImproveBuilding(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+
+    assert(updateWorkerSupplyPickups(registry) == 0);
+    assert(updateWorkerWorkplaceBenchDropOffs(registry) == 0);
+    assert(updateWorkerWorkplaceBenchWork(registry) == 0);
+    assert(updateWorkerWorkplaceOutputPickups(registry) == 0);
+    assert(updateWorkerBuildingDeliveries(registry) == 0);
+
+    const auto& worker_after = registry.get<FixedActorComponent>(worker);
+    assert(worker_after.path_entity == worker_before.path_entity);
+    assert(worker_after.carried_object == worker_before.carried_object);
+    assert(closeTo(worker_after.route_t, worker_before.route_t));
+    assert(closeTo(worker_after.direction, worker_before.direction));
+    assert(registry.get<WorkplaceBenchComponent>(firstWorkplaceBenchBuilding(registry)).state ==
+           bench_before);
+    assert(buildingImproved(registry) == building_improved_before);
+    assert(registry.view<PathComponent>().size() == path_count_before);
+
+    assert(std::string(siteContextTagForRole(MicroZoneRole::CLINIC)) == "MUNICIPAL");
+    assert(!roleIsEnterable(MicroZoneRole::CLINIC));
+}
+
+static void testBuildingPurposeReadoutsDoNotMutateLoopState() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity object = firstCarryableObject(registry);
+    assert(worker != MAX_ENTITIES);
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+
+    const auto worker_before = registry.get<FixedActorComponent>(worker);
+    const WorkplaceBenchState bench_before =
+        registry.get<WorkplaceBenchComponent>(workplace).state;
+    const bool building_improved_before = buildingImproved(registry);
+    const TransformComponent object_before = registry.get<TransformComponent>(object);
+
+    assert(!buildingInspectionReadout(registry, housing).empty());
+    assert(!buildingInspectionReadout(registry, workplace).empty());
+    assert(!buildingInspectionReadout(registry, supply).empty());
+    assert(!housingInteriorReadout(registry).empty());
+    assert(!workplaceBenchLoopReadout(registry).empty());
+
+    const auto& worker_after = registry.get<FixedActorComponent>(worker);
+    assert(worker_after.path_entity == worker_before.path_entity);
+    assert(worker_after.carried_object == worker_before.carried_object);
+    assert(closeTo(worker_after.route_t, worker_before.route_t));
+    assert(closeTo(worker_after.direction, worker_before.direction));
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == bench_before);
+    assert(buildingImproved(registry) == building_improved_before);
+    assert(closeTo(registry.get<TransformComponent>(object).x, object_before.x));
+    assert(closeTo(registry.get<TransformComponent>(object).y, object_before.y));
+}
+
+static void testDependencyEdgeInspectionReadouts() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+    assert(housing != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(clinic != MAX_ENTITIES);
+
+    assert(dependencyEdgeResolved(registry));
+    assert(dependencyEndpointForRole(registry, MicroZoneRole::WORKPLACE) == workplace);
+    assert(dependencyEndpointForRole(registry, MicroZoneRole::SUPPLY) == supply);
+    assert(dependencyEndpointForRole(registry, MicroZoneRole::HOUSING) == MAX_ENTITIES);
+
+    const std::string workplace_readout = buildingInspectionReadout(registry, workplace);
+    const std::string supply_readout = buildingInspectionReadout(registry, supply);
+    assert(workplace_readout.find("DEPENDS ON: SUPPLY") != std::string::npos);
+    assert(supply_readout.find("SUPPORTS: WORKPLACE") != std::string::npos);
+    assert(buildingInspectionReadout(registry, housing).find("DEPENDS ON") == std::string::npos);
+    assert(buildingInspectionReadout(registry, clinic).find("DEPENDS ON") == std::string::npos);
+    assert(buildingInspectionReadout(registry, clinic).find("SUPPORTS") == std::string::npos);
+}
+
+static void testDependencyEdgeMissingTargetReadouts() {
+    Registry missing_supply;
+    WorldConfig workplace_only = makeSandboxConfig();
+    workplace_only.workplace_micro_zone_count = 1;
+    workplace_only.workplace_building_count = 1;
+    buildWorld(missing_supply, workplace_only);
+
+    Entity workplace = firstBuildingByRole(missing_supply, MicroZoneRole::WORKPLACE);
+    assert(workplace != MAX_ENTITIES);
+    assert(!dependencyEdgeResolved(missing_supply));
+    assert(buildingInspectionReadout(missing_supply, workplace).find("DEPENDS ON: MISSING SUPPLY") !=
+           std::string::npos);
+    assert(dependencyScanReadout(missing_supply, MicroZoneRole::WORKPLACE) ==
+           "FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; TARGET: MISSING");
+
+    Registry missing_workplace;
+    WorldConfig supply_only = makeSandboxConfig();
+    supply_only.supply_micro_zone_count = 1;
+    supply_only.supply_building_count = 1;
+    buildWorld(missing_workplace, supply_only);
+
+    Entity supply = firstBuildingByRole(missing_workplace, MicroZoneRole::SUPPLY);
+    assert(supply != MAX_ENTITIES);
+    assert(!dependencyEdgeResolved(missing_workplace));
+    assert(buildingInspectionReadout(missing_workplace, supply).find("SUPPORTS: NO WORKPLACE") !=
+           std::string::npos);
+    assert(dependencyScanReadout(missing_workplace, MicroZoneRole::SUPPLY) ==
+           "FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; TARGET: MISSING");
+}
+
+static void testDependencyDebuggerScanEnrichment() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+
+    assert(inheritedGadgetSiteMetadataScan(
+        registry,
+        InspectionTarget{workplace, InspectionTargetType::WORKPLACE}) ==
+           "WORKPLACE PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SOURCE: SUPPLY");
+    assert(inheritedGadgetSiteMetadataScan(
+        registry,
+        InspectionTarget{supply, InspectionTargetType::SUPPLY}) ==
+           "SUPPLY PURPOSE: MATERIAL SOURCE; FUNCTION: SOURCE LOOP MATERIAL; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SUPPORTS: WORKPLACE");
+    assert(inheritedGadgetSiteMetadataScan(
+        registry,
+        InspectionTarget{firstBuildingByRole(registry, MicroZoneRole::HOUSING), InspectionTargetType::HOUSING}) ==
+           "HOUSING PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY");
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    assert(inheritedGadgetPromptReadout(registry, player, 22.0f) ==
+           "G USE DEBUGGER ON WORKPLACE INTERIOR");
+    assert(useInheritedGadget(registry, player, 22.0f));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "GADGET RESULT: WORKPLACE PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SOURCE: SUPPLY");
+}
+
+static void testDependencyReadoutsDoNotMutateLoopState() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity object = firstCarryableObject(registry);
+    assert(worker != MAX_ENTITIES);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+
+    const auto worker_before = registry.get<FixedActorComponent>(worker);
+    const WorkplaceBenchState bench_before =
+        registry.get<WorkplaceBenchComponent>(workplace).state;
+    const bool building_improved_before = buildingImproved(registry);
+    const TransformComponent object_before = registry.get<TransformComponent>(object);
+
+    assert(!dependencyInspectionReadout(registry, MicroZoneRole::WORKPLACE).empty());
+    assert(!dependencyInspectionReadout(registry, MicroZoneRole::SUPPLY).empty());
+    assert(!dependencyScanReadout(registry, MicroZoneRole::WORKPLACE).empty());
+    assert(!dependencyScanReadout(registry, MicroZoneRole::SUPPLY).empty());
+    assert(!buildingInspectionReadout(registry, workplace).empty());
+    assert(!buildingInspectionReadout(registry, supply).empty());
+
+    const auto& worker_after = registry.get<FixedActorComponent>(worker);
+    assert(worker_after.path_entity == worker_before.path_entity);
+    assert(worker_after.carried_object == worker_before.carried_object);
+    assert(closeTo(worker_after.route_t, worker_before.route_t));
+    assert(closeTo(worker_after.direction, worker_before.direction));
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == bench_before);
+    assert(buildingImproved(registry) == building_improved_before);
+    assert(closeTo(registry.get<TransformComponent>(object).x, object_before.x));
+    assert(closeTo(registry.get<TransformComponent>(object).y, object_before.y));
 }
 
 static void testWorkerSupplyPickupRequiresSupplyEndpoint() {
@@ -2684,7 +3390,7 @@ static void testBenchAndBuildingLoopReadoutsExposeBlockages() {
     assert(buildingImprovementLoopReadout(registry) ==
            "BUILDING: ALREADY COMPLETE; BUILDING IMPROVED: YES");
     assert(housingInteriorReadout(registry) ==
-           "SHELTER SUPPLY: 0/1; BUILDING: ALREADY COMPLETE; BUILDING IMPROVED: YES");
+           "PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY; BUILDING SUPPLY: 0/1; BUILDING: ALREADY COMPLETE; BUILDING IMPROVED: YES");
 }
 
 static void testWorkerBlockedSupplyPickupResumesAfterPlayerReleasesSupply() {
@@ -3079,7 +3785,7 @@ static void testInheritedGadgetSiteMetadataScan() {
 
     assert(useInheritedGadget(registry, player, 22.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: WORKPLACE PURPOSE: CONVERT SUPPLY TO PART");
+           "GADGET RESULT: WORKPLACE PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SOURCE: SUPPLY");
 
     exitBuildingInterior(registry, player);
     auto signposts = registry.view<RouteSignpostComponent, TransformComponent>();
@@ -3609,6 +4315,8 @@ int main() {
     testConfiguredWorkplaceCreatesSecondBuildingType();
     testConfiguredSupplyCreatesThirdPurposeBuilding();
     testThreeRoleLayoutKeepsUsableBuildingFootprints();
+    testCommercialSiteRolePlacementAndInspection();
+    testFiveRoleLayoutKeepsWorkerPathsConnectedAndMarketClear();
     testPedestrianPathRequiresHousingAndWorkplace();
     testSupplyPathRequiresConfiguredSupply();
     testValidationRejectsBuildingOutsideMicroZone();
@@ -3648,6 +4356,19 @@ int main() {
     testPlayerBenchWorkCreatesOutputOnlyWhenStocked();
     testPlayerTakesFinishedOutputAsSingleCarriedItem();
     testPlayerImprovesBuildingWithFinishedItemOnly();
+    testBuildingPurposeForCurrentRoles();
+    testBuildingInspectionReadoutsIncludePurposeForCurrentRoles();
+    testCommercialSiteDebuggerScanMetadataAndNoTarget();
+    testCommercialSiteObservationOnlyBoundary();
+    testPublicSitePlacementAndInspection();
+    testSiteContextTagsInInspectionReadout();
+    testPublicSiteDebuggerScanMetadata();
+    testPublicSiteBoundaryDoesNotBreakLoop();
+    testBuildingPurposeReadoutsDoNotMutateLoopState();
+    testDependencyEdgeInspectionReadouts();
+    testDependencyEdgeMissingTargetReadouts();
+    testDependencyDebuggerScanEnrichment();
+    testDependencyReadoutsDoNotMutateLoopState();
     testWorkerSupplyPickupRequiresSupplyEndpoint();
     testWorkerSupplyPickupBlockedWhilePlayerCarriesObject();
     testWorkerSupplyPickupBlockedByStoredSupplyStates();

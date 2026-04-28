@@ -11,7 +11,9 @@ enum class ZoneType {
 enum class MicroZoneRole {
     HOUSING,
     WORKPLACE,
-    SUPPLY
+    SUPPLY,
+    MARKET,
+    CLINIC
 };
 
 enum class PathKind {
@@ -27,6 +29,8 @@ enum class InspectionTargetType {
     HOUSING,
     WORKPLACE,
     SUPPLY,
+    MARKET,
+    CLINIC,
     PEDESTRIAN_PATH,
     ROUTE_SIGNPOST,
     WORKER,

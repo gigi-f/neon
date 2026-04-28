@@ -38,29 +38,42 @@ inline TransformComponent pedestrianPathTransformBetween(const TransformComponen
     const AabbRect a = aabbFromTransform(from);
     const AabbRect b = aabbFromTransform(to);
     constexpr float thickness = 8.0f;
+    const bool x_overlap_or_touch = a.left <= b.right && a.right >= b.left;
+    const bool y_overlap_or_touch = a.top <= b.bottom && a.bottom >= b.top;
 
-    if (a.bottom <= b.top || b.bottom <= a.top) {
+    if ((a.bottom <= b.top || b.bottom <= a.top) && x_overlap_or_touch) {
         const bool a_above_b = a.bottom <= b.top;
         const float start = a_above_b ? a.bottom : b.bottom;
         const float end = a_above_b ? b.top : a.top;
+        const float overlap_start = std::max(a.left, b.left);
+        const float overlap_end = std::min(a.right, b.right);
         return TransformComponent{
-            (from.x + to.x) * 0.5f,
+            (overlap_start + overlap_end) * 0.5f,
             (start + end) * 0.5f,
             thickness,
             std::max(thickness, end - start)
         };
     }
 
-    if (a.right <= b.left || b.right <= a.left) {
+    if ((a.right <= b.left || b.right <= a.left) && y_overlap_or_touch) {
         const bool a_left_of_b = a.right <= b.left;
         const float start = a_left_of_b ? a.right : b.right;
         const float end = a_left_of_b ? b.left : a.left;
+        const float overlap_start = std::max(a.top, b.top);
+        const float overlap_end = std::min(a.bottom, b.bottom);
         return TransformComponent{
             (start + end) * 0.5f,
-            (from.y + to.y) * 0.5f,
+            (overlap_start + overlap_end) * 0.5f,
             std::max(thickness, end - start),
             thickness
         };
+    }
+
+    if (!x_overlap_or_touch || !y_overlap_or_touch) {
+        return TransformComponent{(from.x + to.x) * 0.5f,
+                                  (from.y + to.y) * 0.5f,
+                                  0.0f,
+                                  0.0f};
     }
 
     return TransformComponent{
@@ -77,10 +90,15 @@ inline Entity createPedestrianPath(Registry& registry, Entity from, Entity to) {
         return MAX_ENTITIES;
     }
 
-    Entity path = registry.create();
-    registry.assign<TransformComponent>(path,
+    const TransformComponent path_transform =
         pedestrianPathTransformBetween(registry.get<TransformComponent>(from),
-                                       registry.get<TransformComponent>(to)));
+                                       registry.get<TransformComponent>(to));
+    if (path_transform.width <= 0.0f || path_transform.height <= 0.0f) {
+        return MAX_ENTITIES;
+    }
+
+    Entity path = registry.create();
+    registry.assign<TransformComponent>(path, path_transform);
     registry.assign<PathComponent>(path, PathKind::PEDESTRIAN, from, to);
     registry.assign<PathStateComponent>(path, PathState::LIT);
     registry.assign<GlyphComponent>(path, std::string("."),

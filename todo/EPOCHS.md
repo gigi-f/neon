@@ -4,6 +4,14 @@ This file proposes future session groups for `todo/TODO.md`. It is directional c
 
 Future agents should use this file to keep the end-game shape in mind while still implementing one small, visible session at a time. If an epoch or session jumps too far ahead, no longer fits the vision, or would push the game toward city-builder/player-management mechanics, push back and propose a smaller or different direction before writing it into `todo/TODO.md`.
 
+## Session Design Directives
+
+- **Vertical slices over horizontal layers.** A session that adds a site, its context, its dependency, and one interaction is better than separate sessions for sites, tags, edges, and labels. Go deep on one concept rather than wide across many.
+- **Every session must include a player verb or interference opportunity.** Observation-only sessions that add inspectable labels with no new action are not allowed. If a proposed session has no verb, restructure it to include one before writing it into TODO.md.
+- **Fold readouts and boundaries into mechanic phases.** Inspection text, scan metadata, and boundary tests are acceptance criteria of the phase that introduces the mechanic, not separate phases. A phase that only adds readouts or only proves boundaries is a sign the prior phase was too narrow.
+- **No decision-only phases.** "Decide whether X needs Y" is a design question, not an implementation phase. Resolve it in the prior phase's acceptance criteria or a TODO note.
+- **Pace check: every 3 observation sessions must be followed by 1 action session.** If the plan accumulates 3+ sessions of context/inspection/label work without a new verb, restructure before implementing.
+
 ## End-Game Frame
 
 The end game should not assume the player becomes a manager, mayor, production planner, or commander. The player is a young girl with illicit tools inherited from her engineer mother, moving through systems she did not build: labor, infrastructure, housing, commerce, public works, scarcity, coercion, and eventually more explicit control systems.
@@ -102,43 +110,34 @@ Gameplay outcome: buildings represent different social and economic functions, n
 
 Big Picture: `building` should cover shelter, workplace, commercial use, public infrastructure, storage, institutional sites, and capital equipment. The player learns what these places do and how they relate.
 
-Logical next step: after purposes are legible, connect them with routes and dependencies that can be observed.
+Logical next step: after purposes are legible, connect them with routes and dependencies that can be observed and disrupted.
 
-Sessions:
+Sessions (completed):
 
 - Session: Building Purpose Model
 - Session: Commercial Site
-- Session: Public Site
-- Session: Ownership Or Authority Tag
 
-Likely focus:
+Sessions (active, tightened into vertical slices):
 
-- Refactor housing-specific improvement/readout language into generic building/site status.
-- Add one commercial or capital-purpose building.
-- Add one public-purpose site.
-- Add inspectable ownership/authority context without faction systems.
+- Session: Public Site With Context — one public site with authority tag, inspection, scan, and boundary tests in 2 phases instead of 6
+
+Design note: the original plan split public sites, authority tags, and boundary tests across 6 phases and 2 sessions. These were collapsed into vertical slices where each phase delivers a mechanic with its readouts and boundaries built in.
 
 ## Epoch: Dependencies And City Flows
 
-Gameplay outcome: production, buildings, and routes begin to form visible dependencies.
+Gameplay outcome: production, buildings, and routes form visible dependencies that the player can inspect, disrupt, and restore.
 
-Big Picture: the simulation exploration core depends on flows: materials, workers, energy, access, information, money, and institutional pressure. Start with one or two flows that are visible and inspectable.
+Big Picture: the simulation exploration core depends on flows: materials, workers, energy, access, information, money, and institutional pressure. Start with one or two flows that are visible, inspectable, and interactable. Every session must include at least one player verb or interference opportunity, not just inspectable labels.
 
-Logical next step: after flows are visible, allow the player's gadgets to reveal hidden flow metadata.
+Logical next step: after flows are visible and disruptable, consider local risk only if the player-facing loop needs stakes.
 
 Sessions:
 
-- Session: One Dependency Edge
-- Session: Route Purpose Readouts
-- Session: Flow Blockage
-- Session: Flow Recovery
+- Session: One Dependency Chain — add one dependency edge with inspection and debugger disruption in 2 phases
+- Session: Route Purpose And Flow — derive path/signpost purpose labels and enrich spoofing to disrupt flow labels in 2 phases
+- Session: Flow Interruption And Recovery — one blockage trigger with visible consequence plus recovery verb and persistence boundary in 2 phases
 
-Likely focus:
-
-- A building depends on a supply, route, or service node.
-- Signposts/routes reveal what they carry or support.
-- Blocking/removing an item creates a visible local blockage.
-- The city can recover if the condition is restored.
+Design note: the original plan spread dependency edges, route purpose, flow blockage, and flow recovery across 12 phases and 4 sessions, all observation-only. These were collapsed into 6 phases across 3 sessions, each ending with a player verb or interference opportunity. Readout and boundary work is folded into mechanic phase acceptance criteria.
 
 ## Epoch: Local Risk, Not Surveillance Yet
 
