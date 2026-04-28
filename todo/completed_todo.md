@@ -1273,3 +1273,75 @@ Logical next step: give the player one current-scope way to reduce the local con
 - [x] `SPACE` on the worker, affected workplace, or affected route reveals the local witness record and the current suspected cause through Debugger inspection.
 - [x] The Debugger distinguishes active flow blockage from lingering local suspicion.
 - [x] Acceptance: volatile last-result HUD behavior remains unchanged; tests cover Debugger output for theft, tampering, and no-suspicion cases.
+
+## Completed Session: Hiding Or De-escalation
+
+Gameplay outcome: the player has one small response to local suspicion besides walking away.
+
+Big Picture: this should be a tiny player-facing pressure valve, not a stealth overhaul. Returning, hiding, or correcting the specific anomaly is enough for now.
+
+Logical next step: once de-escalation exists, decide exactly which suspicion state should persist through save/load.
+
+## Phase 75: Allow returning a suspicious missing output.
+
+- [x] If suspicion came from taking the workplace `PART`, carrying the `PART` back to the workplace lets `E` return it to the expected output/bench state.
+- [x] Returning the item changes the suspicion readout to a de-escalated local state instead of deleting all evidence instantly.
+- [x] Acceptance: normal part delivery to housing still works; tests cover return versus housing delivery.
+
+## Phase 76: Allow correcting suspicious route tampering.
+
+- [x] If suspicion came from a `G` Interference Torch route spoof, using `G` Interference Torch to restore the signpost while the worker is not currently blocked changes the suspicion readout to a de-escalated local state.
+- [x] The route remains mechanically clear and readable as `FLOW: CLEAR`.
+- [x] Acceptance: restoring an unrelated signpost does not de-escalate the event; tests cover route-scoped correction.
+
+## Phase 77: Add one bounded hiding option.
+
+- [x] Let the player hide the carried suspicious item inside housing with `E`, marking it hidden from the current worker's immediate concern while keeping it inspectable and Debugger-readable.
+- [x] The hidden state should be local to the tiny current scope and avoid inventory expansion.
+- [x] Acceptance: hidden item state is visible through housing inspection/Debugger inspection; tests cover hiding only when carrying the suspected item.
+
+## Completed Session: Suspicion Persistence
+
+Gameplay outcome: tiny save/load preserves the local risk state that matters and drops only volatile acknowledgement text.
+
+Big Picture: persistence should prove the boundary before larger surveillance exists. Active local suspicion and de-escalated local suspicion are mechanical; one-frame HUD explanations are not.
+
+Logical next step: after local suspicion survives a save boundary, start adding small traces of larger institutions without making them active systems.
+
+## Phase 78: Persist active local suspicion.
+
+- [x] Extend tiny save/load so active witnessed theft or route-tampering suspicion survives reload with the same cause and target.
+- [x] Preserve only current-scope fields needed by readouts and mechanics.
+- [x] Acceptance: active local suspicion round-trips; volatile HUD last-result text still does not become persistent state.
+
+## Phase 79: Persist de-escalated local suspicion boundary.
+
+- [x] Save/load preserves de-escalated local suspicion as a quieter readout while not re-triggering the original witnessed HUD/status event.
+- [x] Corrected flow and returned/hidden item states remain mechanically consistent after reload.
+- [x] Acceptance: tests cover active suspicion, de-escalated suspicion, and no-suspicion round trips.
+
+## Completed Session: Institutional Log Fragment
+
+Gameplay outcome: the player can uncover one local trace of a larger system without activating that larger system yet.
+
+Big Picture: hidden systems should be foreshadowed through repeated local hooks. A log fragment can point toward audits, debt, or surveillance while staying deterministic and attached to existing buildings.
+
+Logical next step: choose the next foreshadowed system only after the player has a repeated reason to care about the fragment.
+
+## Phase 80: Add one workplace log fragment.
+
+- [x] Add a deterministic institutional log fragment to the current workplace that references local output, route, or bench anomalies.
+- [x] The fragment appears only after a relevant local suspicion or de-escalation state exists.
+- [x] Acceptance: the fragment is tied to existing workplace state and does not add faction AI, economy simulation, or surveillance networks.
+
+## Phase 81: Add a player verb to recover the fragment.
+
+- [x] Let the player use `SPACE` on the affected workplace to recover the log fragment into the volatile Debugger result.
+- [x] The recovered text should be short, literal, and separate from live world speech.
+- [x] Acceptance: the same target without a qualifying local state reports no fragment; tests cover qualifying and non-qualifying scans.
+
+## Phase 82: Add a local consequence clue.
+
+- [x] If the player recovers the fragment, affected workplace/worker inspection can show one compact clue such as `AUDIT TRACE: LOCAL ONLY`.
+- [x] The clue should foreshadow institutional control without adding audits as an active system.
+- [x] Acceptance: clue state remains current-scope, deterministic, and covered by save/load boundary tests only if the implementation makes it mechanical.

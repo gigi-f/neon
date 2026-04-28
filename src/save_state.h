@@ -32,6 +32,22 @@ struct SavedSpoofedSignpost {
     uint64_t endpoint_stable_id = 0;
 };
 
+struct SavedLocalSuspicion {
+    bool present = false;
+    bool active = false;
+    LocalSuspicionCause cause = LocalSuspicionCause::NONE;
+    LocalSuspicionResolution resolution = LocalSuspicionResolution::NONE;
+    uint64_t workplace_stable_id = 0;
+    bool target_is_carryable = false;
+    uint64_t target_path_from_stable_id = 0;
+    uint64_t target_path_to_stable_id = 0;
+    uint64_t target_endpoint_stable_id = 0;
+    uint64_t path_from_stable_id = 0;
+    uint64_t path_to_stable_id = 0;
+    uint64_t resolution_stable_id = 0;
+    bool institutional_log_recovered = false;
+};
+
 struct TinySaveState {
     SavedTransform player{};
     bool player_carrying = false;
@@ -59,6 +75,7 @@ struct TinySaveState {
     bool worker_carrying = false;
 
     std::vector<SavedSpoofedSignpost> spoofed_signposts;
+    SavedLocalSuspicion local_suspicion{};
 };
 
 inline SavedTransform savedTransformFromTransform(const TransformComponent& transform) {
@@ -99,6 +116,63 @@ inline bool roleFromSaveName(const std::string& name, MicroZoneRole& role) {
     }
     if (name == "CLINIC") {
         role = MicroZoneRole::CLINIC;
+        return true;
+    }
+    return false;
+}
+
+inline const char* localSuspicionCauseSaveName(LocalSuspicionCause cause) {
+    switch (cause) {
+        case LocalSuspicionCause::NONE: return "NONE";
+        case LocalSuspicionCause::MISSING_PART: return "MISSING_PART";
+        case LocalSuspicionCause::ROUTE_TAMPERING: return "ROUTE_TAMPERING";
+    }
+    return "NONE";
+}
+
+inline bool localSuspicionCauseFromSaveName(const std::string& name,
+                                            LocalSuspicionCause& cause) {
+    if (name == "NONE") {
+        cause = LocalSuspicionCause::NONE;
+        return true;
+    }
+    if (name == "MISSING_PART") {
+        cause = LocalSuspicionCause::MISSING_PART;
+        return true;
+    }
+    if (name == "ROUTE_TAMPERING") {
+        cause = LocalSuspicionCause::ROUTE_TAMPERING;
+        return true;
+    }
+    return false;
+}
+
+inline const char* localSuspicionResolutionSaveName(LocalSuspicionResolution resolution) {
+    switch (resolution) {
+        case LocalSuspicionResolution::NONE: return "NONE";
+        case LocalSuspicionResolution::RETURNED_OUTPUT: return "RETURNED_OUTPUT";
+        case LocalSuspicionResolution::CORRECTED_ROUTE: return "CORRECTED_ROUTE";
+        case LocalSuspicionResolution::HIDDEN_ITEM: return "HIDDEN_ITEM";
+    }
+    return "NONE";
+}
+
+inline bool localSuspicionResolutionFromSaveName(const std::string& name,
+                                                 LocalSuspicionResolution& resolution) {
+    if (name == "NONE") {
+        resolution = LocalSuspicionResolution::NONE;
+        return true;
+    }
+    if (name == "RETURNED_OUTPUT") {
+        resolution = LocalSuspicionResolution::RETURNED_OUTPUT;
+        return true;
+    }
+    if (name == "CORRECTED_ROUTE") {
+        resolution = LocalSuspicionResolution::CORRECTED_ROUTE;
+        return true;
+    }
+    if (name == "HIDDEN_ITEM") {
+        resolution = LocalSuspicionResolution::HIDDEN_ITEM;
         return true;
     }
     return false;
@@ -273,6 +347,51 @@ inline TinySaveState captureTinySaveState(Registry& registry, Entity player) {
             stableIdForEntity(registry, signpost.endpoint_entity)});
     }
 
+    const Entity suspicion_worker = firstLocalSuspicionRecordWorker(registry);
+    if (suspicion_worker != MAX_ENTITIES &&
+        registry.has<LocalSuspicionComponent>(suspicion_worker)) {
+        const auto& suspicion = registry.get<LocalSuspicionComponent>(suspicion_worker);
+        state.local_suspicion.present = true;
+        state.local_suspicion.active = localSuspicionImmediateActive(suspicion);
+        state.local_suspicion.cause = suspicion.cause;
+        state.local_suspicion.resolution = suspicion.resolution;
+        state.local_suspicion.workplace_stable_id =
+            stableIdForEntity(registry, suspicion.workplace_entity);
+        state.local_suspicion.resolution_stable_id =
+            stableIdForEntity(registry, suspicion.resolution_entity);
+        state.local_suspicion.institutional_log_recovered =
+            suspicion.institutional_log_recovered;
+        if (suspicion.target_entity != MAX_ENTITIES &&
+            registry.alive(suspicion.target_entity) &&
+            registry.has<CarryableComponent>(suspicion.target_entity)) {
+            state.local_suspicion.target_is_carryable = true;
+        } else if (suspicion.target_entity != MAX_ENTITIES &&
+                   registry.alive(suspicion.target_entity) &&
+                   registry.has<RouteSignpostComponent>(suspicion.target_entity)) {
+            const auto& signpost =
+                registry.get<RouteSignpostComponent>(suspicion.target_entity);
+            if (registry.alive(signpost.path_entity) &&
+                registry.has<PathComponent>(signpost.path_entity)) {
+                const auto& path = registry.get<PathComponent>(signpost.path_entity);
+                state.local_suspicion.target_path_from_stable_id =
+                    stableIdForEntity(registry, path.from);
+                state.local_suspicion.target_path_to_stable_id =
+                    stableIdForEntity(registry, path.to);
+                state.local_suspicion.target_endpoint_stable_id =
+                    stableIdForEntity(registry, signpost.endpoint_entity);
+            }
+        }
+        if (suspicion.path_entity != MAX_ENTITIES &&
+            registry.alive(suspicion.path_entity) &&
+            registry.has<PathComponent>(suspicion.path_entity)) {
+            const auto& path = registry.get<PathComponent>(suspicion.path_entity);
+            state.local_suspicion.path_from_stable_id =
+                stableIdForEntity(registry, path.from);
+            state.local_suspicion.path_to_stable_id =
+                stableIdForEntity(registry, path.to);
+        }
+    }
+
     return state;
 }
 
@@ -287,7 +406,7 @@ inline bool readSavedTransform(std::istream& in, SavedTransform& transform) {
 
 inline std::string serializeTinySaveState(const TinySaveState& state) {
     std::ostringstream out;
-    out << "NEON_TINY_SAVE_V7\n";
+    out << "NEON_TINY_SAVE_V8\n";
     out << "PLAYER ";
     writeSavedTransform(out, state.player);
     out << ' ' << (state.player_carrying ? 1 : 0) << "\n";
@@ -325,6 +444,20 @@ inline std::string serializeTinySaveState(const TinySaveState& state) {
             << signpost.path_to_stable_id << ' '
             << signpost.endpoint_stable_id << "\n";
     }
+    out << "LOCAL_SUSPICION "
+        << (state.local_suspicion.present ? 1 : 0) << ' '
+        << (state.local_suspicion.active ? 1 : 0) << ' '
+        << localSuspicionCauseSaveName(state.local_suspicion.cause) << ' '
+        << localSuspicionResolutionSaveName(state.local_suspicion.resolution) << ' '
+        << state.local_suspicion.workplace_stable_id << ' '
+        << (state.local_suspicion.target_is_carryable ? "CARRYABLE" : "SIGNPOST") << ' '
+        << state.local_suspicion.target_path_from_stable_id << ' '
+        << state.local_suspicion.target_path_to_stable_id << ' '
+        << state.local_suspicion.target_endpoint_stable_id << ' '
+        << state.local_suspicion.path_from_stable_id << ' '
+        << state.local_suspicion.path_to_stable_id << ' '
+        << state.local_suspicion.resolution_stable_id << ' '
+        << (state.local_suspicion.institutional_log_recovered ? 1 : 0) << "\n";
     out << "END\n";
     return out.str();
 }
@@ -334,7 +467,11 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
     std::istringstream in(text);
 
     std::string tag;
-    if (!(in >> tag) || tag != "NEON_TINY_SAVE_V7") return TinySaveStatus::INVALID_FORMAT;
+    if (!(in >> tag) ||
+        (tag != "NEON_TINY_SAVE_V7" && tag != "NEON_TINY_SAVE_V8")) {
+        return TinySaveStatus::INVALID_FORMAT;
+    }
+    const bool has_local_suspicion_record = tag == "NEON_TINY_SAVE_V8";
 
     int flag = 0;
     if (!(in >> tag) || tag != "PLAYER") return TinySaveStatus::INVALID_FORMAT;
@@ -411,6 +548,48 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
             return TinySaveStatus::INVALID_FORMAT;
         }
         parsed.spoofed_signposts.push_back(signpost);
+    }
+
+    if (has_local_suspicion_record) {
+        int present_flag = 0;
+        int active_flag = 0;
+        int log_recovered_flag = 0;
+        std::string cause_name;
+        std::string resolution_name;
+        std::string target_kind;
+        if (!(in >> tag) || tag != "LOCAL_SUSPICION") return TinySaveStatus::INVALID_FORMAT;
+        if (!(in >> present_flag >>
+              active_flag >>
+              cause_name >>
+              resolution_name >>
+              parsed.local_suspicion.workplace_stable_id >>
+              target_kind >>
+              parsed.local_suspicion.target_path_from_stable_id >>
+              parsed.local_suspicion.target_path_to_stable_id >>
+              parsed.local_suspicion.target_endpoint_stable_id >>
+              parsed.local_suspicion.path_from_stable_id >>
+              parsed.local_suspicion.path_to_stable_id >>
+              parsed.local_suspicion.resolution_stable_id >>
+              log_recovered_flag)) {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
+        parsed.local_suspicion.present = present_flag != 0;
+        parsed.local_suspicion.active = active_flag != 0;
+        parsed.local_suspicion.institutional_log_recovered = log_recovered_flag != 0;
+        if (!localSuspicionCauseFromSaveName(cause_name, parsed.local_suspicion.cause)) {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
+        if (!localSuspicionResolutionFromSaveName(resolution_name,
+                                                  parsed.local_suspicion.resolution)) {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
+        if (target_kind == "CARRYABLE") {
+            parsed.local_suspicion.target_is_carryable = true;
+        } else if (target_kind == "SIGNPOST") {
+            parsed.local_suspicion.target_is_carryable = false;
+        } else {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
     }
 
     if (!(in >> tag) || tag != "END") return TinySaveStatus::INVALID_FORMAT;
@@ -521,6 +700,42 @@ inline TinySaveStatus applyTinySaveState(Registry& registry, Entity player, cons
                                                        saved_signpost.endpoint_stable_id);
         if (marker != MAX_ENTITIES) {
             registry.get<RouteSignpostComponent>(marker).spoofed = true;
+        }
+    }
+
+    auto suspicion_workers = registry.view<LocalSuspicionComponent>();
+    for (Entity suspicion_worker : suspicion_workers) {
+        registry.remove<LocalSuspicionComponent>(suspicion_worker);
+    }
+    if (state.local_suspicion.present) {
+        const Entity worker = firstFixedWorker(registry);
+        if (worker != MAX_ENTITIES) {
+            Entity target = MAX_ENTITIES;
+            if (state.local_suspicion.target_is_carryable) {
+                target = carryable;
+            } else {
+                target = routeSignpostByStableIds(
+                    registry,
+                    state.local_suspicion.target_path_from_stable_id,
+                    state.local_suspicion.target_path_to_stable_id,
+                    state.local_suspicion.target_endpoint_stable_id);
+            }
+            const Entity path =
+                pedestrianPathByEndpointStableIds(registry,
+                                                  state.local_suspicion.path_from_stable_id,
+                                                  state.local_suspicion.path_to_stable_id);
+            auto& suspicion = registry.assign<LocalSuspicionComponent>(worker);
+            suspicion.active = state.local_suspicion.active;
+            suspicion.cause = state.local_suspicion.cause;
+            suspicion.resolution = state.local_suspicion.resolution;
+            suspicion.workplace_entity =
+                buildingByStableId(registry, state.local_suspicion.workplace_stable_id);
+            suspicion.target_entity = target;
+            suspicion.path_entity = path;
+            suspicion.resolution_entity =
+                buildingByStableId(registry, state.local_suspicion.resolution_stable_id);
+            suspicion.institutional_log_recovered =
+                state.local_suspicion.institutional_log_recovered;
         }
     }
 

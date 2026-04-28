@@ -969,7 +969,7 @@ static void testCarryableItemKindLabelsAndSaveRoundTrip() {
     assert(workerCarryReadout(registry, worker) == "WORKER ROUTINE: DELIVERING SUPPLY; REASON: WAGE ROUTE; CARRYING: SUPPLY");
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V7") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V8") != std::string::npos);
     assert(serialized.find("CARRYABLE 1 SUPPLY") != std::string::npos);
 
     TinySaveState parsed;
@@ -4061,6 +4061,90 @@ static void testInheritedGadgetSpoofTogglesSignpostConsequence() {
     assert(productionLoopSummaryReadout(registry) == "LOOP: RUNNING");
 }
 
+static void setupWitnessedMissingPartSuspicion(Registry& registry,
+                                               Entity& player,
+                                               Entity& worker,
+                                               Entity& workplace,
+                                               Entity& object) {
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    workplace = firstWorkplaceBenchBuilding(registry);
+    worker = firstFixedWorker(registry);
+    object = firstCarryableObject(registry);
+    const Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    registry.assign<BuildingInteractionComponent>(player);
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    hideCarryableObject(registry, object);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::OUTPUT_READY;
+    assert(takeWorkplaceOutput(registry, player));
+    assert(localSuspicionActive(registry));
+}
+
+static void setupWitnessedRouteSuspicion(Registry& registry,
+                                         Entity& player,
+                                         Entity& worker,
+                                         Entity& signpost,
+                                         Entity& route_path,
+                                         Entity& workplace) {
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    worker = firstFixedWorker(registry);
+    assert(worker != MAX_ENTITIES);
+    signpost = firstRouteSignpostForPath(registry,
+        registry.get<FixedActorComponent>(worker).path_entity);
+    assert(signpost != MAX_ENTITIES);
+    route_path = registry.get<RouteSignpostComponent>(signpost).path_entity;
+    workplace = pathEndpointWithRole(registry, route_path, MicroZoneRole::WORKPLACE);
+    assert(workplace != MAX_ENTITIES);
+
+    registry.get<TransformComponent>(worker) = registry.get<TransformComponent>(signpost);
+    registry.get<TransformComponent>(worker).x += 24.0f;
+
+    player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(signpost));
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(routeSignpostSpoofed(registry, signpost));
+    assert(localSuspicionActive(registry));
+}
+
 static void testWitnessedOutputTheftCreatesLocalSuspicion() {
     Registry registry;
     WorldConfig config = makeSandboxConfig();
@@ -4235,32 +4319,37 @@ static void testWitnessedRouteTamperingCreatesLocalSuspicionAndRestoreKeepsIt() 
 
     assert(useInheritedGadgetSpoof(registry, player, 22.0f));
     assert(!routeSignpostSpoofed(registry, signpost));
-    assert(localSuspicionActive(registry));
+    assert(!localSuspicionActive(registry));
     assert(registry.get<LocalSuspicionComponent>(worker).cause ==
            LocalSuspicionCause::ROUTE_TAMPERING);
+    assert(registry.get<LocalSuspicionComponent>(worker).resolution ==
+           LocalSuspicionResolution::CORRECTED_ROUTE);
 
     const std::string worker_scan =
         inheritedGadgetScanResult(registry, InspectionTarget{worker, InspectionTargetType::WORKER});
     assert(worker_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
-    assert(worker_scan.find("SUSPICION: ROUTE TAMPERING") != std::string::npos);
+    assert(worker_scan.find("DE-ESCALATED: CORRECTED ROUTE TAMPERING") != std::string::npos);
     assert(worker_scan.find("TARGET: ROUTE SIGNAL") != std::string::npos);
     const std::string workplace_scan =
         inheritedGadgetScanResult(registry,
                                   InspectionTarget{workplace, InspectionTargetType::WORKPLACE});
     assert(workplace_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
-    assert(workplace_scan.find("SUSPICION: ROUTE TAMPERING") != std::string::npos);
+    assert(workplace_scan.find("DE-ESCALATED: CORRECTED ROUTE TAMPERING") !=
+           std::string::npos);
     const std::string signpost_scan =
         inheritedGadgetScanResult(registry,
                                   InspectionTarget{signpost, InspectionTargetType::ROUTE_SIGNPOST});
     assert(signpost_scan.find("FLOW: BLOCKED") == std::string::npos);
     assert(signpost_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
-    assert(signpost_scan.find("SUSPICION: ROUTE TAMPERING") != std::string::npos);
+    assert(signpost_scan.find("DE-ESCALATED: CORRECTED ROUTE TAMPERING") !=
+           std::string::npos);
     const std::string path_scan =
         inheritedGadgetScanResult(registry,
                                   InspectionTarget{route_path, InspectionTargetType::PEDESTRIAN_PATH});
     assert(path_scan.find("FLOW: BLOCKED") == std::string::npos);
     assert(path_scan.find("LOCAL WITNESS: WORKER") != std::string::npos);
-    assert(path_scan.find("SUSPICION: ROUTE TAMPERING") != std::string::npos);
+    assert(path_scan.find("DE-ESCALATED: CORRECTED ROUTE TAMPERING") !=
+           std::string::npos);
 }
 
 static void testUnwitnessedRouteTamperingDoesNotCreateLocalSuspicion() {
@@ -4305,6 +4394,223 @@ static void testUnwitnessedRouteTamperingDoesNotCreateLocalSuspicion() {
                InspectionTarget{registry.get<RouteSignpostComponent>(signpost).path_entity,
                                 InspectionTargetType::PEDESTRIAN_PATH})
                .find("SUSPICION:") == std::string::npos);
+}
+
+static void testReturningSuspiciousOutputDeEscalatesLocalConcern() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(registry, player, worker, workplace, object);
+
+    assert(playerCanReturnSuspiciousWorkplaceOutput(registry, player));
+    assert(returnSuspiciousWorkplaceOutput(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state ==
+           WorkplaceBenchState::OUTPUT_READY);
+    assert(!localSuspicionActive(registry));
+    assert(workerCarryReadout(registry, worker).find("SUSPICION QUIET: RETURNED MISSING PART") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace)
+               .find("SUSPICION QUIET: RETURNED MISSING PART") != std::string::npos);
+
+    Registry delivery_registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(delivery_registry, config);
+    deriveInfrastructure(delivery_registry, config);
+    Entity delivery_player = delivery_registry.create();
+    delivery_registry.assign<PlayerComponent>(delivery_player);
+    delivery_registry.assign<BuildingInteractionComponent>(delivery_player);
+    Entity delivery_object = firstCarryableObject(delivery_registry);
+    Entity housing = firstBuildingByRole(delivery_registry, MicroZoneRole::HOUSING);
+    assert(delivery_object != MAX_ENTITIES);
+    assert(housing != MAX_ENTITIES);
+    delivery_registry.get<CarryableComponent>(delivery_object).kind = ItemKind::PART;
+    hideCarryableObject(delivery_registry, delivery_object);
+    delivery_registry.get<PlayerComponent>(delivery_player).carried_object = delivery_object;
+    delivery_registry.assign<TransformComponent>(delivery_player,
+                                                 delivery_registry.get<TransformComponent>(housing));
+    assert(enterBuildingInterior(delivery_registry, delivery_player, housing));
+    assert(playerCanImproveBuilding(delivery_registry, delivery_player));
+    assert(improveBuilding(delivery_registry, delivery_player));
+}
+
+static void testHidingSuspiciousItemInHousingKeepsInspectableConcern() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(registry, player, worker, workplace, object);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    assert(housing != MAX_ENTITIES);
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(registry, player, housing));
+
+    assert(playerCanHideSuspiciousItemInHousing(registry, player));
+    assert(hideSuspiciousItemInHousing(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == MAX_ENTITIES);
+    assert(!localSuspicionActive(registry));
+    assert(workerCarryReadout(registry, worker).find("SUSPICION HIDDEN: MISSING PART") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, housing).find("SUSPICION HIDDEN: MISSING PART") !=
+           std::string::npos);
+
+    const std::string housing_scan =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{housing, InspectionTargetType::HOUSING});
+    assert(housing_scan.find("DE-ESCALATED: HIDDEN MISSING PART") != std::string::npos);
+}
+
+static void testCorrectingSuspiciousRouteDeEscalatesOnlyMatchingSignpost() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity signpost = MAX_ENTITIES;
+    Entity route_path = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    setupWitnessedRouteSuspicion(registry, player, worker, signpost, route_path, workplace);
+
+    Entity unrelated = MAX_ENTITIES;
+    auto signposts = registry.view<RouteSignpostComponent, TransformComponent>();
+    for (Entity marker : signposts) {
+        if (marker != signpost) {
+            unrelated = marker;
+            break;
+        }
+    }
+    assert(unrelated != MAX_ENTITIES);
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(unrelated);
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(localSuspicionActive(registry));
+    assert(workerCarryReadout(registry, worker).find("SUSPICION: ROUTE TAMPERING") !=
+           std::string::npos);
+
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(signpost);
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(!routeSignpostSpoofed(registry, signpost));
+    assert(!localSuspicionActive(registry));
+    assert(workerCarryReadout(registry, worker)
+               .find("SUSPICION QUIET: CORRECTED ROUTE TAMPERING") != std::string::npos);
+    assert(routeSignpostReadout(registry, signpost).find("FLOW: CLEAR") != std::string::npos);
+}
+
+static void testTinySaveRoundTripRestoresLocalSuspicionStates() {
+    Registry active_registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(active_registry, player, worker, workplace, object);
+
+    const std::string active_save =
+        serializeTinySaveState(captureTinySaveState(active_registry, player));
+    assert(active_save.find("LOCAL_SUSPICION 1 1 MISSING_PART NONE") != std::string::npos);
+
+    TinySaveState active_state;
+    assert(deserializeTinySaveState(active_save, active_state) == TinySaveStatus::OK);
+    active_registry.remove<LocalSuspicionComponent>(worker);
+    assert(applyTinySaveState(active_registry, player, active_state) == TinySaveStatus::OK);
+    assert(localSuspicionActive(active_registry));
+    assert(workerCarryReadout(active_registry, worker).find("SUSPICION: MISSING PART") !=
+           std::string::npos);
+
+    Registry hidden_registry;
+    Entity hidden_player = MAX_ENTITIES;
+    Entity hidden_worker = MAX_ENTITIES;
+    Entity hidden_workplace = MAX_ENTITIES;
+    Entity hidden_object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(hidden_registry,
+                                       hidden_player,
+                                       hidden_worker,
+                                       hidden_workplace,
+                                       hidden_object);
+    Entity housing = firstBuildingByRole(hidden_registry, MicroZoneRole::HOUSING);
+    assert(housing != MAX_ENTITIES);
+    assert(exitBuildingInterior(hidden_registry, hidden_player));
+    hidden_registry.get<TransformComponent>(hidden_player) =
+        hidden_registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(hidden_registry, hidden_player, housing));
+    assert(hideSuspiciousItemInHousing(hidden_registry, hidden_player));
+    const std::string hidden_save =
+        serializeTinySaveState(captureTinySaveState(hidden_registry, hidden_player));
+    assert(hidden_save.find("LOCAL_SUSPICION 1 0 MISSING_PART HIDDEN_ITEM") !=
+           std::string::npos);
+    TinySaveState hidden_state;
+    assert(deserializeTinySaveState(hidden_save, hidden_state) == TinySaveStatus::OK);
+    hidden_registry.remove<LocalSuspicionComponent>(hidden_worker);
+    assert(applyTinySaveState(hidden_registry, hidden_player, hidden_state) == TinySaveStatus::OK);
+    assert(!localSuspicionActive(hidden_registry));
+    assert(buildingInspectionReadout(hidden_registry, housing).find("SUSPICION HIDDEN") !=
+           std::string::npos);
+
+    Registry clear_registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(clear_registry, config);
+    deriveInfrastructure(clear_registry, config);
+    spawnFixedActors(clear_registry, config);
+    Entity clear_player = clear_registry.create();
+    clear_registry.assign<PlayerComponent>(clear_player);
+    clear_registry.assign<BuildingInteractionComponent>(clear_player);
+    clear_registry.assign<TransformComponent>(clear_player, TransformComponent{0, 0, 12, 12});
+    Entity clear_worker = firstFixedWorker(clear_registry);
+    assert(clear_worker != MAX_ENTITIES);
+    clear_registry.assign<LocalSuspicionComponent>(clear_worker).active = true;
+    const std::string clear_save =
+        serializeTinySaveState(captureTinySaveState(clear_registry, clear_player));
+    TinySaveState clear_state;
+    assert(deserializeTinySaveState(clear_save, clear_state) == TinySaveStatus::OK);
+    assert(applyTinySaveState(clear_registry, clear_player, clear_state) == TinySaveStatus::OK);
+    assert(!localSuspicionActive(clear_registry));
+}
+
+static void testInstitutionalLogFragmentRecoveryAddsAuditTrace() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(registry, player, worker, workplace, object);
+    registry.assign<InheritedGadgetComponent>(player);
+
+    assert(useInheritedGadget(registry, player, 22.0f));
+    const std::string result = inheritedGadgetResultReadout(registry, player);
+    assert(result.find("WORKPLACE LOG: OUTPUT ANOMALY FILED") != std::string::npos);
+    assert(result.find("AUDIT TRACE: LOCAL ONLY") != std::string::npos);
+    assert(workerCarryReadout(registry, worker).find("AUDIT TRACE: LOCAL ONLY") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace).find("AUDIT TRACE: LOCAL ONLY") !=
+           std::string::npos);
+
+    Registry clear_registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    buildWorld(clear_registry, config);
+    deriveInfrastructure(clear_registry, config);
+    Entity clear_workplace = firstWorkplaceBenchBuilding(clear_registry);
+    Entity clear_player = clear_registry.create();
+    clear_registry.assign<PlayerComponent>(clear_player);
+    clear_registry.assign<InheritedGadgetComponent>(clear_player);
+    clear_registry.assign<TransformComponent>(clear_player,
+                                              clear_registry.get<TransformComponent>(clear_workplace));
+    clear_registry.assign<BuildingInteractionComponent>(clear_player);
+    assert(enterBuildingInterior(clear_registry, clear_player, clear_workplace));
+    assert(useInheritedGadget(clear_registry, clear_player, 22.0f));
+    assert(inheritedGadgetResultReadout(clear_registry, clear_player)
+               .find("WORKPLACE LOG:") == std::string::npos);
 }
 
 static void testRouteSignpostRecoveryReadoutAppearsOnlyAfterRestore() {
@@ -5124,6 +5430,11 @@ int main() {
     testUnwitnessedOutputPickupDoesNotCreateLocalSuspicion();
     testWitnessedRouteTamperingCreatesLocalSuspicionAndRestoreKeepsIt();
     testUnwitnessedRouteTamperingDoesNotCreateLocalSuspicion();
+    testReturningSuspiciousOutputDeEscalatesLocalConcern();
+    testHidingSuspiciousItemInHousingKeepsInspectableConcern();
+    testCorrectingSuspiciousRouteDeEscalatesOnlyMatchingSignpost();
+    testTinySaveRoundTripRestoresLocalSuspicionStates();
+    testInstitutionalLogFragmentRecoveryAddsAuditTrace();
     testRouteSignpostRecoveryReadoutAppearsOnlyAfterRestore();
     testRouteSignpostConsequenceReadoutCoversLocalStates();
     testProductionLoopSummaryReadoutCoversRouteInterferenceStates();

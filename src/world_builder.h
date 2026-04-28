@@ -1052,13 +1052,6 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
             } else if (workplaceSupplyFlowRecoveredByRoute(registry)) {
                 readout += "; SUPPLY FLOW: CLEAR";
             }
-            {
-                const std::string suspicion =
-                    localSuspicionInspectionReadoutForBuilding(registry, building);
-                if (!suspicion.empty()) {
-                    readout += "; " + suspicion;
-                }
-            }
             break;
         case MicroZoneRole::SUPPLY:
             readout += "; SITE STATUS: STOCK POINT";
@@ -1072,6 +1065,10 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
     }
     if (roleInDependencyEdge(role)) {
         readout += "; " + dependencyInspectionReadout(registry, role);
+    }
+    const std::string suspicion = localSuspicionInspectionReadoutForBuilding(registry, building);
+    if (!suspicion.empty()) {
+        readout += "; " + suspicion;
     }
     readout += std::string("; CONTEXT: ") + siteContextTagForRole(role);
     return readout;
@@ -1461,6 +1458,33 @@ inline const char* localSuspicionCauseLabel(LocalSuspicionCause cause) {
     return "NONE";
 }
 
+inline const char* localSuspicionResolutionLabel(LocalSuspicionResolution resolution) {
+    switch (resolution) {
+        case LocalSuspicionResolution::RETURNED_OUTPUT:
+            return "RETURNED";
+        case LocalSuspicionResolution::CORRECTED_ROUTE:
+            return "CORRECTED";
+        case LocalSuspicionResolution::HIDDEN_ITEM:
+            return "HIDDEN";
+        case LocalSuspicionResolution::NONE:
+            return "ACTIVE";
+    }
+    return "ACTIVE";
+}
+
+inline bool localSuspicionRecordExists(const LocalSuspicionComponent& suspicion) {
+    return suspicion.cause != LocalSuspicionCause::NONE &&
+           (suspicion.active ||
+            suspicion.resolution != LocalSuspicionResolution::NONE ||
+            suspicion.institutional_log_recovered);
+}
+
+inline bool localSuspicionImmediateActive(const LocalSuspicionComponent& suspicion) {
+    return suspicion.active &&
+           suspicion.cause != LocalSuspicionCause::NONE &&
+           suspicion.resolution == LocalSuspicionResolution::NONE;
+}
+
 inline void recordLocalSuspicion(Registry& registry,
                                  Entity worker,
                                  LocalSuspicionCause cause,
@@ -1478,16 +1502,19 @@ inline void recordLocalSuspicion(Registry& registry,
     auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
     suspicion.active = true;
     suspicion.cause = cause;
+    suspicion.resolution = LocalSuspicionResolution::NONE;
     suspicion.workplace_entity = workplace;
     suspicion.target_entity = target;
     suspicion.path_entity = path;
+    suspicion.resolution_entity = MAX_ENTITIES;
+    suspicion.institutional_log_recovered = false;
 }
 
 inline Entity firstLocalSuspicionWorker(Registry& registry) {
     auto suspicions = registry.view<LocalSuspicionComponent>();
     for (Entity worker : suspicions) {
         const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
-        if (suspicion.active && suspicion.cause != LocalSuspicionCause::NONE) {
+        if (localSuspicionImmediateActive(suspicion)) {
             return worker;
         }
     }
@@ -1496,6 +1523,16 @@ inline Entity firstLocalSuspicionWorker(Registry& registry) {
 
 inline bool localSuspicionActive(Registry& registry) {
     return firstLocalSuspicionWorker(registry) != MAX_ENTITIES;
+}
+
+inline Entity firstLocalSuspicionRecordWorker(Registry& registry) {
+    auto suspicions = registry.view<LocalSuspicionComponent>();
+    for (Entity worker : suspicions) {
+        if (localSuspicionRecordExists(registry.get<LocalSuspicionComponent>(worker))) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
 }
 
 inline std::string localSuspicionHudReadout(Registry& registry) {
@@ -1513,7 +1550,7 @@ inline Entity localSuspicionWorkerForWorker(Registry& registry, Entity worker) {
         return MAX_ENTITIES;
     }
     const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
-    return suspicion.active && suspicion.cause != LocalSuspicionCause::NONE ?
+    return localSuspicionRecordExists(suspicion) ?
         worker :
         MAX_ENTITIES;
 }
@@ -1525,9 +1562,11 @@ inline Entity localSuspicionWorkerForBuilding(Registry& registry, Entity buildin
     auto suspicions = registry.view<LocalSuspicionComponent>();
     for (Entity worker : suspicions) {
         const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
-        if (suspicion.active &&
-            suspicion.cause != LocalSuspicionCause::NONE &&
-            suspicion.workplace_entity == building) {
+        if (!localSuspicionRecordExists(suspicion)) {
+            continue;
+        }
+        if (suspicion.workplace_entity == building ||
+            suspicion.resolution_entity == building) {
             return worker;
         }
     }
@@ -1541,8 +1580,7 @@ inline Entity localSuspicionWorkerForPath(Registry& registry, Entity path) {
     auto suspicions = registry.view<LocalSuspicionComponent>();
     for (Entity worker : suspicions) {
         const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
-        if (suspicion.active &&
-            suspicion.cause != LocalSuspicionCause::NONE &&
+        if (localSuspicionRecordExists(suspicion) &&
             suspicion.path_entity == path) {
             return worker;
         }
@@ -1557,7 +1595,7 @@ inline Entity localSuspicionWorkerForSignpost(Registry& registry, Entity signpos
     auto suspicions = registry.view<LocalSuspicionComponent>();
     for (Entity worker : suspicions) {
         const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
-        if (!suspicion.active || suspicion.cause == LocalSuspicionCause::NONE) {
+        if (!localSuspicionRecordExists(suspicion)) {
             continue;
         }
         if (suspicion.target_entity == signpost) {
@@ -1571,13 +1609,35 @@ inline Entity localSuspicionWorkerForSignpost(Registry& registry, Entity signpos
     return MAX_ENTITIES;
 }
 
+inline std::string localSuspicionStateReadout(const LocalSuspicionComponent& suspicion) {
+    if (!localSuspicionRecordExists(suspicion)) {
+        return "";
+    }
+
+    std::string readout;
+    if (localSuspicionImmediateActive(suspicion)) {
+        readout = std::string("SUSPICION: ") + localSuspicionCauseLabel(suspicion.cause);
+    } else if (suspicion.resolution == LocalSuspicionResolution::HIDDEN_ITEM) {
+        readout = std::string("SUSPICION HIDDEN: ") +
+                  localSuspicionCauseLabel(suspicion.cause);
+    } else {
+        readout = std::string("SUSPICION QUIET: ") +
+                  localSuspicionResolutionLabel(suspicion.resolution) +
+                  " " +
+                  localSuspicionCauseLabel(suspicion.cause);
+    }
+    if (suspicion.institutional_log_recovered) {
+        readout += "; AUDIT TRACE: LOCAL ONLY";
+    }
+    return readout;
+}
+
 inline std::string localSuspicionInspectionReadoutForWorker(Registry& registry, Entity worker) {
     const Entity suspicion_worker = localSuspicionWorkerForWorker(registry, worker);
     if (suspicion_worker == MAX_ENTITIES) {
         return "";
     }
-    return std::string("SUSPICION: ") +
-           localSuspicionCauseLabel(registry.get<LocalSuspicionComponent>(suspicion_worker).cause);
+    return localSuspicionStateReadout(registry.get<LocalSuspicionComponent>(suspicion_worker));
 }
 
 inline std::string localSuspicionInspectionReadoutForBuilding(Registry& registry, Entity building) {
@@ -1585,8 +1645,7 @@ inline std::string localSuspicionInspectionReadoutForBuilding(Registry& registry
     if (suspicion_worker == MAX_ENTITIES) {
         return "";
     }
-    return std::string("SUSPICION: ") +
-           localSuspicionCauseLabel(registry.get<LocalSuspicionComponent>(suspicion_worker).cause);
+    return localSuspicionStateReadout(registry.get<LocalSuspicionComponent>(suspicion_worker));
 }
 
 inline const char* localSuspicionTargetLabel(const LocalSuspicionComponent& suspicion) {
@@ -1609,13 +1668,42 @@ inline std::string localSuspicionDebuggerReadoutForWorker(Registry& registry,
         return "";
     }
     const auto& suspicion = registry.get<LocalSuspicionComponent>(suspicion_worker);
-    if (!suspicion.active || suspicion.cause == LocalSuspicionCause::NONE) {
+    if (!localSuspicionRecordExists(suspicion)) {
         return "";
     }
-    return std::string("LOCAL WITNESS: WORKER; SUSPICION: ") +
-           localSuspicionCauseLabel(suspicion.cause) +
-           "; TARGET: " +
-           localSuspicionTargetLabel(suspicion);
+    std::string readout = "LOCAL WITNESS: WORKER; ";
+    if (localSuspicionImmediateActive(suspicion)) {
+        readout += std::string("SUSPICION: ") + localSuspicionCauseLabel(suspicion.cause);
+    } else {
+        readout += std::string("DE-ESCALATED: ") +
+                   localSuspicionResolutionLabel(suspicion.resolution) +
+                   " " +
+                   localSuspicionCauseLabel(suspicion.cause);
+    }
+    readout += std::string("; TARGET: ") + localSuspicionTargetLabel(suspicion);
+    if (suspicion.institutional_log_recovered) {
+        readout += "; AUDIT TRACE: LOCAL ONLY";
+    }
+    return readout;
+}
+
+inline bool deEscalateLocalSuspicion(Registry& registry,
+                                     Entity worker,
+                                     LocalSuspicionResolution resolution,
+                                     Entity resolution_entity) {
+    if (!registry.alive(worker) ||
+        !registry.has<LocalSuspicionComponent>(worker) ||
+        resolution == LocalSuspicionResolution::NONE) {
+        return false;
+    }
+    auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    if (!localSuspicionRecordExists(suspicion)) {
+        return false;
+    }
+    suspicion.active = false;
+    suspicion.resolution = resolution;
+    suspicion.resolution_entity = resolution_entity;
+    return true;
 }
 
 inline bool workerNearTransform(Registry& registry,
@@ -2626,6 +2714,112 @@ inline bool takeWorkplaceOutput(Registry& registry,
     return true;
 }
 
+inline Entity localSuspicionWorkerForCarriedObject(Registry& registry, Entity object) {
+    if (!registry.alive(object)) {
+        return MAX_ENTITIES;
+    }
+    auto suspicions = registry.view<LocalSuspicionComponent>();
+    for (Entity worker : suspicions) {
+        const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+        if (localSuspicionRecordExists(suspicion) &&
+            suspicion.target_entity == object) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline bool playerCanReturnSuspiciousWorkplaceOutput(Registry& registry, Entity player) {
+    if (!playerInsideWorkplaceInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
+        return false;
+    }
+
+    const auto& player_component = registry.get<PlayerComponent>(player);
+    const Entity object = player_component.carried_object;
+    if (object == MAX_ENTITIES ||
+        !registry.alive(object) ||
+        !registry.has<CarryableComponent>(object) ||
+        !carryableObjectIsKind(registry, object, ItemKind::PART)) {
+        return false;
+    }
+
+    const auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (!registry.has<WorkplaceBenchComponent>(interaction.building_entity) ||
+        registry.get<WorkplaceBenchComponent>(interaction.building_entity).state !=
+            WorkplaceBenchState::EMPTY) {
+        return false;
+    }
+
+    const Entity worker = localSuspicionWorkerForCarriedObject(registry, object);
+    if (worker == MAX_ENTITIES) {
+        return false;
+    }
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    return localSuspicionImmediateActive(suspicion) &&
+           suspicion.cause == LocalSuspicionCause::MISSING_PART &&
+           suspicion.workplace_entity == interaction.building_entity;
+}
+
+inline bool returnSuspiciousWorkplaceOutput(Registry& registry, Entity player) {
+    if (!playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
+        return false;
+    }
+
+    auto& player_component = registry.get<PlayerComponent>(player);
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    const Entity object = player_component.carried_object;
+    registry.get<WorkplaceBenchComponent>(interaction.building_entity).state =
+        WorkplaceBenchState::OUTPUT_READY;
+    hideCarryableObject(registry, object);
+    player_component.carried_object = MAX_ENTITIES;
+
+    const Entity worker = localSuspicionWorkerForCarriedObject(registry, object);
+    return deEscalateLocalSuspicion(registry,
+                                    worker,
+                                    LocalSuspicionResolution::RETURNED_OUTPUT,
+                                    interaction.building_entity);
+}
+
+inline bool playerCanHideSuspiciousItemInHousing(Registry& registry, Entity player) {
+    if (!playerInsideHousingInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
+        return false;
+    }
+
+    const auto& player_component = registry.get<PlayerComponent>(player);
+    const Entity object = player_component.carried_object;
+    if (object == MAX_ENTITIES ||
+        !registry.alive(object) ||
+        !registry.has<CarryableComponent>(object) ||
+        !carryableObjectIsKind(registry, object, ItemKind::PART)) {
+        return false;
+    }
+
+    const Entity worker = localSuspicionWorkerForCarriedObject(registry, object);
+    if (worker == MAX_ENTITIES) {
+        return false;
+    }
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    return localSuspicionImmediateActive(suspicion) &&
+           suspicion.cause == LocalSuspicionCause::MISSING_PART;
+}
+
+inline bool hideSuspiciousItemInHousing(Registry& registry, Entity player) {
+    if (!playerCanHideSuspiciousItemInHousing(registry, player)) {
+        return false;
+    }
+
+    auto& player_component = registry.get<PlayerComponent>(player);
+    const Entity object = player_component.carried_object;
+    const Entity worker = localSuspicionWorkerForCarriedObject(registry, object);
+    const Entity housing = registry.get<BuildingInteractionComponent>(player).building_entity;
+    hideCarryableObject(registry, object);
+    player_component.carried_object = MAX_ENTITIES;
+    return deEscalateLocalSuspicion(registry,
+                                    worker,
+                                    LocalSuspicionResolution::HIDDEN_ITEM,
+                                    housing);
+}
+
 inline bool playerCanImproveBuilding(Registry& registry, Entity player) {
     if (!playerInsideHousingInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
         return false;
@@ -2859,6 +3053,10 @@ inline std::string localSuspicionDebuggerReadoutForTarget(Registry& registry,
         case InspectionTargetType::WORKER:
             suspicion_worker = localSuspicionWorkerForWorker(registry, target.entity);
             break;
+        case InspectionTargetType::HOUSING:
+        case InspectionTargetType::HOUSING_INTERIOR:
+            suspicion_worker = localSuspicionWorkerForBuilding(registry, target.entity);
+            break;
         case InspectionTargetType::WORKPLACE:
         case InspectionTargetType::WORKPLACE_INTERIOR:
             suspicion_worker = localSuspicionWorkerForBuilding(registry, target.entity);
@@ -2870,16 +3068,80 @@ inline std::string localSuspicionDebuggerReadoutForTarget(Registry& registry,
             suspicion_worker = localSuspicionWorkerForSignpost(registry, target.entity);
             break;
         case InspectionTargetType::NONE:
-        case InspectionTargetType::HOUSING:
         case InspectionTargetType::SUPPLY:
         case InspectionTargetType::MARKET:
         case InspectionTargetType::CLINIC:
-        case InspectionTargetType::HOUSING_INTERIOR:
         case InspectionTargetType::SUPPLY_INTERIOR:
         case InspectionTargetType::CARRYABLE_OBJECT:
             break;
     }
     return localSuspicionDebuggerReadoutForWorker(registry, suspicion_worker);
+}
+
+inline const char* institutionalLogFragmentForSuspicion(const LocalSuspicionComponent& suspicion) {
+    switch (suspicion.cause) {
+        case LocalSuspicionCause::MISSING_PART:
+            return "WORKPLACE LOG: OUTPUT ANOMALY FILED";
+        case LocalSuspicionCause::ROUTE_TAMPERING:
+            return "WORKPLACE LOG: ROUTE SIGNAL ANOMALY FILED";
+        case LocalSuspicionCause::NONE:
+            return "";
+    }
+    return "";
+}
+
+inline Entity localSuspicionWorkerForInstitutionalLogTarget(Registry& registry,
+                                                            const InspectionTarget& target) {
+    switch (target.type) {
+        case InspectionTargetType::WORKPLACE:
+        case InspectionTargetType::WORKPLACE_INTERIOR:
+            return localSuspicionWorkerForBuilding(registry, target.entity);
+        case InspectionTargetType::NONE:
+        case InspectionTargetType::HOUSING:
+        case InspectionTargetType::SUPPLY:
+        case InspectionTargetType::MARKET:
+        case InspectionTargetType::CLINIC:
+        case InspectionTargetType::PEDESTRIAN_PATH:
+        case InspectionTargetType::ROUTE_SIGNPOST:
+        case InspectionTargetType::WORKER:
+        case InspectionTargetType::HOUSING_INTERIOR:
+        case InspectionTargetType::SUPPLY_INTERIOR:
+        case InspectionTargetType::CARRYABLE_OBJECT:
+            return MAX_ENTITIES;
+    }
+    return MAX_ENTITIES;
+}
+
+inline std::string institutionalLogFragmentForTarget(Registry& registry,
+                                                     const InspectionTarget& target) {
+    const Entity suspicion_worker =
+        localSuspicionWorkerForInstitutionalLogTarget(registry, target);
+    if (suspicion_worker == MAX_ENTITIES ||
+        !registry.has<LocalSuspicionComponent>(suspicion_worker)) {
+        return "";
+    }
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(suspicion_worker);
+    if (!localSuspicionRecordExists(suspicion)) {
+        return "";
+    }
+    return institutionalLogFragmentForSuspicion(suspicion);
+}
+
+inline bool recoverInstitutionalLogFragmentForTarget(Registry& registry,
+                                                     const InspectionTarget& target) {
+    const Entity suspicion_worker =
+        localSuspicionWorkerForInstitutionalLogTarget(registry, target);
+    if (suspicion_worker == MAX_ENTITIES ||
+        !registry.has<LocalSuspicionComponent>(suspicion_worker)) {
+        return false;
+    }
+    auto& suspicion = registry.get<LocalSuspicionComponent>(suspicion_worker);
+    if (!localSuspicionRecordExists(suspicion) ||
+        institutionalLogFragmentForSuspicion(suspicion)[0] == '\0') {
+        return false;
+    }
+    suspicion.institutional_log_recovered = true;
+    return true;
 }
 
 inline std::string inheritedGadgetWorkerScan(Registry& registry, Entity worker) {
@@ -2903,6 +3165,10 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
         const std::string suspicion = localSuspicionDebuggerReadoutForTarget(registry, target);
         if (!suspicion.empty()) {
             readout += "; " + suspicion;
+        }
+        const std::string log_fragment = institutionalLogFragmentForTarget(registry, target);
+        if (!log_fragment.empty()) {
+            readout += "; " + log_fragment;
         }
         return readout;
     };
@@ -3045,6 +3311,7 @@ inline bool useInheritedGadget(Registry& registry, Entity player, float range_wu
     }
 
     gadget.last_result_kind = InheritedGadgetResultKind::DEBUGGER;
+    recoverInstitutionalLogFragmentForTarget(registry, target);
     gadget.last_result = inheritedGadgetScanResult(registry, target);
     return true;
 }
@@ -3102,6 +3369,20 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
                                                   MicroZoneRole::WORKPLACE),
                              target.entity,
                              signpost.path_entity);
+    } else if (was_spoofed && !signpost.spoofed) {
+        const Entity suspicion_worker = localSuspicionWorkerForSignpost(registry, target.entity);
+        if (suspicion_worker != MAX_ENTITIES &&
+            registry.has<LocalSuspicionComponent>(suspicion_worker)) {
+            const auto& suspicion = registry.get<LocalSuspicionComponent>(suspicion_worker);
+            if (localSuspicionImmediateActive(suspicion) &&
+                suspicion.cause == LocalSuspicionCause::ROUTE_TAMPERING &&
+                suspicion.target_entity == target.entity) {
+                deEscalateLocalSuspicion(registry,
+                                         suspicion_worker,
+                                         LocalSuspicionResolution::CORRECTED_ROUTE,
+                                         target.entity);
+            }
+        }
     }
     return true;
 }

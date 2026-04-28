@@ -662,7 +662,11 @@ int main(int, char**) {
 
                 Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
 
-                if (playerCanImproveBuilding(registry, player)) {
+                if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
+                    returnSuspiciousWorkplaceOutput(registry, player);
+                } else if (playerCanHideSuspiciousItemInHousing(registry, player)) {
+                    hideSuspiciousItemInHousing(registry, player);
+                } else if (playerCanImproveBuilding(registry, player)) {
                     improveBuilding(registry, player);
                 } else if (playerCanStoreSupplyAtShelter(registry, player)) {
                     storeSupplyAtShelter(registry, player);
@@ -751,7 +755,16 @@ int main(int, char**) {
             bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
             auto& player_comp = registry.get<PlayerComponent>(player);
 
-            if (playerCanImproveBuilding(registry, player)) {
+            if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E RETURN SUSPECT PART  %s  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              workplaceBenchReadout(registry).c_str(),
+                              carryableObjectLabel(registry, player_comp.carried_object));
+            } else if (playerCanHideSuspiciousItemInHousing(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E HIDE SUSPECT PART  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              carryableObjectLabel(registry, player_comp.carried_object));
+            } else if (playerCanImproveBuilding(registry, player)) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  E IMPROVE BUILDING  %s  [CARRIED: %s]",
                               locationStateName(location_state),
                               buildingImprovementReadout(registry).c_str(),

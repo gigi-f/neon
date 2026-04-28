@@ -127,6 +127,13 @@ enum class LocalSuspicionCause {
     ROUTE_TAMPERING
 };
 
+enum class LocalSuspicionResolution {
+    NONE,
+    RETURNED_OUTPUT,
+    CORRECTED_ROUTE,
+    HIDDEN_ITEM
+};
+
 struct InheritedGadgetComponent {
     bool available = true;
     std::string label = "MOTHER'S DEBUGGER";
@@ -184,9 +191,12 @@ struct FixedActorComponent {
 struct LocalSuspicionComponent {
     bool active = false;
     LocalSuspicionCause cause = LocalSuspicionCause::NONE;
+    LocalSuspicionResolution resolution = LocalSuspicionResolution::NONE;
     Entity workplace_entity = MAX_ENTITIES;
     Entity target_entity = MAX_ENTITIES;
     Entity path_entity = MAX_ENTITIES;
+    Entity resolution_entity = MAX_ENTITIES;
+    bool institutional_log_recovered = false;
 };
 
 struct SolidComponent {
