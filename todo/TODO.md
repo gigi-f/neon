@@ -54,8 +54,8 @@ Logical next step: expose the witnessed state through local worker/building read
   - Surface an immediate HUD/status line so the player can tell the action was noticed.
   - Acceptance: unwitnessed pickup remains unchanged; witnessed pickup marks only current-scope local suspicion; tests cover both cases.
 - [ ] Phase 72: Add witnessed route tampering.
-  - If the player spoofs a signpost while the worker is close enough to be affected by the route, record a local suspicion event with a route-tampering cause.
-  - Restoring the signpost clears the flow blockage but does not silently erase that it was witnessed.
+  - If the player uses `G` Interference Torch to spoof a signpost while the worker is close enough to be affected by the route, record a local suspicion event with a route-tampering cause.
+  - Using `G` Interference Torch to restore the signpost clears the flow blockage but does not silently erase that it was witnessed.
   - Acceptance: no global surveillance, faction, wanted-level, or NPC pursuit state is introduced; tests cover witnessed route tampering and restoration.
 
 ## Session: Local Suspicion Readout
@@ -70,10 +70,10 @@ Logical next step: give the player one current-scope way to reduce the local con
   - `SPACE` on the worker and affected workplace shows a compact local suspicion line such as `SUSPICION: MISSING PART` or `SUSPICION: ROUTE TAMPERING`.
   - The line identifies only current-scope cause and target; it does not infer motives, crimes, or citywide consequences.
   - Acceptance: readouts clear when no local suspicion exists; tests cover worker and building readout boundaries.
-- [ ] Phase 74: Add debugger view of local suspicion.
+- [ ] Phase 74: Add Debugger view of local suspicion.
   - `SPACE` on the worker, affected workplace, or affected route reveals the local witness record and the current suspected cause through Debugger inspection.
-  - The debugger distinguishes active flow blockage from lingering local suspicion.
-  - Acceptance: volatile last-result HUD behavior remains unchanged; tests cover debugger output for theft, tampering, and no-suspicion cases.
+  - The Debugger distinguishes active flow blockage from lingering local suspicion.
+  - Acceptance: volatile last-result HUD behavior remains unchanged; tests cover Debugger output for theft, tampering, and no-suspicion cases.
 
 ## Session: Hiding Or De-escalation
 
@@ -88,11 +88,11 @@ Logical next step: once de-escalation exists, decide exactly which suspicion sta
   - Returning the item changes the suspicion readout to a de-escalated local state instead of deleting all evidence instantly.
   - Acceptance: normal part delivery to housing still works; tests cover return versus housing delivery.
 - [ ] Phase 76: Allow correcting suspicious route tampering.
-  - If suspicion came from route spoofing, restoring the signpost while the worker is not currently blocked changes the suspicion readout to a de-escalated local state.
+  - If suspicion came from a `G` Interference Torch route spoof, using `G` Interference Torch to restore the signpost while the worker is not currently blocked changes the suspicion readout to a de-escalated local state.
   - The route remains mechanically clear and readable as `FLOW: CLEAR`.
   - Acceptance: restoring an unrelated signpost does not de-escalate the event; tests cover route-scoped correction.
 - [ ] Phase 77: Add one bounded hiding option.
-  - Let the player hide the carried suspicious item inside housing with `E`, marking it hidden from the current worker's immediate concern while keeping it inspectable/debuggable.
+  - Let the player hide the carried suspicious item inside housing with `E`, marking it hidden from the current worker's immediate concern while keeping it inspectable and Debugger-readable.
   - The hidden state should be local to the tiny current scope and avoid inventory expansion.
   - Acceptance: hidden item state is visible through housing inspection/Debugger inspection; tests cover hiding only when carrying the suspected item.
 
