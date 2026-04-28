@@ -1225,6 +1225,7 @@ inline bool workerAtWorkplaceEndpoint(Registry& registry, Entity worker);
 inline bool workerCanWorkWorkplaceBench(Registry& registry, Entity worker);
 inline bool workerCanTakeWorkplaceOutput(Registry& registry, Entity worker);
 inline Entity availableSupplyCarryableObject(Registry& registry);
+inline constexpr float kLocalWitnessRangeWu = 22.0f;
 
 inline bool playerCarryingItemKind(Registry& registry, ItemKind kind) {
     auto players = registry.view<PlayerComponent>();
@@ -1432,6 +1433,118 @@ inline std::string productionLoopSummaryReadout(Registry& registry) {
         }
     }
     return "LOOP: RUNNING";
+}
+
+inline const char* localSuspicionCauseLabel(LocalSuspicionCause cause) {
+    switch (cause) {
+        case LocalSuspicionCause::MISSING_PART:
+            return "MISSING PART";
+        case LocalSuspicionCause::ROUTE_TAMPERING:
+            return "ROUTE TAMPERING";
+        case LocalSuspicionCause::NONE:
+            return "NONE";
+    }
+    return "NONE";
+}
+
+inline void recordLocalSuspicion(Registry& registry,
+                                 Entity worker,
+                                 LocalSuspicionCause cause,
+                                 Entity workplace,
+                                 Entity target,
+                                 Entity path) {
+    if (!registry.alive(worker) || !registry.has<FixedActorComponent>(worker) ||
+        cause == LocalSuspicionCause::NONE) {
+        return;
+    }
+
+    if (!registry.has<LocalSuspicionComponent>(worker)) {
+        registry.assign<LocalSuspicionComponent>(worker);
+    }
+    auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    suspicion.active = true;
+    suspicion.cause = cause;
+    suspicion.workplace_entity = workplace;
+    suspicion.target_entity = target;
+    suspicion.path_entity = path;
+}
+
+inline Entity firstLocalSuspicionWorker(Registry& registry) {
+    auto suspicions = registry.view<LocalSuspicionComponent>();
+    for (Entity worker : suspicions) {
+        const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+        if (suspicion.active && suspicion.cause != LocalSuspicionCause::NONE) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline bool localSuspicionActive(Registry& registry) {
+    return firstLocalSuspicionWorker(registry) != MAX_ENTITIES;
+}
+
+inline std::string localSuspicionHudReadout(Registry& registry) {
+    const Entity worker = firstLocalSuspicionWorker(registry);
+    if (worker == MAX_ENTITIES) {
+        return "";
+    }
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    return std::string("LOCAL NOTICE: WORKER SAW ") +
+           localSuspicionCauseLabel(suspicion.cause);
+}
+
+inline bool workerNearTransform(Registry& registry,
+                                Entity worker,
+                                const TransformComponent& transform,
+                                float range_wu) {
+    return registry.alive(worker) &&
+           registry.has<TransformComponent>(worker) &&
+           aabbDistance(registry.get<TransformComponent>(worker), transform) <= range_wu;
+}
+
+inline Entity workerWitnessingWorkplaceOutputTake(Registry& registry,
+                                                  Entity player,
+                                                  Entity workplace,
+                                                  float range_wu = kLocalWitnessRangeWu) {
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player) ||
+        !registry.alive(workplace) || !registry.has<TransformComponent>(workplace)) {
+        return MAX_ENTITIES;
+    }
+
+    const auto& player_transform = registry.get<TransformComponent>(player);
+    const auto& workplace_transform = registry.get<TransformComponent>(workplace);
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        if (workerCanTakeWorkplaceOutput(registry, worker) ||
+            workerNearTransform(registry, worker, player_transform, range_wu) ||
+            workerNearTransform(registry, worker, workplace_transform, range_wu)) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline Entity workerWitnessingRouteTampering(Registry& registry,
+                                             Entity signpost_entity,
+                                             float range_wu = kLocalWitnessRangeWu) {
+    if (!registry.alive(signpost_entity) ||
+        !registry.has<RouteSignpostComponent>(signpost_entity) ||
+        !registry.has<TransformComponent>(signpost_entity)) {
+        return MAX_ENTITIES;
+    }
+
+    const auto& signpost = registry.get<RouteSignpostComponent>(signpost_entity);
+    const auto& signpost_transform = registry.get<TransformComponent>(signpost_entity);
+    auto workers = registry.view<FixedActorComponent>();
+    for (Entity worker : workers) {
+        const auto& actor = registry.get<FixedActorComponent>(worker);
+        if (actor.path_entity == signpost.path_entity &&
+            workerNearTransform(registry, worker, signpost_transform, range_wu)) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
 }
 
 inline bool workerCarryingSupplyObject(Registry& registry, Entity worker) {
@@ -2357,7 +2470,9 @@ inline bool playerCanTakeWorkplaceOutput(Registry& registry, Entity player) {
     return object != MAX_ENTITIES && !carryableObjectIsHeld(registry, object);
 }
 
-inline bool takeWorkplaceOutput(Registry& registry, Entity player) {
+inline bool takeWorkplaceOutput(Registry& registry,
+                                Entity player,
+                                float witness_range_wu = kLocalWitnessRangeWu) {
     if (!playerCanTakeWorkplaceOutput(registry, player)) {
         return false;
     }
@@ -2365,12 +2480,25 @@ inline bool takeWorkplaceOutput(Registry& registry, Entity player) {
     const Entity object = firstCarryableObject(registry);
     auto& player_component = registry.get<PlayerComponent>(player);
     auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    const Entity workplace = interaction.building_entity;
+    const Entity witness = workerWitnessingWorkplaceOutputTake(registry,
+                                                               player,
+                                                               workplace,
+                                                               witness_range_wu);
 
     registry.get<CarryableComponent>(object).kind = ItemKind::PART;
     hideCarryableObject(registry, object);
     player_component.carried_object = object;
-    registry.get<WorkplaceBenchComponent>(interaction.building_entity).state =
+    registry.get<WorkplaceBenchComponent>(workplace).state =
         WorkplaceBenchState::EMPTY;
+    if (witness != MAX_ENTITIES) {
+        recordLocalSuspicion(registry,
+                             witness,
+                             LocalSuspicionCause::MISSING_PART,
+                             workplace,
+                             object,
+                             MAX_ENTITIES);
+    }
     return true;
 }
 
@@ -2786,11 +2914,25 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
     }
 
     auto& signpost = registry.get<RouteSignpostComponent>(target.entity);
+    const bool was_spoofed = signpost.spoofed;
+    const Entity witness = workerWitnessingRouteTampering(registry,
+                                                          target.entity,
+                                                          range_wu);
     signpost.spoofed = !signpost.spoofed;
     signpost.signal_recovered = !signpost.spoofed;
     gadget.last_result = signpost.spoofed ?
         "SPOOFED SIGNPOST: ROUTE SIGNAL CONFUSED" :
         "RESTORED SIGNPOST: ROUTE SIGNAL CLEAR";
+    if (!was_spoofed && signpost.spoofed && witness != MAX_ENTITIES) {
+        recordLocalSuspicion(registry,
+                             witness,
+                             LocalSuspicionCause::ROUTE_TAMPERING,
+                             pathEndpointWithRole(registry,
+                                                  signpost.path_entity,
+                                                  MicroZoneRole::WORKPLACE),
+                             target.entity,
+                             signpost.path_entity);
+    }
     return true;
 }
 

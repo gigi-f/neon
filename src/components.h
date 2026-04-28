@@ -121,6 +121,12 @@ enum class InheritedGadgetResultKind {
     INTERFERENCE_TORCH
 };
 
+enum class LocalSuspicionCause {
+    NONE,
+    MISSING_PART,
+    ROUTE_TAMPERING
+};
+
 struct InheritedGadgetComponent {
     bool available = true;
     std::string label = "MOTHER'S DEBUGGER";
@@ -173,6 +179,14 @@ struct FixedActorComponent {
     float direction = 1.0f;
     float speed_wu = 24.0f;
     bool acknowledged = false;
+};
+
+struct LocalSuspicionComponent {
+    bool active = false;
+    LocalSuspicionCause cause = LocalSuspicionCause::NONE;
+    Entity workplace_entity = MAX_ENTITIES;
+    Entity target_entity = MAX_ENTITIES;
+    Entity path_entity = MAX_ENTITIES;
 };
 
 struct SolidComponent {

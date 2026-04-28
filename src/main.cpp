@@ -829,6 +829,10 @@ int main(int, char**) {
             }
             drawText(renderer, font, productionLoopSummaryReadout(registry).c_str(), 6, 132, SDL_Color{235, 170, 210, 220}, 0.65f);
             drawText(renderer, font, inheritedGadgetResultReadout(registry, player).c_str(), 6, 146, SDL_Color{205, 215, 255, 220}, 0.65f);
+            const std::string local_notice = localSuspicionHudReadout(registry);
+            if (!local_notice.empty()) {
+                drawText(renderer, font, local_notice.c_str(), 6, 160, SDL_Color{255, 155, 120, 230}, 0.65f);
+            }
         }
 
         SDL_RenderPresent(renderer);

@@ -4061,6 +4061,182 @@ static void testInheritedGadgetSpoofTogglesSignpostConsequence() {
     assert(productionLoopSummaryReadout(registry) == "LOOP: RUNNING");
 }
 
+static void testWitnessedOutputTheftCreatesLocalSuspicion() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity workplace = firstWorkplaceBenchBuilding(registry);
+    Entity worker = firstFixedWorker(registry);
+    Entity object = firstCarryableObject(registry);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    registry.assign<BuildingInteractionComponent>(player);
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    hideCarryableObject(registry, object);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::OUTPUT_READY;
+    assert(workerCanTakeWorkplaceOutput(registry, worker));
+    assert(takeWorkplaceOutput(registry, player));
+
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(registry.get<CarryableComponent>(object).kind == ItemKind::PART);
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::EMPTY);
+    assert(localSuspicionActive(registry));
+    assert(registry.has<LocalSuspicionComponent>(worker));
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    assert(suspicion.active);
+    assert(suspicion.cause == LocalSuspicionCause::MISSING_PART);
+    assert(suspicion.workplace_entity == workplace);
+    assert(suspicion.target_entity == object);
+    assert(suspicion.path_entity == MAX_ENTITIES);
+    assert(localSuspicionHudReadout(registry) ==
+           "LOCAL NOTICE: WORKER SAW MISSING PART");
+}
+
+static void testUnwitnessedOutputPickupDoesNotCreateLocalSuspicion() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity workplace = firstWorkplaceBenchBuilding(registry);
+    Entity worker = firstFixedWorker(registry);
+    Entity object = firstCarryableObject(registry);
+    assert(workplace != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+
+    registry.get<TransformComponent>(worker) =
+        TransformComponent{4000.0f, 4000.0f, 12.0f, 12.0f};
+    registry.get<FixedActorComponent>(worker).route_t = 0.5f;
+    registry.get<FixedActorComponent>(worker).direction = 0.0f;
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    registry.assign<BuildingInteractionComponent>(player);
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    hideCarryableObject(registry, object);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::OUTPUT_READY;
+    assert(!workerCanTakeWorkplaceOutput(registry, worker));
+    assert(takeWorkplaceOutput(registry, player));
+
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(registry.get<CarryableComponent>(object).kind == ItemKind::PART);
+    assert(registry.get<WorkplaceBenchComponent>(workplace).state == WorkplaceBenchState::EMPTY);
+    assert(!localSuspicionActive(registry));
+    assert(localSuspicionHudReadout(registry).empty());
+    assert(registry.view<LocalSuspicionComponent>().empty());
+}
+
+static void testWitnessedRouteTamperingCreatesLocalSuspicionAndRestoreKeepsIt() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    assert(worker != MAX_ENTITIES);
+    Entity signpost = firstRouteSignpostForPath(registry,
+        registry.get<FixedActorComponent>(worker).path_entity);
+    assert(signpost != MAX_ENTITIES);
+
+    registry.get<TransformComponent>(worker) = registry.get<TransformComponent>(signpost);
+    registry.get<TransformComponent>(worker).x += 24.0f;
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(signpost));
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(routeSignpostSpoofed(registry, signpost));
+    assert(localSuspicionActive(registry));
+    assert(registry.has<LocalSuspicionComponent>(worker));
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    assert(suspicion.active);
+    assert(suspicion.cause == LocalSuspicionCause::ROUTE_TAMPERING);
+    assert(suspicion.target_entity == signpost);
+    assert(suspicion.path_entity == registry.get<RouteSignpostComponent>(signpost).path_entity);
+    assert(localSuspicionHudReadout(registry) ==
+           "LOCAL NOTICE: WORKER SAW ROUTE TAMPERING");
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(!routeSignpostSpoofed(registry, signpost));
+    assert(localSuspicionActive(registry));
+    assert(registry.get<LocalSuspicionComponent>(worker).cause ==
+           LocalSuspicionCause::ROUTE_TAMPERING);
+}
+
+static void testUnwitnessedRouteTamperingDoesNotCreateLocalSuspicion() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    assert(worker != MAX_ENTITIES);
+    Entity signpost = firstRouteSignpostForPath(registry,
+        registry.get<FixedActorComponent>(worker).path_entity);
+    assert(signpost != MAX_ENTITIES);
+
+    registry.get<TransformComponent>(worker) =
+        TransformComponent{4000.0f, 4000.0f, 12.0f, 12.0f};
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(signpost));
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(routeSignpostSpoofed(registry, signpost));
+    assert(!localSuspicionActive(registry));
+    assert(localSuspicionHudReadout(registry).empty());
+    assert(registry.view<LocalSuspicionComponent>().empty());
+    assert(!dependencyDisrupted(registry));
+}
+
 static void testRouteSignpostRecoveryReadoutAppearsOnlyAfterRestore() {
     Registry registry;
     WorldConfig config = makeSandboxConfig();
@@ -4874,6 +5050,10 @@ int main() {
     testInheritedGadgetInvalidTargetDoesNotAlterWorkerInspection();
     testInheritedGadgetSpoofCandidateSelection();
     testInheritedGadgetSpoofTogglesSignpostConsequence();
+    testWitnessedOutputTheftCreatesLocalSuspicion();
+    testUnwitnessedOutputPickupDoesNotCreateLocalSuspicion();
+    testWitnessedRouteTamperingCreatesLocalSuspicionAndRestoreKeepsIt();
+    testUnwitnessedRouteTamperingDoesNotCreateLocalSuspicion();
     testRouteSignpostRecoveryReadoutAppearsOnlyAfterRestore();
     testRouteSignpostConsequenceReadoutCoversLocalStates();
     testProductionLoopSummaryReadoutCoversRouteInterferenceStates();

@@ -1233,3 +1233,23 @@ Acceptance:
 - [x] Save/load behavior is explicit and deterministic for current scope.
 - [x] No repair minigame, management command, or generalized event/history system is introduced.
 - [x] The roadmap can move toward local risk or hidden-system clues without ambiguity.
+
+## Completed Session: Witnessed Interruption
+
+Gameplay outcome: nearby interference can be noticed locally before any surveillance system exists.
+
+Big Picture: risk starts with people and systems already present in the tiny loop. The worker should notice concrete interference with their expected route or output, not trigger a global wanted model.
+
+Logical next step: expose the witnessed state through local worker/building readouts, then give the player a small way to respond.
+
+## Phase 71: Add witnessed output theft.
+
+- [x] If the player takes the ready workplace `PART` while the fixed worker is nearby or assigned to collect it, record a local suspicion event tied to the worker/workplace pair.
+- [x] Surface an immediate HUD/status line so the player can tell the action was noticed.
+- [x] Acceptance: unwitnessed pickup remains unchanged; witnessed pickup marks only current-scope local suspicion; tests cover both cases.
+
+## Phase 72: Add witnessed route tampering.
+
+- [x] If the player uses `G` Interference Torch to spoof a signpost while the worker is close enough to be affected by the route, record a local suspicion event with a route-tampering cause.
+- [x] Using `G` Interference Torch to restore the signpost clears the flow blockage but does not silently erase that it was witnessed.
+- [x] Acceptance: no global surveillance, faction, wanted-level, or NPC pursuit state is introduced; tests cover witnessed route tampering and restoration.

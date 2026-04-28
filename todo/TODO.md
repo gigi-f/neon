@@ -40,23 +40,7 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - Worker loop: the fixed worker follows derived pedestrian paths through supply, workplace, and housing tasks; route endpoints expose readable `TO ...`, `LABOR ROUTE`, `SUPPLY ROUTE`, and carried-flow labels.
 - Hidden-system surface: Debugger inspection reveals labor pressure, route quota, site purpose, market access, dependency state, expected cargo, and access details, but scan memory remains volatile HUD-only state.
 - Interference loop: spoofed signposts and disrupted dependencies are inspectable, pause affected worker/supply flow, show local `FLOW: BLOCKED` or `SUPPLY FLOW: DISRUPTED` readouts, and persist active blockage state through tiny save/load; restored routes show local `FLOW: CLEAR`, with recovery acknowledgement intentionally volatile.
-
-## Session: Witnessed Interruption
-
-Gameplay outcome: nearby interference can be noticed locally before any surveillance system exists.
-
-Big Picture: risk starts with people and systems already present in the tiny loop. The worker should notice concrete interference with their expected route or output, not trigger a global wanted model.
-
-Logical next step: expose the witnessed state through local worker/building readouts, then give the player a small way to respond.
-
-- [ ] Phase 71: Add witnessed output theft.
-  - If the player takes the ready workplace `PART` while the fixed worker is nearby or assigned to collect it, record a local suspicion event tied to the worker/workplace pair.
-  - Surface an immediate HUD/status line so the player can tell the action was noticed.
-  - Acceptance: unwitnessed pickup remains unchanged; witnessed pickup marks only current-scope local suspicion; tests cover both cases.
-- [ ] Phase 72: Add witnessed route tampering.
-  - If the player uses `G` Interference Torch to spoof a signpost while the worker is close enough to be affected by the route, record a local suspicion event with a route-tampering cause.
-  - Using `G` Interference Torch to restore the signpost clears the flow blockage but does not silently erase that it was witnessed.
-  - Acceptance: no global surveillance, faction, wanted-level, or NPC pursuit state is introduced; tests cover witnessed route tampering and restoration.
+- Local risk loop: a worker can witness expected `PART` theft or nearby `G` Interference Torch route tampering, producing a current-scope `LOCAL NOTICE` HUD line without adding surveillance, wanted level, factions, or pursuit.
 
 ## Session: Local Suspicion Readout
 
