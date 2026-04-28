@@ -224,6 +224,13 @@ struct PathStateComponent {
     PathState state = PathState::LIT;
 };
 
+struct DependencyDisruptionComponent {
+    MicroZoneRole dependent_role = MicroZoneRole::WORKPLACE;
+    MicroZoneRole provider_role = MicroZoneRole::SUPPLY;
+    bool disrupted = false;
+    bool recovered = false;
+};
+
 struct RouteSignpostComponent {
     Entity path_entity = MAX_ENTITIES;
     Entity endpoint_entity = MAX_ENTITIES;

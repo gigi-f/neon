@@ -840,20 +840,79 @@ inline bool dependencyEdgeResolved(Registry& registry,
            dependencyEndpointForRole(registry, dependency.provider_role, dependency) != MAX_ENTITIES;
 }
 
+inline Entity dependencyDisruptionStateEntity(Registry& registry,
+                                              const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                              bool create_if_missing = false) {
+    auto disruptions = registry.view<DependencyDisruptionComponent>();
+    for (Entity state : disruptions) {
+        const auto& component = registry.get<DependencyDisruptionComponent>(state);
+        if (component.dependent_role == dependency.dependent_role &&
+            component.provider_role == dependency.provider_role) {
+            return state;
+        }
+    }
+
+    if (!create_if_missing) {
+        return MAX_ENTITIES;
+    }
+
+    Entity state = registry.create();
+    registry.assign<DependencyDisruptionComponent>(state,
+        dependency.dependent_role,
+        dependency.provider_role,
+        false,
+        false);
+    return state;
+}
+
+inline bool dependencyDisrupted(Registry& registry,
+                                const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency);
+    return state != MAX_ENTITIES &&
+           registry.get<DependencyDisruptionComponent>(state).disrupted;
+}
+
+inline bool dependencyRecovered(Registry& registry,
+                                const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency);
+    return state != MAX_ENTITIES &&
+           registry.get<DependencyDisruptionComponent>(state).recovered;
+}
+
+inline bool toggleDependencyDisruption(Registry& registry,
+                                       const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    if (!dependencyEdgeResolved(registry, dependency)) {
+        return false;
+    }
+
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency, true);
+    auto& component = registry.get<DependencyDisruptionComponent>(state);
+    component.disrupted = !component.disrupted;
+    component.recovered = !component.disrupted;
+    return true;
+}
+
 inline std::string dependencyInspectionReadout(Registry& registry,
                                                MicroZoneRole role,
                                                const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+    const bool disrupted = dependencyDisrupted(registry, dependency);
+    const bool recovered = dependencyRecovered(registry, dependency);
+    const std::string status = disrupted ? "; DEPENDENCY: DISRUPTED" :
+        (recovered ? "; DEPENDENCY: RESTORED" : "");
+
     if (roleIsDependencyDependent(role, dependency)) {
         return std::string("DEPENDS ON: ") +
                (dependencyEndpointForRole(registry, dependency.provider_role, dependency) != MAX_ENTITIES
                     ? roleDisplayName(dependency.provider_role)
-                    : std::string("MISSING ") + roleDisplayName(dependency.provider_role));
+                    : std::string("MISSING ") + roleDisplayName(dependency.provider_role)) +
+               status;
     }
     if (roleIsDependencyProvider(role, dependency)) {
         return std::string("SUPPORTS: ") +
                (dependencyEndpointForRole(registry, dependency.dependent_role, dependency) != MAX_ENTITIES
                     ? roleDisplayName(dependency.dependent_role)
-                    : std::string("NO ") + roleDisplayName(dependency.dependent_role));
+                    : std::string("NO ") + roleDisplayName(dependency.dependent_role)) +
+               status;
     }
     return "DEPENDENCY: NONE";
 }
@@ -869,6 +928,10 @@ inline std::string dependencyScanReadout(Registry& registry,
         "; REQUIRED FOR: " + dependency.required_for;
     if (!dependencyEdgeResolved(registry, dependency)) {
         readout += "; TARGET: MISSING";
+    } else if (dependencyDisrupted(registry, dependency)) {
+        readout += "; DEPENDENCY: DISRUPTED; FLOW STATUS: CONFUSED";
+    } else if (dependencyRecovered(registry, dependency)) {
+        readout += "; DEPENDENCY: RESTORED; FLOW STATUS: CLEAR";
     } else if (roleIsDependencyProvider(role, dependency)) {
         readout += std::string("; SUPPORTS: ") + roleDisplayName(dependency.dependent_role);
     } else {
@@ -1060,6 +1123,9 @@ inline std::string workerBlockedReason(Registry& registry, Entity worker) {
     if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
         return "ROUTE SIGNAL CONFUSED";
     }
+    if (workerCurrentPathHasDisruptedDependency(registry, worker)) {
+        return "DEPENDENCY DISRUPTED";
+    }
     if (buildingImproved(registry)) {
         return "BUILDING ALREADY IMPROVED";
     }
@@ -1094,15 +1160,23 @@ inline std::string workerBlockedReason(Registry& registry, Entity worker) {
 }
 
 inline std::string workerConsequenceSourceReadout(Registry& registry, Entity worker) {
-    return workerCurrentPathHasSpoofedRouteSignpost(registry, worker) ?
-        "SOURCE: CORRUPTED ROUTE SIGNAL" :
-        "";
+    if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
+        return "SOURCE: CORRUPTED ROUTE SIGNAL";
+    }
+    if (workerCurrentPathHasDisruptedDependency(registry, worker)) {
+        return "SOURCE: DISRUPTED DEPENDENCY";
+    }
+    return "";
 }
 
 inline std::string workerRouteConsequenceReadout(Registry& registry, Entity worker) {
-    return workerCurrentPathHasSpoofedRouteSignpost(registry, worker) ?
-        "WAITING ON ROUTE SIGNAL" :
-        "";
+    if (workerCurrentPathHasSpoofedRouteSignpost(registry, worker)) {
+        return "WAITING ON ROUTE SIGNAL";
+    }
+    if (workerCurrentPathHasDisruptedDependency(registry, worker)) {
+        return "WAITING ON SUPPLY FLOW";
+    }
+    return "";
 }
 
 inline std::string workerCarryReadout(Registry& registry, Entity worker) {
@@ -1137,6 +1211,9 @@ inline std::string workerCarryReadout(Registry& registry, Entity worker) {
 }
 
 inline std::string productionLoopSummaryReadout(Registry& registry) {
+    if (dependencyDisrupted(registry)) {
+        return "LOOP: DISRUPTED; INTERFERENCE: DEPENDENCY; CONSEQUENCE: SUPPLY FLOW CONFUSED";
+    }
     if (anyRouteSignpostSpoofed(registry)) {
         return "LOOP: SPOOFED; INTERFERENCE: ROUTE; CONSEQUENCE: ROUTE SIGNAL CONFUSED";
     }
@@ -1320,6 +1397,9 @@ inline bool workerReturningToSupply(Registry& registry, Entity worker) {
     if (workplace == MAX_ENTITIES || supply == MAX_ENTITIES) {
         return false;
     }
+    if (dependencyDisrupted(registry)) {
+        return false;
+    }
 
     const float supply_t = routeTForPathEndpoint(registry, worker_component.path_entity, supply);
     return std::fabs(worker_component.route_t - supply_t) > 0.001f;
@@ -1434,6 +1514,10 @@ inline bool workerCanTakeSupplyObject(Registry& registry, Entity worker) {
         return false;
     }
 
+    if (dependencyDisrupted(registry)) {
+        return false;
+    }
+
     if (registry.get<FixedActorComponent>(worker).carried_object != MAX_ENTITIES) {
         return false;
     }
@@ -1491,6 +1575,11 @@ inline bool routeWorkerCarryingSupplyTowardWorkplace(Registry& registry, Entity 
     if (workplace == MAX_ENTITIES || supply == MAX_ENTITIES) {
         refreshWorkerCarryVisual(registry, worker);
         return false;
+    }
+    if (dependencyDisrupted(registry)) {
+        worker_component.direction = 0.0f;
+        refreshWorkerCarryVisual(registry, worker);
+        return true;
     }
 
     const float target_t =
@@ -1563,6 +1652,9 @@ inline size_t updateWorkerSupplyDeliveryRoutes(Registry& registry, float dt) {
 inline bool workerCanStockWorkplaceBench(Registry& registry, Entity worker) {
     if (!workerAtWorkplaceEndpoint(registry, worker) ||
         !workerCarryingSupplyObject(registry, worker)) {
+        return false;
+    }
+    if (dependencyDisrupted(registry)) {
         return false;
     }
 
@@ -2364,8 +2456,31 @@ inline std::string inheritedGadgetScanResult(Registry& registry, const Inspectio
     return inheritedGadgetSiteMetadataScan(registry, target);
 }
 
+inline bool inspectionTargetIsDependencyTarget(const InspectionTarget& target) {
+    switch (target.type) {
+        case InspectionTargetType::WORKPLACE:
+        case InspectionTargetType::WORKPLACE_INTERIOR:
+        case InspectionTargetType::SUPPLY:
+        case InspectionTargetType::SUPPLY_INTERIOR:
+            return target.entity != MAX_ENTITIES;
+        case InspectionTargetType::NONE:
+        case InspectionTargetType::HOUSING:
+        case InspectionTargetType::MARKET:
+        case InspectionTargetType::CLINIC:
+        case InspectionTargetType::PEDESTRIAN_PATH:
+        case InspectionTargetType::ROUTE_SIGNPOST:
+        case InspectionTargetType::WORKER:
+        case InspectionTargetType::HOUSING_INTERIOR:
+        case InspectionTargetType::CARRYABLE_OBJECT:
+            return false;
+    }
+    return false;
+}
+
 inline bool inheritedGadgetCanSpoofTarget(const InspectionTarget& target) {
-    return target.entity != MAX_ENTITIES && target.type == InspectionTargetType::ROUTE_SIGNPOST;
+    return target.entity != MAX_ENTITIES &&
+           (target.type == InspectionTargetType::ROUTE_SIGNPOST ||
+            inspectionTargetIsDependencyTarget(target));
 }
 
 inline bool playerCanUseInheritedGadget(Registry& registry, Entity player) {
@@ -2396,6 +2511,11 @@ inline std::string inheritedGadgetSpoofPromptReadout(Registry& registry,
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
     if (!inheritedGadgetCanSpoofTarget(target)) {
         return "SHIFT+G SPOOF:N/A";
+    }
+    if (inspectionTargetIsDependencyTarget(target)) {
+        return dependencyDisrupted(registry) ?
+            "SHIFT+G RESTORE DEPENDENCY" :
+            "SHIFT+G DISRUPT DEPENDENCY";
     }
     return routeSignpostSpoofed(registry, target.entity) ?
         "SHIFT+G RESTORE SIGNPOST" :
@@ -2429,8 +2549,23 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
         gadget.last_result = "SPOOF FAILED: NO SIGNAL";
         return false;
     }
-    if (!inheritedGadgetCanSpoofTarget(target) ||
-        !registry.alive(target.entity) ||
+    if (!inheritedGadgetCanSpoofTarget(target)) {
+        gadget.last_result = "SPOOF FAILED: SIGNPOST REQUIRED";
+        return false;
+    }
+
+    if (inspectionTargetIsDependencyTarget(target)) {
+        if (!toggleDependencyDisruption(registry)) {
+            gadget.last_result = "SPOOF FAILED: DEPENDENCY UNRESOLVED";
+            return false;
+        }
+        gadget.last_result = dependencyDisrupted(registry) ?
+            "DISRUPTED DEPENDENCY: SUPPLY FLOW CONFUSED" :
+            "RESTORED DEPENDENCY: SUPPLY FLOW CLEAR";
+        return true;
+    }
+
+    if (!registry.alive(target.entity) ||
         !registry.has<RouteSignpostComponent>(target.entity)) {
         gadget.last_result = "SPOOF FAILED: SIGNPOST REQUIRED";
         return false;

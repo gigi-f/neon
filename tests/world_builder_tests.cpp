@@ -2287,6 +2287,154 @@ static void testDependencyReadoutsDoNotMutateLoopState() {
     assert(closeTo(registry.get<TransformComponent>(object).y, object_before.y));
 }
 
+static void testDependencyDisruptionViaDebuggerTogglesReadouts() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    assert(!dependencyDisrupted(registry));
+    assert(inheritedGadgetCanSpoofTarget(playerInspectionTarget(registry, player, 22.0f)));
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "SHIFT+G DISRUPT DEPENDENCY");
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(dependencyDisrupted(registry));
+    assert(!dependencyRecovered(registry));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "GADGET RESULT: DISRUPTED DEPENDENCY: SUPPLY FLOW CONFUSED");
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "SHIFT+G RESTORE DEPENDENCY");
+
+    assert(buildingInspectionReadout(registry, workplace).find("DEPENDENCY: DISRUPTED") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, supply).find("DEPENDENCY: DISRUPTED") !=
+           std::string::npos);
+    assert(dependencyScanReadout(registry, MicroZoneRole::WORKPLACE).find("FLOW STATUS: CONFUSED") !=
+           std::string::npos);
+    assert(productionLoopSummaryReadout(registry) ==
+           "LOOP: DISRUPTED; INTERFERENCE: DEPENDENCY; CONSEQUENCE: SUPPLY FLOW CONFUSED");
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(!dependencyDisrupted(registry));
+    assert(dependencyRecovered(registry));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "GADGET RESULT: RESTORED DEPENDENCY: SUPPLY FLOW CLEAR");
+    assert(buildingInspectionReadout(registry, workplace).find("DEPENDENCY: RESTORED") !=
+           std::string::npos);
+    assert(dependencyScanReadout(registry, MicroZoneRole::WORKPLACE).find("FLOW STATUS: CLEAR") !=
+           std::string::npos);
+    assert(productionLoopSummaryReadout(registry) == "LOOP: RUNNING");
+}
+
+static void testDependencyDisruptionPausesAndRestoresWorkerSupplyFlow() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    Entity worker = firstFixedWorker(registry);
+    Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
+    Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(worker != MAX_ENTITIES);
+    assert(supply != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, supply);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    assert(toggleDependencyDisruption(registry));
+    const float disrupted_t = worker_component.route_t;
+    assert(workerCurrentPathHasDisruptedDependency(registry, worker));
+    assert(workerBlockedReason(registry, worker) == "DEPENDENCY DISRUPTED");
+    assert(workerCarryReadout(registry, worker).find("SOURCE: DISRUPTED DEPENDENCY") !=
+           std::string::npos);
+    assert(workerCarryReadout(registry, worker).find("WAITING ON SUPPLY FLOW") !=
+           std::string::npos);
+    assert(!takeSupplyObjectForWorker(registry, worker));
+    updateFixedActors(registry, 10.0f);
+    assert(closeTo(worker_component.route_t, disrupted_t));
+
+    assert(toggleDependencyDisruption(registry));
+    assert(!workerCurrentPathHasDisruptedDependency(registry, worker));
+    assert(workerBlockedReason(registry, worker).empty());
+    assert(takeSupplyObjectForWorker(registry, worker));
+    assert(workerCarryingSupplyObject(registry, worker));
+}
+
+static void testDependencyDisruptionBoundariesDoNotSpoofRoutesOrUnrelatedSites() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    Entity market = firstBuildingByRole(registry, MicroZoneRole::MARKET);
+    Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+    assert(workplace != MAX_ENTITIES);
+    assert(market != MAX_ENTITIES);
+    assert(clinic != MAX_ENTITIES);
+    assert(!anyRouteSignpostSpoofed(registry));
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(dependencyDisrupted(registry));
+    assert(!anyRouteSignpostSpoofed(registry));
+    assert(buildingInspectionReadout(registry, market).find("DEPENDENCY: DISRUPTED") ==
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, clinic).find("DEPENDENCY: DISRUPTED") ==
+           std::string::npos);
+
+    exitBuildingInterior(registry, player);
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(clinic);
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "SHIFT+G SPOOF:N/A");
+    assert(!useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(dependencyDisrupted(registry));
+}
+
 static void testWorkerSupplyPickupRequiresSupplyEndpoint() {
     Registry registry;
     WorldConfig config = makeSandboxConfig();
@@ -4369,6 +4517,9 @@ int main() {
     testDependencyEdgeMissingTargetReadouts();
     testDependencyDebuggerScanEnrichment();
     testDependencyReadoutsDoNotMutateLoopState();
+    testDependencyDisruptionViaDebuggerTogglesReadouts();
+    testDependencyDisruptionPausesAndRestoresWorkerSupplyFlow();
+    testDependencyDisruptionBoundariesDoNotSpoofRoutesOrUnrelatedSites();
     testWorkerSupplyPickupRequiresSupplyEndpoint();
     testWorkerSupplyPickupBlockedWhilePlayerCarriesObject();
     testWorkerSupplyPickupBlockedByStoredSupplyStates();

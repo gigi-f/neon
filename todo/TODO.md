@@ -61,6 +61,8 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - A spoofed signpost is inspectable and produces `LOOP: SPOOFED; CONSEQUENCE: ROUTE SIGNAL CONFUSED` without changing worker AI yet.
 - A worker on a path with a spoofed signpost shows `BLOCKED: ROUTE SIGNAL CONFUSED` and does not advance until the signpost is restored.
 - Tiny save/load persists spoofed signpost state as current-scope mechanical state.
+- The player can use `Shift+G` on the workplace/supply dependency to disrupt or restore supply flow.
+- A disrupted dependency is inspectable from workplace and supply, appears in debugger scans, and pauses worker supply flow until restored.
 
 ## Session: Public Site With Context
 
@@ -131,17 +133,17 @@ Acceptance:
 
 Goal: let the player use the debugger to interfere with the dependency edge.
 
-- [ ] Add a debugger verb (reuse `Shift+G` spoof pattern or extend it) that can disrupt the dependency, such as spoofing the dependency target, marking it severed, or confusing the flow label.
-- [ ] Show the disruption through inspection/readout on the affected site and dependency edge.
-- [ ] Derive one consequence from the disruption, such as worker unable to resolve next destination, or site showing `DEPENDENCY: DISRUPTED`.
-- [ ] Ensure the disruption is reversible through the same verb or a restore action.
-- [ ] Add tests for disruption trigger, consequence readout, worker impact (if any), reversal, and boundary (unrelated sites/routes unchanged).
+- [x] Add a debugger verb (reuse `Shift+G` spoof pattern or extend it) that can disrupt the dependency, such as spoofing the dependency target, marking it severed, or confusing the flow label.
+- [x] Show the disruption through inspection/readout on the affected site and dependency edge.
+- [x] Derive one consequence from the disruption, such as worker unable to resolve next destination, or site showing `DEPENDENCY: DISRUPTED`.
+- [x] Ensure the disruption is reversible through the same verb or a restore action.
+- [x] Add tests for disruption trigger, consequence readout, worker impact (if any), reversal, and boundary (unrelated sites/routes unchanged).
 
 Acceptance:
 
-- [ ] The player has a new interference opportunity tied to the dependency, not just a label to read.
-- [ ] The disruption is local and reversible.
-- [ ] No global risk, wanted level, or surveillance reaction is introduced.
+- [x] The player has a new interference opportunity tied to the dependency, not just a label to read.
+- [x] The disruption is local and reversible.
+- [x] No global risk, wanted level, or surveillance reaction is introduced.
 
 ## Session: Route Purpose And Flow
 
