@@ -4352,11 +4352,30 @@ static void testSpoofedRouteShowsAndClearsLocalFlowBlockageReadouts() {
 
     assert(useInheritedGadgetSpoof(registry, player, 22.0f));
     assert(!routeFlowBlockedBySpoofedSignpost(registry, supply_path));
+    assert(routeFlowRecoveredByRestoredSignpost(registry, supply_path));
     assert(pathInspectionReadout(registry, supply_path).find("FLOW: BLOCKED") ==
+           std::string::npos);
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: CLEAR") !=
            std::string::npos);
     assert(routeSignpostReadout(registry, supply_signpost).find("FLOW: BLOCKED") ==
            std::string::npos);
+    assert(routeSignpostReadout(registry, supply_signpost).find("FLOW: CLEAR") !=
+           std::string::npos);
     assert(buildingInspectionReadout(registry, workplace).find("SUPPLY FLOW: DISRUPTED") ==
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace).find("SUPPLY FLOW: CLEAR") !=
+           std::string::npos);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(routeFlowBlockedBySpoofedSignpost(registry, supply_path));
+    assert(!routeFlowRecoveredByRestoredSignpost(registry, supply_path));
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: BLOCKED") !=
+           std::string::npos);
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: CLEAR") ==
+           std::string::npos);
+    assert(routeSignpostReadout(registry, supply_signpost).find("FLOW: BLOCKED") !=
+           std::string::npos);
+    assert(routeSignpostReadout(registry, supply_signpost).find("FLOW: CLEAR") ==
            std::string::npos);
 }
 
@@ -4691,6 +4710,70 @@ static void testTinySaveRoundTripRestoresSpoofedSignpostState() {
     assert(!routeSignpostSpoofed(registry, unsaved_marker));
 }
 
+static void testTinySaveRoundTripRestoresRouteFlowPersistenceBoundary() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+
+    const Entity supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(supply_path != MAX_ENTITIES);
+    const Entity marker = firstRouteSignpostForPath(registry, supply_path);
+    assert(marker != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<TransformComponent>(player, 0.0f, 0.0f, 12.0f, 12.0f);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    registry.get<RouteSignpostComponent>(marker).spoofed = true;
+    const std::string blocked_save =
+        serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(blocked_save.find("SPOOFED_SIGNPOSTS 1") != std::string::npos);
+
+    TinySaveState blocked_state;
+    assert(deserializeTinySaveState(blocked_save, blocked_state) == TinySaveStatus::OK);
+    registry.get<RouteSignpostComponent>(marker).spoofed = false;
+    registry.get<RouteSignpostComponent>(marker).signal_recovered = true;
+
+    assert(applyTinySaveState(registry, player, blocked_state) == TinySaveStatus::OK);
+    assert(routeFlowBlockedBySpoofedSignpost(registry, supply_path));
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: BLOCKED") !=
+           std::string::npos);
+    assert(routeSignpostReadout(registry, marker).find("FLOW: BLOCKED") !=
+           std::string::npos);
+
+    registry.get<RouteSignpostComponent>(marker).spoofed = false;
+    registry.get<RouteSignpostComponent>(marker).signal_recovered = true;
+    const std::string clear_save =
+        serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(clear_save.find("SPOOFED_SIGNPOSTS 0") != std::string::npos);
+
+    TinySaveState clear_state;
+    assert(deserializeTinySaveState(clear_save, clear_state) == TinySaveStatus::OK);
+    registry.get<RouteSignpostComponent>(marker).spoofed = true;
+    registry.get<RouteSignpostComponent>(marker).signal_recovered = false;
+
+    assert(applyTinySaveState(registry, player, clear_state) == TinySaveStatus::OK);
+    assert(!routeFlowBlockedBySpoofedSignpost(registry, supply_path));
+    assert(!routeFlowRecoveredByRestoredSignpost(registry, supply_path));
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: BLOCKED") ==
+           std::string::npos);
+    assert(pathInspectionReadout(registry, supply_path).find("FLOW: CLEAR") ==
+           std::string::npos);
+    assert(routeSignpostReadout(registry, marker).find("FLOW: BLOCKED") ==
+           std::string::npos);
+    assert(routeSignpostReadout(registry, marker).find("FLOW: CLEAR") ==
+           std::string::npos);
+    assert(routeSignpostReadout(registry, marker).find("CARRIES: MATERIAL") !=
+           std::string::npos);
+}
+
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
@@ -4806,5 +4889,6 @@ int main() {
     testSpoofedRouteSignalPausesAndRestoresSupplyDeliveryMovement();
     testSpoofedRouteSignalConsequenceDoesNotMutateProductionState();
     testTinySaveRoundTripRestoresSpoofedSignpostState();
+    testTinySaveRoundTripRestoresRouteFlowPersistenceBoundary();
     return 0;
 }

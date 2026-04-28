@@ -962,6 +962,31 @@ inline bool pathConnectsReadoutRoles(Registry& registry,
     return (from == a && to == b) || (from == b && to == a);
 }
 
+inline bool routeFlowBlockedBySpoofedSignpost(Registry& registry, Entity path_entity) {
+    return pathHasSpoofedRouteSignpost(registry, path_entity);
+}
+
+inline bool pathHasRecoveredRouteSignpost(Registry& registry, Entity path_entity) {
+    if (!registry.alive(path_entity)) {
+        return false;
+    }
+    auto signposts = registry.view<RouteSignpostComponent>();
+    for (Entity marker : signposts) {
+        const auto& signpost = registry.get<RouteSignpostComponent>(marker);
+        if (signpost.path_entity == path_entity &&
+            signpost.signal_recovered &&
+            !signpost.spoofed) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool routeFlowRecoveredByRestoredSignpost(Registry& registry, Entity path_entity) {
+    return !routeFlowBlockedBySpoofedSignpost(registry, path_entity) &&
+           pathHasRecoveredRouteSignpost(registry, path_entity);
+}
+
 inline bool routeBetweenRolesHasSpoofedSignpost(Registry& registry,
                                                 MicroZoneRole a,
                                                 MicroZoneRole b) {
@@ -975,10 +1000,30 @@ inline bool routeBetweenRolesHasSpoofedSignpost(Registry& registry,
     return false;
 }
 
+inline bool routeBetweenRolesHasRecoveredSignpost(Registry& registry,
+                                                 MicroZoneRole a,
+                                                 MicroZoneRole b) {
+    auto paths = registry.view<PathComponent>();
+    for (Entity path_entity : paths) {
+        if (pathConnectsReadoutRoles(registry, path_entity, a, b) &&
+            routeFlowRecoveredByRestoredSignpost(registry, path_entity)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline bool workplaceSupplyFlowDisruptedBySpoofedRoute(Registry& registry) {
     return routeBetweenRolesHasSpoofedSignpost(registry,
                                                MicroZoneRole::WORKPLACE,
                                                MicroZoneRole::SUPPLY);
+}
+
+inline bool workplaceSupplyFlowRecoveredByRoute(Registry& registry) {
+    return !workplaceSupplyFlowDisruptedBySpoofedRoute(registry) &&
+           routeBetweenRolesHasRecoveredSignpost(registry,
+                                                MicroZoneRole::WORKPLACE,
+                                                MicroZoneRole::SUPPLY);
 }
 
 inline std::string buildingInspectionReadout(Registry& registry, Entity building) {
@@ -1001,6 +1046,8 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
             }
             if (workplaceSupplyFlowDisruptedBySpoofedRoute(registry)) {
                 readout += "; SUPPLY FLOW: DISRUPTED";
+            } else if (workplaceSupplyFlowRecoveredByRoute(registry)) {
+                readout += "; SUPPLY FLOW: CLEAR";
             }
             break;
         case MicroZoneRole::SUPPLY:
@@ -1090,10 +1137,6 @@ inline RoutePurposeInfo routePurposeForPath(Registry& registry, Entity path_enti
     return routePurposeForRoles(from_role, to_role);
 }
 
-inline bool routeFlowBlockedBySpoofedSignpost(Registry& registry, Entity path_entity) {
-    return pathHasSpoofedRouteSignpost(registry, path_entity);
-}
-
 inline std::string pathInspectionReadout(Registry& registry, Entity path_entity) {
     std::string readout = "Foot path. Non-solid access between buildings.";
     if (registry.alive(path_entity) && registry.has<PathStateComponent>(path_entity)) {
@@ -1109,6 +1152,8 @@ inline std::string pathInspectionReadout(Registry& registry, Entity path_entity)
         "; CARRIES: " + purpose.carries;
     if (routeFlowBlockedBySpoofedSignpost(registry, path_entity)) {
         readout += "; FLOW: BLOCKED";
+    } else if (routeFlowRecoveredByRestoredSignpost(registry, path_entity)) {
+        readout += "; FLOW: CLEAR";
     }
     return readout;
 }
@@ -1152,6 +1197,8 @@ inline std::string routeSignpostReadout(Registry& registry, Entity marker) {
         (signpost.spoofed ? "???" : purpose.carries);
     if (signpost.spoofed) {
         readout += "; FLOW: BLOCKED";
+    } else if (signpost.signal_recovered) {
+        readout += "; FLOW: CLEAR";
     }
     readout += "; SIGNAL: ";
     if (signpost.spoofed) {

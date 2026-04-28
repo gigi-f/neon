@@ -67,6 +67,7 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - The inherited debugger reveals route expected cargo and access details on path/signpost scans.
 - Spoofed signposts corrupt their carried-flow label, and spoofing the workplace/supply route shows `SUPPLY FLOW: DISRUPTED` on the workplace.
 - Spoofed route signposts now derive an explicit local `FLOW: BLOCKED` label on the affected path/signpost, and restoring the signpost clears it.
+- Restored route signposts now show local `FLOW: CLEAR` recovery on the signpost, path, and affected workplace supply-flow readout; tiny save/load persists active spoofed blockages but treats recovery acknowledgement as volatile.
 
 ## Session: Public Site With Context
 
@@ -217,19 +218,21 @@ Acceptance:
 
 Goal: define recovery, make it visible, and settle the persistence question.
 
-- [ ] Use a current action to clear the blockage: dropping/returning supply, restoring a signpost, delivering a part, or clearing a held output.
-- [ ] Show recovery through the same objects that showed the blockage, such as `FLOW: CLEAR` or restored normal labels.
-- [ ] Ensure stale blockage text clears when the condition is resolved.
-- [ ] If blockage/recovery state is derived from already-saved data, add tests proving save/load restores it correctly. If new persistence is needed, add only the smallest required state. If persistence is premature, document the deferral in a TODO note.
-- [ ] Add tests for blocked → recovered transitions, readout clearing, and the chosen persistence boundary.
+- [x] Use a current action to clear the blockage: dropping/returning supply, restoring a signpost, delivering a part, or clearing a held output.
+- [x] Show recovery through the same objects that showed the blockage, such as `FLOW: CLEAR` or restored normal labels.
+- [x] Ensure stale blockage text clears when the condition is resolved.
+- [x] If blockage/recovery state is derived from already-saved data, add tests proving save/load restores it correctly. If new persistence is needed, add only the smallest required state. If persistence is premature, document the deferral in a TODO note.
+- [x] Add tests for blocked → recovered transitions, readout clearing, and the chosen persistence boundary.
+
+TODO note: active route blockage remains derived from saved spoofed signpost state. Recovery acknowledgement (`FLOW: CLEAR`) is local volatile readout state after a restore action; saving/loading a restored route returns to normal clear route labels without adding event-history persistence.
 
 Acceptance:
 
-- [ ] The player can restore the flow without resetting the world.
-- [ ] Recovery is visible through inspection without a separate log or journal.
-- [ ] Save/load behavior is explicit and deterministic for current scope.
-- [ ] No repair minigame, management command, or generalized event/history system is introduced.
-- [ ] The roadmap can move toward local risk or hidden-system clues without ambiguity.
+- [x] The player can restore the flow without resetting the world.
+- [x] Recovery is visible through inspection without a separate log or journal.
+- [x] Save/load behavior is explicit and deterministic for current scope.
+- [x] No repair minigame, management command, or generalized event/history system is introduced.
+- [x] The roadmap can move toward local risk or hidden-system clues without ambiguity.
 
 ## Still Deferred
 
