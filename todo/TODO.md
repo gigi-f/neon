@@ -35,10 +35,10 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 ## Current Runtime Shape
 
 - Authored sandbox scope: one player, one housing building, one workplace building, one supply building, one market site, derived lit pedestrian paths/signposts, and at most one config-driven fixed worker.
-- Core verbs: `E` enters/exits sites and applies carried items to housing/workplace state; `F` picks up or drops the single carried object; `SPACE` inspects nearby buildings, paths, signposts, and worker targets; `G` runs `MOTHER'S DEBUGGER`; `Shift+G` spoofs/restores route signposts or disrupts/restores the workplace/supply dependency; `F5`/`F9` save/load the tiny current scope.
+- Core verbs: `E` enters/exits sites and applies carried items to housing/workplace state; `F` picks up or drops the single carried object; `SPACE` runs Debugger inspection on nearby buildings, paths, signposts, and worker targets; `G` uses the Interference Torch to spoof/restore route signposts or disrupt/restore the workplace/supply dependency; `F5`/`F9` save/load the tiny current scope.
 - Production loop: player and worker both operate the same `SUPPLY` -> stocked bench -> output-ready bench -> carried `PART` -> improved housing chain, with item labels derived from the carried kind.
 - Worker loop: the fixed worker follows derived pedestrian paths through supply, workplace, and housing tasks; route endpoints expose readable `TO ...`, `LABOR ROUTE`, `SUPPLY ROUTE`, and carried-flow labels.
-- Hidden-system surface: the debugger reveals labor pressure, route quota, site purpose, market access, dependency state, expected cargo, and access details, but scan memory remains volatile HUD-only state.
+- Hidden-system surface: Debugger inspection reveals labor pressure, route quota, site purpose, market access, dependency state, expected cargo, and access details, but scan memory remains volatile HUD-only state.
 - Interference loop: spoofed signposts and disrupted dependencies are inspectable, pause affected worker/supply flow, show local `FLOW: BLOCKED` or `SUPPLY FLOW: DISRUPTED` readouts, and persist active blockage state through tiny save/load; restored routes show local `FLOW: CLEAR`, with recovery acknowledgement intentionally volatile.
 
 ## Session: Witnessed Interruption
@@ -71,7 +71,7 @@ Logical next step: give the player one current-scope way to reduce the local con
   - The line identifies only current-scope cause and target; it does not infer motives, crimes, or citywide consequences.
   - Acceptance: readouts clear when no local suspicion exists; tests cover worker and building readout boundaries.
 - [ ] Phase 74: Add debugger view of local suspicion.
-  - `G` on the worker, affected workplace, or affected route reveals the local witness record and the current suspected cause.
+  - `SPACE` on the worker, affected workplace, or affected route reveals the local witness record and the current suspected cause through Debugger inspection.
   - The debugger distinguishes active flow blockage from lingering local suspicion.
   - Acceptance: volatile last-result HUD behavior remains unchanged; tests cover debugger output for theft, tampering, and no-suspicion cases.
 
@@ -94,7 +94,7 @@ Logical next step: once de-escalation exists, decide exactly which suspicion sta
 - [ ] Phase 77: Add one bounded hiding option.
   - Let the player hide the carried suspicious item inside housing with `E`, marking it hidden from the current worker's immediate concern while keeping it inspectable/debuggable.
   - The hidden state should be local to the tiny current scope and avoid inventory expansion.
-  - Acceptance: hidden item state is visible through housing inspection/debugger; tests cover hiding only when carrying the suspected item.
+  - Acceptance: hidden item state is visible through housing inspection/Debugger inspection; tests cover hiding only when carrying the suspected item.
 
 ## Session: Suspicion Persistence
 
@@ -126,7 +126,7 @@ Logical next step: choose the next foreshadowed system only after the player has
   - The fragment appears only after a relevant local suspicion or de-escalation state exists.
   - Acceptance: the fragment is tied to existing workplace state and does not add faction AI, economy simulation, or surveillance networks.
 - [ ] Phase 81: Add a player verb to recover the fragment.
-  - Let the player use `G` on the affected workplace to recover the log fragment into the volatile debugger result.
+  - Let the player use `SPACE` on the affected workplace to recover the log fragment into the volatile Debugger result.
   - The recovered text should be short, literal, and separate from live world speech.
   - Acceptance: the same target without a qualifying local state reports no fragment; tests cover qualifying and non-qualifying scans.
 - [ ] Phase 82: Add a local consequence clue.

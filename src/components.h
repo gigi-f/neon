@@ -116,10 +116,16 @@ struct PlayerComponent {
     Entity carried_object = MAX_ENTITIES;
 };
 
+enum class InheritedGadgetResultKind {
+    DEBUGGER,
+    INTERFERENCE_TORCH
+};
+
 struct InheritedGadgetComponent {
     bool available = true;
     std::string label = "MOTHER'S DEBUGGER";
     std::string last_result;
+    InheritedGadgetResultKind last_result_kind = InheritedGadgetResultKind::DEBUGGER;
 };
 
 struct CarryableComponent {

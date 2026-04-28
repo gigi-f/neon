@@ -1,7 +1,7 @@
 # route-purpose-readouts Specification
 
 ## Purpose
-Make derived pedestrian routes readable through path inspection, route signposts, and inherited debugger scans without adding a planner, minimap, traffic system, or extra route state.
+Make derived pedestrian routes readable through path inspection, route signposts, and `SPACE` Debugger inspection without adding a planner, minimap, traffic system, or extra route state.
 ## Requirements
 ### Requirement: Derived path route purpose
 The system SHALL derive readable route purpose labels from pedestrian path endpoint roles.
@@ -30,14 +30,14 @@ The system SHALL include route purpose and carried-flow text in ordinary signpos
 - **THEN** its readout SHALL clear corrupted carried-flow text and show restored clear signal text
 
 ### Requirement: Debugger route scan enrichment
-The system SHALL expose richer route detail through the inherited debugger scan than ordinary inspection shows.
+The system SHALL expose richer route detail through `SPACE` Debugger inspection than ordinary inspection shows.
 
-#### Scenario: Debugger scans a path
-- **WHEN** the debugger scans a pedestrian path
+#### Scenario: Debugger inspects a path
+- **WHEN** the Debugger inspects a pedestrian path
 - **THEN** the result SHALL include route purpose, expected cargo, and access detail
 
-#### Scenario: Debugger scans a signpost
-- **WHEN** the debugger scans a route signpost
+#### Scenario: Debugger inspects a signpost
+- **WHEN** the Debugger inspects a route signpost
 - **THEN** the result SHALL include route purpose, expected cargo, access detail, and target role
 
 ### Requirement: Local flow consequence from spoofed route
@@ -102,4 +102,3 @@ The system SHALL persist active spoofed route blockages through the current tiny
 - **WHEN** a route signpost is restored before tiny save state is restored
 - **THEN** the affected signpost and path readouts SHALL not include stale `FLOW: BLOCKED`
 - **AND** they SHALL expose normal clear route labels without requiring new recovery event state
-

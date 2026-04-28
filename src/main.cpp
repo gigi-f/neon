@@ -213,6 +213,11 @@ static void performInspection(Registry& registry, Entity player, float range_wu)
     inspection.has_result = true;
 }
 
+static void performDebuggerInspection(Registry& registry, Entity player, float range_wu) {
+    performInspection(registry, player, range_wu);
+    useInheritedGadget(registry, player, range_wu);
+}
+
 static const char* locationStateName(PlayerLocationState state) {
     switch (state) {
         case PlayerLocationState::OUTSIDE: return "OUTSIDE";
@@ -673,14 +678,10 @@ int main(int, char**) {
                 }
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_SPACE) {
-                performInspection(registry, player, INSPECTION_RANGE_WU);
+                performDebuggerInspection(registry, player, INSPECTION_RANGE_WU);
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_G) {
-                if ((event.key.keysym.mod & KMOD_SHIFT) != 0) {
-                    useInheritedGadgetSpoof(registry, player, INSPECTION_RANGE_WU);
-                } else {
-                    useInheritedGadget(registry, player, INSPECTION_RANGE_WU);
-                }
+                useInheritedGadgetSpoof(registry, player, INSPECTION_RANGE_WU);
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F5) {
                 const TinySaveStatus status = saveTinyStateToFile(registry, player, TINY_SAVE_PATH);
@@ -740,7 +741,7 @@ int main(int, char**) {
             float fps = dt > 0.0f ? 1.0f / dt : 0.0f;
             std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + SUPPLY + MARKET + CLINIC + WORKER", fps, registry.entity_count());
             drawText(renderer, font, line, 6, 6, hud, 0.7f);
-            std::snprintf(line, sizeof(line), "WASD MOVE  E ACT/DOORS  F PICK/DROP  SPACE INSPECT  G SCAN  SHIFT+G SPOOF  F5 SAVE  F9 LOAD  CAM:%.0f,%.0f Z:%.2f",
+            std::snprintf(line, sizeof(line), "WASD MOVE  E ACT/DOORS  F PICK/DROP  SPACE DEBUGGER  G INTERFERENCE TORCH  F5 SAVE  F9 LOAD  CAM:%.0f,%.0f Z:%.2f",
                           active_camera.x, active_camera.y, active_camera.scale);
             drawText(renderer, font, line, 6, 20, SDL_Color{110, 190, 230, 220}, 0.65f);
             const PlayerLocationState location_state =
@@ -808,7 +809,7 @@ int main(int, char**) {
             drawText(renderer, font, line, 6, 48, SDL_Color{190, 205, 255, 225}, 0.65f);
             const bool can_inspect = playerInspectionTarget(registry, player, INSPECTION_RANGE_WU).entity != MAX_ENTITIES;
             std::snprintf(line, sizeof(line), "INSPECT:%s",
-                          can_inspect ? "SPACE READ NEARBY" : "NO NEARBY TARGET");
+                          can_inspect ? "SPACE DEBUGGER READ" : "NO NEARBY TARGET");
             drawText(renderer, font, line, 6, 62, SDL_Color{180, 220, 190, 220}, 0.65f);
             if (registry.has<InspectionComponent>(player) &&
                 registry.get<InspectionComponent>(player).has_result) {

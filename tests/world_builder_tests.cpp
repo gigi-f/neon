@@ -1842,16 +1842,16 @@ static void testCommercialSiteDebuggerScanMetadataAndNoTarget() {
 
     assert(playerInspectionTarget(registry, player, 22.0f).type == InspectionTargetType::MARKET);
     assert(inheritedGadgetPromptReadout(registry, player, 22.0f) ==
-           "G USE DEBUGGER ON MARKET");
+           "SPACE DEBUGGER ON MARKET");
     assert(useInheritedGadget(registry, player, 22.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: MARKET PURPOSE: EXCHANGE; ACCESS: RESTRICTED");
+           "DEBUGGER RESULT: MARKET PURPOSE: EXCHANGE; ACCESS: RESTRICTED");
 
     registry.get<TransformComponent>(player) = TransformComponent{4000.0f, 4000.0f, 12.0f, 12.0f};
     assert(inheritedGadgetPromptReadout(registry, player, 22.0f) ==
-           "G USE DEBUGGER: NO SIGNAL");
+           "SPACE DEBUGGER: NO SIGNAL");
     assert(!useInheritedGadget(registry, player, 22.0f));
-    assert(inheritedGadgetResultReadout(registry, player) == "GADGET RESULT: NO SIGNAL");
+    assert(inheritedGadgetResultReadout(registry, player) == "DEBUGGER RESULT: NO SIGNAL");
 }
 
 static void testCommercialSiteObservationOnlyBoundary() {
@@ -2025,10 +2025,10 @@ static void testPublicSiteDebuggerScanMetadata() {
 
     assert(playerInspectionTarget(registry, player, 22.0f).type == InspectionTargetType::CLINIC);
     assert(inheritedGadgetPromptReadout(registry, player, 22.0f) ==
-           "G USE DEBUGGER ON CLINIC");
+           "SPACE DEBUGGER ON CLINIC");
     assert(useInheritedGadget(registry, player, 22.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: CLINIC PURPOSE: PUBLIC HEALTH; SERVICE: RATIONED; AUTHORITY: MUNICIPAL");
+           "DEBUGGER RESULT: CLINIC PURPOSE: PUBLIC HEALTH; SERVICE: RATIONED; AUTHORITY: MUNICIPAL");
 }
 
 static void testPublicSiteBoundaryDoesNotBreakLoop() {
@@ -2250,10 +2250,10 @@ static void testDependencyDebuggerScanEnrichment() {
     assert(enterBuildingInterior(registry, player, workplace));
 
     assert(inheritedGadgetPromptReadout(registry, player, 22.0f) ==
-           "G USE DEBUGGER ON WORKPLACE INTERIOR");
+           "SPACE DEBUGGER ON WORKPLACE INTERIOR");
     assert(useInheritedGadget(registry, player, 22.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: WORKPLACE PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SOURCE: SUPPLY");
+           "DEBUGGER RESULT: WORKPLACE PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SOURCE: SUPPLY");
 }
 
 static void testDependencyReadoutsDoNotMutateLoopState() {
@@ -2327,14 +2327,14 @@ static void testDependencyDisruptionViaDebuggerTogglesReadouts() {
     assert(!dependencyDisrupted(registry));
     assert(inheritedGadgetCanSpoofTarget(playerInspectionTarget(registry, player, 22.0f)));
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
-           "SHIFT+G DISRUPT DEPENDENCY");
+           "G INTERFERENCE TORCH DISRUPT DEPENDENCY");
     assert(useInheritedGadgetSpoof(registry, player, 22.0f));
     assert(dependencyDisrupted(registry));
     assert(!dependencyRecovered(registry));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: DISRUPTED DEPENDENCY: SUPPLY FLOW CONFUSED");
+           "INTERFERENCE TORCH RESULT: DISRUPTED DEPENDENCY: SUPPLY FLOW CONFUSED");
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
-           "SHIFT+G RESTORE DEPENDENCY");
+           "G INTERFERENCE TORCH RESTORE DEPENDENCY");
 
     assert(buildingInspectionReadout(registry, workplace).find("DEPENDENCY: DISRUPTED") !=
            std::string::npos);
@@ -2349,7 +2349,7 @@ static void testDependencyDisruptionViaDebuggerTogglesReadouts() {
     assert(!dependencyDisrupted(registry));
     assert(dependencyRecovered(registry));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: RESTORED DEPENDENCY: SUPPLY FLOW CLEAR");
+           "INTERFERENCE TORCH RESULT: RESTORED DEPENDENCY: SUPPLY FLOW CLEAR");
     assert(buildingInspectionReadout(registry, workplace).find("DEPENDENCY: RESTORED") !=
            std::string::npos);
     assert(dependencyScanReadout(registry, MicroZoneRole::WORKPLACE).find("FLOW STATUS: CLEAR") !=
@@ -2445,7 +2445,7 @@ static void testDependencyDisruptionBoundariesDoNotSpoofRoutesOrUnrelatedSites()
     exitBuildingInterior(registry, player);
     registry.get<TransformComponent>(player) = registry.get<TransformComponent>(clinic);
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
-           "SHIFT+G SPOOF:N/A");
+           "G INTERFERENCE TORCH:N/A");
     assert(!useInheritedGadgetSpoof(registry, player, 22.0f));
     assert(dependencyDisrupted(registry));
 }
@@ -3839,14 +3839,14 @@ static void testInheritedGadgetReadoutAndCarryableBehavior() {
 
     assert(playerHasInheritedGadget(registry, player));
     assert(inheritedGadgetLabel(registry, player) == "MOTHER'S DEBUGGER");
-    assert(inheritedGadgetReadout(registry, player) == "GADGET:MOTHER'S DEBUGGER READY");
-    assert(inheritedGadgetResultReadout(registry, player) == "GADGET RESULT: IDLE");
+    assert(inheritedGadgetReadout(registry, player) == "DEBUGGER:MOTHER'S DEBUGGER READY");
+    assert(inheritedGadgetResultReadout(registry, player) == "DEBUGGER RESULT: IDLE");
 
     assert(playerCanTakeNearbyCarryableObject(registry, player, 18.0f));
     assert(takeNearbyCarryableObject(registry, player, 18.0f));
     assert(registry.get<PlayerComponent>(player).carried_object == object);
     assert(carryableObjectIsKind(registry, object, ItemKind::SUPPLY));
-    assert(inheritedGadgetReadout(registry, player) == "GADGET:MOTHER'S DEBUGGER READY");
+    assert(inheritedGadgetReadout(registry, player) == "DEBUGGER:MOTHER'S DEBUGGER READY");
 }
 
 static void testInheritedGadgetPromptAndNoSignalBehavior() {
@@ -3857,16 +3857,16 @@ static void testInheritedGadgetPromptAndNoSignalBehavior() {
     registry.assign<TransformComponent>(player, 0.0f, 0.0f, 12.0f, 12.0f);
 
     assert(!playerCanUseInheritedGadget(registry, player));
-    assert(inheritedGadgetPromptReadout(registry, player, 18.0f) == "GADGET:NONE");
+    assert(inheritedGadgetPromptReadout(registry, player, 18.0f) == "DEBUGGER:NONE");
 
     registry.assign<InheritedGadgetComponent>(player);
 
     assert(playerCanUseInheritedGadget(registry, player));
     assert(inheritedGadgetPromptReadout(registry, player, 18.0f) ==
-           "G USE DEBUGGER: NO SIGNAL");
-    assert(inheritedGadgetResultReadout(registry, player) == "GADGET RESULT: IDLE");
+           "SPACE DEBUGGER: NO SIGNAL");
+    assert(inheritedGadgetResultReadout(registry, player) == "DEBUGGER RESULT: IDLE");
     assert(!useInheritedGadget(registry, player, 18.0f));
-    assert(inheritedGadgetResultReadout(registry, player) == "GADGET RESULT: NO SIGNAL");
+    assert(inheritedGadgetResultReadout(registry, player) == "DEBUGGER RESULT: NO SIGNAL");
 }
 
 static void testInheritedGadgetTargetResultReplacesPreviousResult() {
@@ -3888,14 +3888,14 @@ static void testInheritedGadgetTargetResultReplacesPreviousResult() {
     registry.assign<TransformComponent>(player, registry.get<TransformComponent>(worker));
 
     assert(inheritedGadgetPromptReadout(registry, player, 18.0f) ==
-           "G USE DEBUGGER ON WORKER");
+           "SPACE DEBUGGER ON WORKER");
     assert(useInheritedGadget(registry, player, 18.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1");
+           "DEBUGGER RESULT: WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1");
 
     registry.get<TransformComponent>(player) = TransformComponent{4000.0f, 4000.0f, 12.0f, 12.0f};
     assert(!useInheritedGadget(registry, player, 18.0f));
-    assert(inheritedGadgetResultReadout(registry, player) == "GADGET RESULT: NO SIGNAL");
+    assert(inheritedGadgetResultReadout(registry, player) == "DEBUGGER RESULT: NO SIGNAL");
 }
 
 static void testInheritedGadgetWorkerScanRevealsHiddenLaborDetail() {
@@ -3922,7 +3922,7 @@ static void testInheritedGadgetWorkerScanRevealsHiddenLaborDetail() {
 
     assert(useInheritedGadget(registry, player, 18.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1");
+           "DEBUGGER RESULT: WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1");
     assert(workerCarryReadout(registry, worker) == ordinary_readout);
 }
 
@@ -3948,7 +3948,7 @@ static void testInheritedGadgetSiteMetadataScan() {
 
     assert(useInheritedGadget(registry, player, 22.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: WORKPLACE PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SOURCE: SUPPLY");
+           "DEBUGGER RESULT: WORKPLACE PURPOSE: PRODUCTION; FUNCTION: CONVERT SUPPLY TO PART; FLOW: MATERIAL; REQUIRED FOR: BENCH STOCK; SOURCE: SUPPLY");
 
     exitBuildingInterior(registry, player);
     auto signposts = registry.view<RouteSignpostComponent, TransformComponent>();
@@ -3983,7 +3983,7 @@ static void testInheritedGadgetInvalidTargetDoesNotAlterWorkerInspection() {
     registry.assign<TransformComponent>(player, 4000.0f, 4000.0f, 12.0f, 12.0f);
 
     assert(!useInheritedGadget(registry, player, 18.0f));
-    assert(inheritedGadgetResultReadout(registry, player) == "GADGET RESULT: NO SIGNAL");
+    assert(inheritedGadgetResultReadout(registry, player) == "DEBUGGER RESULT: NO SIGNAL");
     assert(workerCarryReadout(registry, worker) == ordinary_readout);
 }
 
@@ -4008,17 +4008,17 @@ static void testInheritedGadgetSpoofCandidateSelection() {
 
     assert(!inheritedGadgetCanSpoofTarget(playerInspectionTarget(registry, player, 22.0f)));
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
-           "SHIFT+G SPOOF:N/A");
+           "G INTERFERENCE TORCH:N/A");
     assert(!useInheritedGadgetSpoof(registry, player, 22.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: SPOOF FAILED: SIGNPOST REQUIRED");
+           "INTERFERENCE TORCH RESULT: FAILED: SIGNPOST OR DEPENDENCY REQUIRED");
     assert(!anyRouteSignpostSpoofed(registry));
 
     registry.get<TransformComponent>(player) = registry.get<TransformComponent>(marker);
 
     assert(inheritedGadgetCanSpoofTarget(playerInspectionTarget(registry, player, 22.0f)));
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
-           "SHIFT+G SPOOF SIGNPOST");
+           "G INTERFERENCE TORCH SPOOF SIGNPOST");
     assert(routeSignpostReadout(registry, marker).find("SPOOFED") == std::string::npos);
 }
 
@@ -4045,9 +4045,9 @@ static void testInheritedGadgetSpoofTogglesSignpostConsequence() {
     assert(routeSignpostReadout(registry, marker).find("SPOOFED: ROUTE SIGNAL CONFUSED") !=
            std::string::npos);
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: SPOOFED SIGNPOST: ROUTE SIGNAL CONFUSED");
+           "INTERFERENCE TORCH RESULT: SPOOFED SIGNPOST: ROUTE SIGNAL CONFUSED");
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
-           "SHIFT+G RESTORE SIGNPOST");
+           "G INTERFERENCE TORCH RESTORE SIGNPOST");
     assert(productionLoopSummaryReadout(registry) ==
            "LOOP: SPOOFED; INTERFERENCE: ROUTE; CONSEQUENCE: ROUTE SIGNAL CONFUSED");
 
@@ -4057,7 +4057,7 @@ static void testInheritedGadgetSpoofTogglesSignpostConsequence() {
     assert(routeSignpostReadout(registry, marker).find("RECOVERY: ROUTE SIGNAL CLEAR") !=
            std::string::npos);
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "GADGET RESULT: RESTORED SIGNPOST: ROUTE SIGNAL CLEAR");
+           "INTERFERENCE TORCH RESULT: RESTORED SIGNPOST: ROUTE SIGNAL CLEAR");
     assert(productionLoopSummaryReadout(registry) == "LOOP: RUNNING");
 }
 

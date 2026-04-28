@@ -2548,21 +2548,24 @@ inline std::string inheritedGadgetLabel(Registry& registry, Entity player) {
 
 inline std::string inheritedGadgetReadout(Registry& registry, Entity player) {
     if (!playerHasInheritedGadget(registry, player)) {
-        return "GADGET:NONE";
+        return "DEBUGGER:NONE";
     }
-    return "GADGET:" + inheritedGadgetLabel(registry, player) + " READY";
+    return "DEBUGGER:" + inheritedGadgetLabel(registry, player) + " READY";
 }
 
 inline std::string inheritedGadgetResultReadout(Registry& registry, Entity player) {
     if (!playerHasInheritedGadget(registry, player)) {
-        return "GADGET RESULT: UNAVAILABLE";
+        return "DEBUGGER RESULT: UNAVAILABLE";
     }
 
     const auto& gadget = registry.get<InheritedGadgetComponent>(player);
     if (gadget.last_result.empty()) {
-        return "GADGET RESULT: IDLE";
+        return "DEBUGGER RESULT: IDLE";
     }
-    return "GADGET RESULT: " + gadget.last_result;
+    const char* label = gadget.last_result_kind == InheritedGadgetResultKind::INTERFERENCE_TORCH ?
+        "INTERFERENCE TORCH RESULT: " :
+        "DEBUGGER RESULT: ";
+    return std::string(label) + gadget.last_result;
 }
 
 inline const char* inheritedGadgetTargetLabel(InspectionTargetType type) {
@@ -2699,35 +2702,35 @@ inline std::string inheritedGadgetPromptReadout(Registry& registry,
                                                 Entity player,
                                                 float range_wu) {
     if (!playerHasInheritedGadget(registry, player)) {
-        return "GADGET:NONE";
+        return "DEBUGGER:NONE";
     }
 
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
     if (target.entity == MAX_ENTITIES) {
-        return "G USE DEBUGGER: NO SIGNAL";
+        return "SPACE DEBUGGER: NO SIGNAL";
     }
-    return std::string("G USE DEBUGGER ON ") + inheritedGadgetTargetLabel(target.type);
+    return std::string("SPACE DEBUGGER ON ") + inheritedGadgetTargetLabel(target.type);
 }
 
 inline std::string inheritedGadgetSpoofPromptReadout(Registry& registry,
                                                      Entity player,
                                                      float range_wu) {
     if (!playerHasInheritedGadget(registry, player)) {
-        return "SPOOF:NONE";
+        return "TORCH:NONE";
     }
 
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
     if (!inheritedGadgetCanSpoofTarget(target)) {
-        return "SHIFT+G SPOOF:N/A";
+        return "G INTERFERENCE TORCH:N/A";
     }
     if (inspectionTargetIsDependencyTarget(target)) {
         return dependencyDisrupted(registry) ?
-            "SHIFT+G RESTORE DEPENDENCY" :
-            "SHIFT+G DISRUPT DEPENDENCY";
+            "G INTERFERENCE TORCH RESTORE DEPENDENCY" :
+            "G INTERFERENCE TORCH DISRUPT DEPENDENCY";
     }
     return routeSignpostSpoofed(registry, target.entity) ?
-        "SHIFT+G RESTORE SIGNPOST" :
-        "SHIFT+G SPOOF SIGNPOST";
+        "G INTERFERENCE TORCH RESTORE SIGNPOST" :
+        "G INTERFERENCE TORCH SPOOF SIGNPOST";
 }
 
 inline bool useInheritedGadget(Registry& registry, Entity player, float range_wu) {
@@ -2738,10 +2741,12 @@ inline bool useInheritedGadget(Registry& registry, Entity player, float range_wu
     auto& gadget = registry.get<InheritedGadgetComponent>(player);
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
     if (target.entity == MAX_ENTITIES) {
+        gadget.last_result_kind = InheritedGadgetResultKind::DEBUGGER;
         gadget.last_result = "NO SIGNAL";
         return false;
     }
 
+    gadget.last_result_kind = InheritedGadgetResultKind::DEBUGGER;
     gadget.last_result = inheritedGadgetScanResult(registry, target);
     return true;
 }
@@ -2752,19 +2757,20 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
     }
 
     auto& gadget = registry.get<InheritedGadgetComponent>(player);
+    gadget.last_result_kind = InheritedGadgetResultKind::INTERFERENCE_TORCH;
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
     if (target.entity == MAX_ENTITIES) {
-        gadget.last_result = "SPOOF FAILED: NO SIGNAL";
+        gadget.last_result = "FAILED: NO SIGNAL";
         return false;
     }
     if (!inheritedGadgetCanSpoofTarget(target)) {
-        gadget.last_result = "SPOOF FAILED: SIGNPOST REQUIRED";
+        gadget.last_result = "FAILED: SIGNPOST OR DEPENDENCY REQUIRED";
         return false;
     }
 
     if (inspectionTargetIsDependencyTarget(target)) {
         if (!toggleDependencyDisruption(registry)) {
-            gadget.last_result = "SPOOF FAILED: DEPENDENCY UNRESOLVED";
+            gadget.last_result = "FAILED: DEPENDENCY UNRESOLVED";
             return false;
         }
         gadget.last_result = dependencyDisrupted(registry) ?
@@ -2775,7 +2781,7 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
 
     if (!registry.alive(target.entity) ||
         !registry.has<RouteSignpostComponent>(target.entity)) {
-        gadget.last_result = "SPOOF FAILED: SIGNPOST REQUIRED";
+        gadget.last_result = "FAILED: SIGNPOST REQUIRED";
         return false;
     }
 
