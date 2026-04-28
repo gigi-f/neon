@@ -34,48 +34,105 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 
 ## Current Runtime Shape
 
-- The runtime has one player, one housing building, one workplace building, one supply building, one market site, derived lit pedestrian paths, and at most one fixed worker.
-- The player can enter/exit housing, workplace, and supply with `E` and move in one-room interiors.
-- The player can inspect nearby housing, workplace, supply, market, and path targets with `SPACE`.
-- The player can pick up or drop the single carried object with `F`, including taking it from supply while empty-handed.
-- The player can store carried supply inside housing with `E`, producing `BUILDING SUPPLY: 1/1`.
-- The player can stock the workplace bench with carried supply, producing `WORK BENCH: STOCKED`.
-- The fixed worker is config-driven and moves on the derived pedestrian path.
-- The fixed worker can pick up the single supply object at the supply endpoint, showing `WORKER CARRYING: SUPPLY`.
-- The fixed worker carries supply back along the workplace-supply path and stops at the workplace endpoint.
-- The fixed worker can stock the same workplace bench state the player can stock.
-- The fixed worker can work a stocked workplace bench into `WORK BENCH: OUTPUT READY`.
-- The fixed worker can take the ready workplace output as a carried `PART`.
-- The fixed worker can route the carried `PART` to housing and set `BUILDING IMPROVED: YES`.
-- Derived pedestrian path endpoints have visible signposts that inspect as `TO ...` route labels.
-- The player can save the tiny current-scope state with `F5`, reload it with `F9`, and see readable save/load status in the HUD.
-- The single carried object is modeled with an item kind, currently `SUPPLY`, and player/worker readouts derive labels from that kind.
-- The player can work a stocked workplace bench into `WORK BENCH: OUTPUT READY`.
-- The player can take the ready workplace output as a carried `PART`.
-- The player can deliver the carried `PART` inside housing to set `BUILDING IMPROVED: YES`.
-- The player has `MOTHER'S DEBUGGER` as an always-available inherited gadget, uses it with `G`, and sees a volatile last gadget result in the HUD.
-- The debugger reveals hidden worker labor pressure (`DEBT WORK`, `PAY DOCKED IF STALLED`, and `ROUTE QUOTA: 1`) without changing worker behavior.
-- The debugger reveals static/derived site metadata such as building purpose, market access, and route-carried material.
-- Gadget scan memory is intentionally deferred; the HUD only keeps the current volatile last result.
-- The player can use `Shift+G` on a route signpost to spoof or restore that signpost signal.
-- A spoofed signpost is inspectable and produces `LOOP: SPOOFED; CONSEQUENCE: ROUTE SIGNAL CONFUSED` without changing worker AI yet.
-- A worker on a path with a spoofed signpost shows `BLOCKED: ROUTE SIGNAL CONFUSED` and does not advance until the signpost is restored.
-- Tiny save/load persists spoofed signpost state as current-scope mechanical state.
-- The player can use `Shift+G` on the workplace/supply dependency to disrupt or restore supply flow.
-- A disrupted dependency is inspectable from workplace and supply, appears in debugger scans, and pauses worker supply flow until restored.
-- Pedestrian paths and signposts derive readable route purpose labels such as `LABOR ROUTE` and `SUPPLY ROUTE`.
-- The inherited debugger reveals route expected cargo and access details on path/signpost scans.
-- Spoofed signposts corrupt their carried-flow label, and spoofing the workplace/supply route shows `SUPPLY FLOW: DISRUPTED` on the workplace.
-- Spoofed route signposts now derive an explicit local `FLOW: BLOCKED` label on the affected path/signpost, and restoring the signpost clears it.
-- Restored route signposts now show local `FLOW: CLEAR` recovery on the signpost, path, and affected workplace supply-flow readout; tiny save/load persists active spoofed blockages but treats recovery acknowledgement as volatile.
+- Authored sandbox scope: one player, one housing building, one workplace building, one supply building, one market site, derived lit pedestrian paths/signposts, and at most one config-driven fixed worker.
+- Core verbs: `E` enters/exits sites and applies carried items to housing/workplace state; `F` picks up or drops the single carried object; `SPACE` inspects nearby buildings, paths, signposts, and worker targets; `G` runs `MOTHER'S DEBUGGER`; `Shift+G` spoofs/restores route signposts or disrupts/restores the workplace/supply dependency; `F5`/`F9` save/load the tiny current scope.
+- Production loop: player and worker both operate the same `SUPPLY` -> stocked bench -> output-ready bench -> carried `PART` -> improved housing chain, with item labels derived from the carried kind.
+- Worker loop: the fixed worker follows derived pedestrian paths through supply, workplace, and housing tasks; route endpoints expose readable `TO ...`, `LABOR ROUTE`, `SUPPLY ROUTE`, and carried-flow labels.
+- Hidden-system surface: the debugger reveals labor pressure, route quota, site purpose, market access, dependency state, expected cargo, and access details, but scan memory remains volatile HUD-only state.
+- Interference loop: spoofed signposts and disrupted dependencies are inspectable, pause affected worker/supply flow, show local `FLOW: BLOCKED` or `SUPPLY FLOW: DISRUPTED` readouts, and persist active blockage state through tiny save/load; restored routes show local `FLOW: CLEAR`, with recovery acknowledgement intentionally volatile.
 
-## Next Session Candidate: Local Risk, Not Surveillance Yet
+## Session: Witnessed Interruption
 
-Gameplay outcome: player interference has local risk before any surveillance system exists.
+Gameplay outcome: nearby interference can be noticed locally before any surveillance system exists.
 
-Big Picture: risk should begin with nearby people and systems noticing anomalies, not with a premature global surveillance model. This gives future surveillance something to generalize from later.
+Big Picture: risk starts with people and systems already present in the tiny loop. The worker should notice concrete interference with their expected route or output, not trigger a global wanted model.
 
-Logical next step: split the next session into 2-4 tiny phases that start with one witnessed interruption and one local suspicion readout, then add one current-scope way to hide, return, or de-escalate before considering persistence.
+Logical next step: expose the witnessed state through local worker/building readouts, then give the player a small way to respond.
+
+- [ ] Phase 71: Add witnessed output theft.
+  - If the player takes the ready workplace `PART` while the fixed worker is nearby or assigned to collect it, record a local suspicion event tied to the worker/workplace pair.
+  - Surface an immediate HUD/status line so the player can tell the action was noticed.
+  - Acceptance: unwitnessed pickup remains unchanged; witnessed pickup marks only current-scope local suspicion; tests cover both cases.
+- [ ] Phase 72: Add witnessed route tampering.
+  - If the player spoofs a signpost while the worker is close enough to be affected by the route, record a local suspicion event with a route-tampering cause.
+  - Restoring the signpost clears the flow blockage but does not silently erase that it was witnessed.
+  - Acceptance: no global surveillance, faction, wanted-level, or NPC pursuit state is introduced; tests cover witnessed route tampering and restoration.
+
+## Session: Local Suspicion Readout
+
+Gameplay outcome: local suspicion is readable, bounded, and tied to the place where the player caused it.
+
+Big Picture: suspicion should be inspectable like every other hidden-system hint. The player should understand who noticed, what they noticed, and what object or route is involved.
+
+Logical next step: give the player one current-scope way to reduce the local concern without adding a broad stealth system.
+
+- [ ] Phase 73: Add worker and workplace suspicion inspection.
+  - `SPACE` on the worker and affected workplace shows a compact local suspicion line such as `SUSPICION: MISSING PART` or `SUSPICION: ROUTE TAMPERING`.
+  - The line identifies only current-scope cause and target; it does not infer motives, crimes, or citywide consequences.
+  - Acceptance: readouts clear when no local suspicion exists; tests cover worker and building readout boundaries.
+- [ ] Phase 74: Add debugger view of local suspicion.
+  - `G` on the worker, affected workplace, or affected route reveals the local witness record and the current suspected cause.
+  - The debugger distinguishes active flow blockage from lingering local suspicion.
+  - Acceptance: volatile last-result HUD behavior remains unchanged; tests cover debugger output for theft, tampering, and no-suspicion cases.
+
+## Session: Hiding Or De-escalation
+
+Gameplay outcome: the player has one small response to local suspicion besides walking away.
+
+Big Picture: this should be a tiny player-facing pressure valve, not a stealth overhaul. Returning, hiding, or correcting the specific anomaly is enough for now.
+
+Logical next step: once de-escalation exists, decide exactly which suspicion state should persist through save/load.
+
+- [ ] Phase 75: Allow returning a suspicious missing output.
+  - If suspicion came from taking the workplace `PART`, carrying the `PART` back to the workplace lets `E` return it to the expected output/bench state.
+  - Returning the item changes the suspicion readout to a de-escalated local state instead of deleting all evidence instantly.
+  - Acceptance: normal part delivery to housing still works; tests cover return versus housing delivery.
+- [ ] Phase 76: Allow correcting suspicious route tampering.
+  - If suspicion came from route spoofing, restoring the signpost while the worker is not currently blocked changes the suspicion readout to a de-escalated local state.
+  - The route remains mechanically clear and readable as `FLOW: CLEAR`.
+  - Acceptance: restoring an unrelated signpost does not de-escalate the event; tests cover route-scoped correction.
+- [ ] Phase 77: Add one bounded hiding option.
+  - Let the player hide the carried suspicious item inside housing with `E`, marking it hidden from the current worker's immediate concern while keeping it inspectable/debuggable.
+  - The hidden state should be local to the tiny current scope and avoid inventory expansion.
+  - Acceptance: hidden item state is visible through housing inspection/debugger; tests cover hiding only when carrying the suspected item.
+
+## Session: Suspicion Persistence
+
+Gameplay outcome: tiny save/load preserves the local risk state that matters and drops only volatile acknowledgement text.
+
+Big Picture: persistence should prove the boundary before larger surveillance exists. Active local suspicion and de-escalated local suspicion are mechanical; one-frame HUD explanations are not.
+
+Logical next step: after local suspicion survives a save boundary, start adding small traces of larger institutions without making them active systems.
+
+- [ ] Phase 78: Persist active local suspicion.
+  - Extend tiny save/load so active witnessed theft or route-tampering suspicion survives reload with the same cause and target.
+  - Preserve only current-scope fields needed by readouts and mechanics.
+  - Acceptance: active local suspicion round-trips; volatile HUD last-result text still does not become persistent state.
+- [ ] Phase 79: Persist de-escalated local suspicion boundary.
+  - Save/load preserves de-escalated local suspicion as a quieter readout while not re-triggering the original witnessed HUD/status event.
+  - Corrected flow and returned/hidden item states remain mechanically consistent after reload.
+  - Acceptance: tests cover active suspicion, de-escalated suspicion, and no-suspicion round trips.
+
+## Session: Institutional Log Fragment
+
+Gameplay outcome: the player can uncover one local trace of a larger system without activating that larger system yet.
+
+Big Picture: hidden systems should be foreshadowed through repeated local hooks. A log fragment can point toward audits, debt, or surveillance while staying deterministic and attached to existing buildings.
+
+Logical next step: choose the next foreshadowed system only after the player has a repeated reason to care about the fragment.
+
+- [ ] Phase 80: Add one workplace log fragment.
+  - Add a deterministic institutional log fragment to the current workplace that references local output, route, or bench anomalies.
+  - The fragment appears only after a relevant local suspicion or de-escalation state exists.
+  - Acceptance: the fragment is tied to existing workplace state and does not add faction AI, economy simulation, or surveillance networks.
+- [ ] Phase 81: Add a player verb to recover the fragment.
+  - Let the player use `G` on the affected workplace to recover the log fragment into the volatile debugger result.
+  - The recovered text should be short, literal, and separate from live world speech.
+  - Acceptance: the same target without a qualifying local state reports no fragment; tests cover qualifying and non-qualifying scans.
+- [ ] Phase 82: Add a local consequence clue.
+  - If the player recovers the fragment, affected workplace/worker inspection can show one compact clue such as `AUDIT TRACE: LOCAL ONLY`.
+  - The clue should foreshadow institutional control without adding audits as an active system.
+  - Acceptance: clue state remains current-scope, deterministic, and covered by save/load boundary tests only if the implementation makes it mechanical.
 
 ## Still Deferred
 
