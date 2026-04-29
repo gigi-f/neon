@@ -247,6 +247,10 @@ struct BuildingUseComponent {
     MicroZoneRole role = MicroZoneRole::HOUSING;
 };
 
+struct ClinicAccessLedgerComponent {
+    bool access_spoofed = false;
+};
+
 struct PathComponent {
     PathKind kind = PathKind::PEDESTRIAN;
     Entity from = MAX_ENTITIES;

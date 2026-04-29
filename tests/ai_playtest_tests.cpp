@@ -80,6 +80,33 @@ static void testSuspicionFixtureLetsAiExerciseWageSpoofLoop() {
     assert(after.find("DOCK RISK: CLEARED") != std::string::npos);
 }
 
+static void testSuspicionFixtureExposesClinicAccessLedgerLoop() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session, AiPlaytestScenario::SUSPICION));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
+    const std::string flagged = aiPlaytestSnapshot(session);
+    assert(flagged.find("TARGET: CLINIC") != std::string::npos);
+    assert(flagged.find("CLINIC LEDGER: WORK RECORD FLAGGED") != std::string::npos);
+    assert(flagged.find("G INTERFERENCE TORCH SPOOF CLINIC ACCESS") != std::string::npos);
+    assert(flagged.find("GHOST CLEARANCE") == std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "G", &result));
+    assert(result == "KEY G OK");
+    const std::string spoofed = aiPlaytestSnapshot(session);
+    assert(spoofed.find("INTERFERENCE TORCH RESULT: ON CLINIC") != std::string::npos);
+    assert(spoofed.find("CLINIC ACCESS: GHOST CLEARANCE") != std::string::npos);
+    assert(spoofed.find("G INTERFERENCE TORCH RESTORE CLINIC ACCESS") !=
+           std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "G", &result));
+    assert(result == "KEY G OK");
+    const std::string restored = aiPlaytestSnapshot(session);
+    assert(restored.find("CLINIC LEDGER: WORK RECORD FLAGGED") != std::string::npos);
+    assert(restored.find("GHOST CLEARANCE") == std::string::npos);
+}
+
 static void testPlaytestStateFileRoundTrip() {
     const std::string path = "/tmp/neon_ai_playtest_state_test.txt";
     std::remove(path.c_str());
@@ -106,6 +133,7 @@ int main() {
     testDefaultSnapshotExposesAiReadableState();
     testSyntheticKeysMutateSameGameState();
     testSuspicionFixtureLetsAiExerciseWageSpoofLoop();
+    testSuspicionFixtureExposesClinicAccessLedgerLoop();
     testPlaytestStateFileRoundTrip();
     return 0;
 }

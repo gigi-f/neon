@@ -1368,3 +1368,10 @@ Logical next step: Public Infrastructure Clue — foreshadow city infrastructure
 - [x] When `wage_record_spoofed`, scan shows `WAGE IMPACT: RECORD ALTERED; DOCK RISK: CLEARED` instead of `DOCK RISK: ACTIVE`.
 - [x] `wage_record_spoofed` persists through save/load (save version bumped to V9).
 - [x] Acceptance: spoof gated on record existence; scan readout flips correctly; reversible; save/load round-trip tested.
+
+## Phase 85: Add clinic access ledger scan and spoof target.
+
+- [x] When a worker has a local suspicion/wage record, `SPACE` Debugger inspection on the clinic shows one compact municipal access line: `CLINIC LEDGER: WORK RECORD FLAGGED`.
+- [x] `G` on the clinic toggles exactly one local spoof state, `CLINIC ACCESS: GHOST CLEARANCE`, with reversible spoof/restored last-result messages.
+- [x] The spoof state is visible through clinic ordinary inspection, clinic Debugger inspection, and `neon_ai_playtest` target details.
+- [x] Acceptance: the clinic remains non-enterable; no health, injury, medicine, doctor, appointment, public-works, or faction system is introduced; tests and an interactive terminal playtest cover flagged, spoofed, restored, and no-record cases.

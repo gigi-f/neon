@@ -13,6 +13,9 @@
 
 inline std::string localSuspicionInspectionReadoutForWorker(Registry& registry, Entity worker);
 inline std::string localSuspicionInspectionReadoutForBuilding(Registry& registry, Entity building);
+inline Entity firstLocalSuspicionRecordWorker(Registry& registry);
+inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic);
+inline bool clinicAccessCanSpoof(Registry& registry, Entity clinic);
 
 inline int floorsForRole(MicroZoneRole role) {
     switch (role) {
@@ -177,6 +180,8 @@ inline Entity buildBuildingUnit(Registry& registry,
         registry.assign<BuildingImprovementComponent>(building);
     } else if (role == MicroZoneRole::WORKPLACE) {
         registry.assign<WorkplaceBenchComponent>(building);
+    } else if (role == MicroZoneRole::CLINIC) {
+        registry.assign<ClinicAccessLedgerComponent>(building);
     }
     registry.assign<GlyphComponent>(building, std::string(1, glyphForRole(role)),
         r, g, b, static_cast<uint8_t>(255), 1.0f, true, true);
@@ -1061,6 +1066,12 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
             break;
         case MicroZoneRole::CLINIC:
             readout += "; SITE STATUS: OBSERVATION ONLY";
+            {
+                const std::string ledger = clinicAccessLedgerReadout(registry, building);
+                if (!ledger.empty()) {
+                    readout += "; " + ledger;
+                }
+            }
             break;
     }
     if (roleInDependencyEdge(role)) {
@@ -1533,6 +1544,45 @@ inline Entity firstLocalSuspicionRecordWorker(Registry& registry) {
         }
     }
     return MAX_ENTITIES;
+}
+
+inline bool clinicAccessHasWorkerRecord(Registry& registry) {
+    return firstLocalSuspicionRecordWorker(registry) != MAX_ENTITIES;
+}
+
+inline bool clinicAccessSpoofed(Registry& registry, Entity clinic) {
+    return registry.alive(clinic) &&
+           registry.has<ClinicAccessLedgerComponent>(clinic) &&
+           registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed;
+}
+
+inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic) {
+    if (!registry.alive(clinic) ||
+        !registry.has<ClinicAccessLedgerComponent>(clinic)) {
+        return "";
+    }
+
+    const bool has_record = clinicAccessHasWorkerRecord(registry);
+    const bool spoofed = registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed;
+    if (!has_record && !spoofed) {
+        return "";
+    }
+
+    if (!has_record) {
+        return "CLINIC ACCESS: GHOST CLEARANCE";
+    }
+
+    std::string readout = "CLINIC LEDGER: WORK RECORD FLAGGED";
+    if (spoofed) {
+        readout += "; CLINIC ACCESS: GHOST CLEARANCE";
+    }
+    return readout;
+}
+
+inline bool clinicAccessCanSpoof(Registry& registry, Entity clinic) {
+    return registry.alive(clinic) &&
+           registry.has<ClinicAccessLedgerComponent>(clinic) &&
+           clinicAccessHasWorkerRecord(registry);
 }
 
 inline std::string localSuspicionHudReadout(Registry& registry) {
@@ -3183,11 +3233,17 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
         return readout;
     };
 
-    auto building_scan = [&](MicroZoneRole role) {
+    auto building_scan = [&](MicroZoneRole role, Entity building) {
         std::string readout = buildingPurposeScanReadoutForRole(role);
         const std::string dependency = dependencyScanReadout(registry, role);
         if (!dependency.empty()) {
             readout += "; " + dependency;
+        }
+        if (role == MicroZoneRole::CLINIC) {
+            const std::string ledger = clinicAccessLedgerReadout(registry, building);
+            if (!ledger.empty()) {
+                readout += "; " + ledger;
+            }
         }
         return append_suspicion(readout);
     };
@@ -3195,17 +3251,17 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
     switch (target.type) {
         case InspectionTargetType::HOUSING:
         case InspectionTargetType::HOUSING_INTERIOR:
-            return building_scan(MicroZoneRole::HOUSING);
+            return building_scan(MicroZoneRole::HOUSING, target.entity);
         case InspectionTargetType::WORKPLACE:
         case InspectionTargetType::WORKPLACE_INTERIOR:
-            return building_scan(MicroZoneRole::WORKPLACE);
+            return building_scan(MicroZoneRole::WORKPLACE, target.entity);
         case InspectionTargetType::SUPPLY:
         case InspectionTargetType::SUPPLY_INTERIOR:
-            return building_scan(MicroZoneRole::SUPPLY);
+            return building_scan(MicroZoneRole::SUPPLY, target.entity);
         case InspectionTargetType::MARKET:
-            return building_scan(MicroZoneRole::MARKET);
+            return building_scan(MicroZoneRole::MARKET, target.entity);
         case InspectionTargetType::CLINIC:
-            return building_scan(MicroZoneRole::CLINIC);
+            return building_scan(MicroZoneRole::CLINIC, target.entity);
         case InspectionTargetType::ROUTE_SIGNPOST:
             if (registry.alive(target.entity) && registry.has<RouteSignpostComponent>(target.entity)) {
                 const auto& signpost = registry.get<RouteSignpostComponent>(target.entity);
@@ -3269,6 +3325,9 @@ inline bool inheritedGadgetCanSpoofTarget(Registry& registry,
         inspectionTargetIsDependencyTarget(target)) {
         return true;
     }
+    if (target.type == InspectionTargetType::CLINIC) {
+        return clinicAccessCanSpoof(registry, target.entity);
+    }
     if (target.type == InspectionTargetType::WORKER &&
         registry.alive(target.entity) &&
         registry.has<LocalSuspicionComponent>(target.entity)) {
@@ -3306,6 +3365,11 @@ inline std::string inheritedGadgetSpoofPromptReadout(Registry& registry,
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
     if (!inheritedGadgetCanSpoofTarget(registry, target)) {
         return "G INTERFERENCE TORCH:N/A";
+    }
+    if (target.type == InspectionTargetType::CLINIC) {
+        return clinicAccessSpoofed(registry, target.entity) ?
+            "G INTERFERENCE TORCH RESTORE CLINIC ACCESS" :
+            "G INTERFERENCE TORCH SPOOF CLINIC ACCESS";
     }
     if (inspectionTargetIsDependencyTarget(target)) {
         return dependencyDisrupted(registry) ?
@@ -3360,6 +3424,20 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
     if (!inheritedGadgetCanSpoofTarget(registry, target)) {
         gadget.last_result = "FAILED: SIGNPOST OR DEPENDENCY REQUIRED";
         return false;
+    }
+
+    if (target.type == InspectionTargetType::CLINIC) {
+        if (!registry.alive(target.entity) ||
+            !registry.has<ClinicAccessLedgerComponent>(target.entity)) {
+            gadget.last_result = "FAILED: CLINIC LEDGER LOST";
+            return false;
+        }
+        auto& ledger = registry.get<ClinicAccessLedgerComponent>(target.entity);
+        ledger.access_spoofed = !ledger.access_spoofed;
+        gadget.last_result = ledger.access_spoofed ?
+            "SPOOFED CLINIC ACCESS: GHOST CLEARANCE" :
+            "RESTORED CLINIC ACCESS: WORK RECORD FLAGGED";
+        return true;
     }
 
     if (target.type == InspectionTargetType::WORKER) {

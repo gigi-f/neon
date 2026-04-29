@@ -1945,6 +1945,8 @@ static void testPublicSitePlacementAndInspection() {
     assert(clinic != MAX_ENTITIES);
     assert(registry.get<BuildingUseComponent>(clinic).role == MicroZoneRole::CLINIC);
     assert(!registry.get<BuildingComponent>(clinic).is_enterable);
+    assert(registry.has<ClinicAccessLedgerComponent>(clinic));
+    assert(!registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed);
     assert(!registry.has<ShelterStockComponent>(clinic));
     assert(!registry.has<WorkplaceBenchComponent>(clinic));
     assert(!registry.has<BuildingImprovementComponent>(clinic));
@@ -4107,6 +4109,60 @@ static void setupWitnessedMissingPartSuspicion(Registry& registry,
     assert(localSuspicionActive(registry));
 }
 
+static void setupClinicAccessLedgerSuspicion(Registry& registry,
+                                             Entity& player,
+                                             Entity& worker,
+                                             Entity& clinic) {
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    config.fixed_worker_count = 1;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    const Entity workplace = firstWorkplaceBenchBuilding(registry);
+    worker = firstFixedWorker(registry);
+    const Entity object = firstCarryableObject(registry);
+    clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+    const Entity workplace_supply_path =
+        firstPathBetweenRoles(registry, MicroZoneRole::WORKPLACE, MicroZoneRole::SUPPLY);
+    assert(workplace != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(clinic != MAX_ENTITIES);
+    assert(workplace_supply_path != MAX_ENTITIES);
+
+    auto& worker_component = registry.get<FixedActorComponent>(worker);
+    worker_component.path_entity = workplace_supply_path;
+    worker_component.route_t = routeTForPathEndpoint(registry, workplace_supply_path, workplace);
+    worker_component.direction = 0.0f;
+    registry.get<TransformComponent>(worker) =
+        transformOnPath(registry.get<TransformComponent>(workplace_supply_path),
+                        worker_component.route_t);
+
+    player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    registry.assign<BuildingInteractionComponent>(player);
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    hideCarryableObject(registry, object);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::OUTPUT_READY;
+    assert(takeWorkplaceOutput(registry, player));
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(clinic);
+    assert(localSuspicionActive(registry));
+}
+
 static void setupWitnessedRouteSuspicion(Registry& registry,
                                          Entity& player,
                                          Entity& worker,
@@ -5446,6 +5502,91 @@ static void testTinySaveRoundTripRestoresWageRecordSpoofed() {
     assert(!registry.get<FixedActorComponent>(worker).wage_record_spoofed);
 }
 
+static void testClinicAccessLedgerRequiresWorkerRecord() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    buildWorld(registry, config);
+
+    const Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+    assert(clinic != MAX_ENTITIES);
+    assert(registry.has<ClinicAccessLedgerComponent>(clinic));
+    assert(clinicAccessLedgerReadout(registry, clinic).empty());
+    assert(buildingInspectionReadout(registry, clinic).find("CLINIC LEDGER") ==
+           std::string::npos);
+    assert(inheritedGadgetScanResult(registry,
+                                     InspectionTarget{clinic, InspectionTargetType::CLINIC})
+               .find("CLINIC LEDGER") == std::string::npos);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(clinic));
+    registry.assign<BuildingInteractionComponent>(player);
+
+    assert(!inheritedGadgetCanSpoofTarget(registry,
+                                          playerInspectionTarget(registry, player, 22.0f)));
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "G INTERFERENCE TORCH:N/A");
+    assert(!useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(!registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed);
+}
+
+static void testClinicAccessLedgerShowsFlaggedWorkerRecord() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity clinic = MAX_ENTITIES;
+    setupClinicAccessLedgerSuspicion(registry, player, worker, clinic);
+
+    const std::string ordinary_readout = buildingInspectionReadout(registry, clinic);
+    assert(ordinary_readout.find("CLINIC LEDGER: WORK RECORD FLAGGED") !=
+           std::string::npos);
+    assert(ordinary_readout.find("GHOST CLEARANCE") == std::string::npos);
+
+    const std::string scan =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{clinic, InspectionTargetType::CLINIC});
+    assert(scan.find("CLINIC PURPOSE: PUBLIC HEALTH") != std::string::npos);
+    assert(scan.find("CLINIC LEDGER: WORK RECORD FLAGGED") != std::string::npos);
+    assert(scan.find("GHOST CLEARANCE") == std::string::npos);
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "G INTERFERENCE TORCH SPOOF CLINIC ACCESS");
+    assert(localSuspicionWorkerForWorker(registry, worker) == worker);
+}
+
+static void testClinicAccessLedgerSpoofTogglesReadouts() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity clinic = MAX_ENTITIES;
+    setupClinicAccessLedgerSuspicion(registry, player, worker, clinic);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "INTERFERENCE TORCH RESULT: SPOOFED CLINIC ACCESS: GHOST CLEARANCE");
+    assert(registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed);
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "G INTERFERENCE TORCH RESTORE CLINIC ACCESS");
+    assert(buildingInspectionReadout(registry, clinic).find(
+               "CLINIC ACCESS: GHOST CLEARANCE") != std::string::npos);
+    assert(inheritedGadgetScanResult(registry,
+                                     InspectionTarget{clinic, InspectionTargetType::CLINIC})
+               .find("CLINIC ACCESS: GHOST CLEARANCE") != std::string::npos);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "INTERFERENCE TORCH RESULT: RESTORED CLINIC ACCESS: WORK RECORD FLAGGED");
+    assert(!registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed);
+    const std::string restored_scan =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{clinic, InspectionTargetType::CLINIC});
+    assert(restored_scan.find("CLINIC LEDGER: WORK RECORD FLAGGED") != std::string::npos);
+    assert(restored_scan.find("GHOST CLEARANCE") == std::string::npos);
+    assert(localSuspicionWorkerForWorker(registry, worker) == worker);
+}
+
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
@@ -5575,5 +5716,8 @@ int main() {
     testWorkerWageRecordSpoofRequiresSuspicionRecord();
     testWorkerWageRecordSpoofTogglesClearedReadout();
     testTinySaveRoundTripRestoresWageRecordSpoofed();
+    testClinicAccessLedgerRequiresWorkerRecord();
+    testClinicAccessLedgerShowsFlaggedWorkerRecord();
+    testClinicAccessLedgerSpoofTogglesReadouts();
     return 0;
 }
