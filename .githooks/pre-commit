@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${NEON_SKIP_PLAYTEST_HOOK:-0}" == "1" ]]; then
+    echo "Skipping Neon playtest hook because NEON_SKIP_PLAYTEST_HOOK=1."
+    exit 0
+fi
+
+changed="$(
+    git diff --cached --name-only --diff-filter=ACMR |
+        grep -E '^(src/|tools/ai_playtest.cpp|tests/ai_playtest_tests.cpp|CMakeLists.txt)' || true
+)"
+
+if [[ -z "$changed" ]]; then
+    exit 0
+fi
+
+transcript="${NEON_PLAYTEST_TRANSCRIPT:-.neon_feature_playtest.txt}"
+tools/verify_feature_completion.sh --transcript "$transcript" --check-changed

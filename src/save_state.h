@@ -73,6 +73,7 @@ struct TinySaveState {
     float worker_direction = 1.0f;
     bool worker_acknowledged = false;
     bool worker_carrying = false;
+    bool worker_wage_record_spoofed = false;
 
     std::vector<SavedSpoofedSignpost> spoofed_signposts;
     SavedLocalSuspicion local_suspicion{};
@@ -323,6 +324,7 @@ inline TinySaveState captureTinySaveState(Registry& registry, Entity player) {
         }
         state.worker_acknowledged = worker_component.acknowledged;
         state.worker_carrying = worker_component.carried_object != MAX_ENTITIES;
+        state.worker_wage_record_spoofed = worker_component.wage_record_spoofed;
         if (registry.alive(worker_component.path_entity) &&
             registry.has<PathComponent>(worker_component.path_entity)) {
             const auto& path = registry.get<PathComponent>(worker_component.path_entity);
@@ -406,7 +408,7 @@ inline bool readSavedTransform(std::istream& in, SavedTransform& transform) {
 
 inline std::string serializeTinySaveState(const TinySaveState& state) {
     std::ostringstream out;
-    out << "NEON_TINY_SAVE_V8\n";
+    out << "NEON_TINY_SAVE_V9\n";
     out << "PLAYER ";
     writeSavedTransform(out, state.player);
     out << ' ' << (state.player_carrying ? 1 : 0) << "\n";
@@ -436,7 +438,8 @@ inline std::string serializeTinySaveState(const TinySaveState& state) {
         << state.worker_route_t << ' '
         << state.worker_direction << ' '
         << (state.worker_acknowledged ? 1 : 0) << ' '
-        << (state.worker_carrying ? 1 : 0) << "\n";
+        << (state.worker_carrying ? 1 : 0) << ' '
+        << (state.worker_wage_record_spoofed ? 1 : 0) << "\n";
     out << "SPOOFED_SIGNPOSTS " << state.spoofed_signposts.size() << "\n";
     for (const auto& signpost : state.spoofed_signposts) {
         out << "SPOOFED_SIGNPOST "
@@ -468,10 +471,13 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
 
     std::string tag;
     if (!(in >> tag) ||
-        (tag != "NEON_TINY_SAVE_V7" && tag != "NEON_TINY_SAVE_V8")) {
+        (tag != "NEON_TINY_SAVE_V7" && tag != "NEON_TINY_SAVE_V8" &&
+         tag != "NEON_TINY_SAVE_V9")) {
         return TinySaveStatus::INVALID_FORMAT;
     }
-    const bool has_local_suspicion_record = tag == "NEON_TINY_SAVE_V8";
+    const bool has_local_suspicion_record =
+        tag == "NEON_TINY_SAVE_V8" || tag == "NEON_TINY_SAVE_V9";
+    const bool has_wage_record_field = tag == "NEON_TINY_SAVE_V9";
 
     int flag = 0;
     if (!(in >> tag) || tag != "PLAYER") return TinySaveStatus::INVALID_FORMAT;
@@ -527,6 +533,11 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
     parsed.has_worker = worker_flag != 0;
     parsed.worker_acknowledged = acknowledged_flag != 0;
     parsed.worker_carrying = worker_carrying_flag != 0;
+    if (has_wage_record_field) {
+        int wage_record_flag = 0;
+        if (!(in >> wage_record_flag)) return TinySaveStatus::INVALID_FORMAT;
+        parsed.worker_wage_record_spoofed = wage_record_flag != 0;
+    }
     parsed.worker_route_t = std::clamp(parsed.worker_route_t, 0.0f, 1.0f);
     if (std::fabs(parsed.worker_direction) <= 0.001f) {
         parsed.worker_direction = 0.0f;
@@ -675,6 +686,7 @@ inline TinySaveStatus applyTinySaveState(Registry& registry, Entity player, cons
                 worker_component.direction = state.worker_direction > 0.0f ? 1.0f : -1.0f;
             }
             worker_component.acknowledged = state.worker_acknowledged;
+            worker_component.wage_record_spoofed = state.worker_wage_record_spoofed;
             if (state.worker_carrying && carryable != MAX_ENTITIES) {
                 worker_component.carried_object = carryable;
                 registry.get<TransformComponent>(carryable) =

@@ -41,6 +41,7 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - Hidden-system surface: Debugger inspection reveals labor pressure, route quota, site purpose, market access, dependency state, expected cargo, local suspicion witness detail, recoverable workplace log fragments, and access details, but scan memory remains volatile HUD-only state.
 - Interference loop: spoofed signposts and disrupted dependencies are inspectable, pause affected worker/supply flow, show local `FLOW: BLOCKED` or `SUPPLY FLOW: DISRUPTED` readouts, and persist active blockage state through tiny save/load; restored routes show local `FLOW: CLEAR`, with recovery acknowledgement intentionally volatile.
 - Local risk loop: a worker can witness expected `PART` theft or nearby `G` Interference Torch route tampering, producing a current-scope `LOCAL NOTICE` HUD line; active, returned, corrected, hidden, and audit-traced suspicion states are inspectable and persist through tiny save/load without adding surveillance, wanted level, factions, or pursuit.
+- Wage clue loop: debugger scan of the worker reveals `WAGE IMPACT: INCIDENT LOGGED; DOCK RISK: ACTIVE` when a suspicion record exists; `G` on the worker with a record toggles `wage_record_spoofed`, changing the scan to `DOCK RISK: CLEARED`; spoofed state persists through save/load (V9).
 
 ## Active Sessions
 

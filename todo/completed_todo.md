@@ -1345,3 +1345,26 @@ Logical next step: choose the next foreshadowed system only after the player has
 - [x] If the player recovers the fragment, affected workplace/worker inspection can show one compact clue such as `AUDIT TRACE: LOCAL ONLY`.
 - [x] The clue should foreshadow institutional control without adding audits as an active system.
 - [x] Acceptance: clue state remains current-scope, deterministic, and covered by save/load boundary tests only if the implementation makes it mechanical.
+
+## Completed Session: Worker Debt Or Wage Clue
+
+Gameplay outcome: the debugger scan of the nearby worker reveals wage-debt risk tied to the player's interference record, and the player can spoof that record with the G torch to clear the risk readout — linking the interference loop to the labor loop without adding any new AI or economy simulation.
+
+Big Picture: hidden systems foreshadowing — the wage/debt pressure is not simulated, but its local trace becomes visible as a consequence of the suspicion record and manipulable via the inherited gadget.
+
+Logical next step: Public Infrastructure Clue — foreshadow city infrastructure ownership without building it.
+
+## Phase 83: Dynamic wage scan consequence.
+
+- [x] When `localSuspicionRecordExists` is true for the target worker, `inheritedGadgetWorkerScan` appends `WAGE IMPACT: INCIDENT LOGGED; DOCK RISK: ACTIVE` to the static scan string.
+- [x] When no record exists, scan is unchanged.
+- [x] Acceptance: tests cover scan with and without a suspicion record.
+
+## Phase 84: Wage record spoof verb.
+
+- [x] Add `wage_record_spoofed: bool` (default false) to `FixedActorComponent`.
+- [x] Add WORKER as a valid `inheritedGadgetCanSpoofTarget` only when a suspicion record exists on that worker.
+- [x] G on worker with record toggles `wage_record_spoofed`; spoof result shows `SPOOFED WAGE RECORD: INCIDENT CLEARED`, restore shows `RESTORED WAGE RECORD: INCIDENT ACTIVE`.
+- [x] When `wage_record_spoofed`, scan shows `WAGE IMPACT: RECORD ALTERED; DOCK RISK: CLEARED` instead of `DOCK RISK: ACTIVE`.
+- [x] `wage_record_spoofed` persists through save/load (save version bumped to V9).
+- [x] Acceptance: spoof gated on record existence; scan readout flips correctly; reversible; save/load round-trip tested.

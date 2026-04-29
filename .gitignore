@@ -18,6 +18,8 @@ NeonOubliette
 # Logs and temporary files
 *.log
 *.tmp
+.neon_feature_playtest.txt
+.neon_playtest_state.txt
 
 # IDE/editor settings
 .vscode/

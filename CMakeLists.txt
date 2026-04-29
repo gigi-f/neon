@@ -15,6 +15,11 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)
 
+add_executable(neon_ai_playtest
+    tools/ai_playtest.cpp
+)
+target_include_directories(neon_ai_playtest PRIVATE src)
+
 enable_testing()
 
 add_executable(world_generation_tests
@@ -28,6 +33,12 @@ add_executable(world_builder_tests
 )
 target_include_directories(world_builder_tests PRIVATE src)
 add_test(NAME world_builder_tests COMMAND world_builder_tests)
+
+add_executable(ai_playtest_tests
+    tests/ai_playtest_tests.cpp
+)
+target_include_directories(ai_playtest_tests PRIVATE src)
+add_test(NAME ai_playtest_tests COMMAND ai_playtest_tests)
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

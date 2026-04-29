@@ -969,7 +969,7 @@ static void testCarryableItemKindLabelsAndSaveRoundTrip() {
     assert(workerCarryReadout(registry, worker) == "WORKER ROUTINE: DELIVERING SUPPLY; REASON: WAGE ROUTE; CARRYING: SUPPLY");
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V8") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V9") != std::string::npos);
     assert(serialized.find("CARRYABLE 1 SUPPLY") != std::string::npos);
 
     TinySaveState parsed;
@@ -2325,7 +2325,7 @@ static void testDependencyDisruptionViaDebuggerTogglesReadouts() {
     assert(enterBuildingInterior(registry, player, workplace));
 
     assert(!dependencyDisrupted(registry));
-    assert(inheritedGadgetCanSpoofTarget(playerInspectionTarget(registry, player, 22.0f)));
+    assert(inheritedGadgetCanSpoofTarget(registry, playerInspectionTarget(registry, player, 22.0f)));
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
            "G INTERFERENCE TORCH DISRUPT DEPENDENCY");
     assert(useInheritedGadgetSpoof(registry, player, 22.0f));
@@ -4006,7 +4006,7 @@ static void testInheritedGadgetSpoofCandidateSelection() {
     registry.assign<InheritedGadgetComponent>(player);
     registry.assign<TransformComponent>(player, registry.get<TransformComponent>(housing));
 
-    assert(!inheritedGadgetCanSpoofTarget(playerInspectionTarget(registry, player, 22.0f)));
+    assert(!inheritedGadgetCanSpoofTarget(registry, playerInspectionTarget(registry, player, 22.0f)));
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
            "G INTERFERENCE TORCH:N/A");
     assert(!useInheritedGadgetSpoof(registry, player, 22.0f));
@@ -4016,7 +4016,7 @@ static void testInheritedGadgetSpoofCandidateSelection() {
 
     registry.get<TransformComponent>(player) = registry.get<TransformComponent>(marker);
 
-    assert(inheritedGadgetCanSpoofTarget(playerInspectionTarget(registry, player, 22.0f)));
+    assert(inheritedGadgetCanSpoofTarget(registry, playerInspectionTarget(registry, player, 22.0f)));
     assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
            "G INTERFERENCE TORCH SPOOF SIGNPOST");
     assert(routeSignpostReadout(registry, marker).find("SPOOFED") == std::string::npos);
@@ -5326,6 +5326,126 @@ static void testTinySaveRoundTripRestoresRouteFlowPersistenceBoundary() {
            std::string::npos);
 }
 
+static void testWorkerScanShowsWageImpactWhenSuspicionRecordExists() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(registry, player, worker, workplace, object);
+
+    const std::string scan_with_record =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(scan_with_record.find("WORKER SIGNAL: DEBT WORK") != std::string::npos);
+    assert(scan_with_record.find("WAGE IMPACT: INCIDENT LOGGED") != std::string::npos);
+    assert(scan_with_record.find("DOCK RISK: ACTIVE") != std::string::npos);
+
+    registry.remove<LocalSuspicionComponent>(worker);
+    const std::string scan_no_record =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(scan_no_record.find("WORKER SIGNAL: DEBT WORK") != std::string::npos);
+    assert(scan_no_record.find("WAGE IMPACT") == std::string::npos);
+    assert(scan_no_record.find("DOCK RISK") == std::string::npos);
+}
+
+static void testWorkerWageRecordSpoofRequiresSuspicionRecord() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(registry, player, worker, workplace, object);
+    registry.assign<InheritedGadgetComponent>(player);
+
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(worker);
+
+    assert(inheritedGadgetCanSpoofTarget(registry,
+                                         playerInspectionTarget(registry, player, 22.0f)));
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "G INTERFERENCE TORCH SPOOF WAGE RECORD");
+
+    registry.remove<LocalSuspicionComponent>(worker);
+    assert(!inheritedGadgetCanSpoofTarget(registry,
+                                          playerInspectionTarget(registry, player, 22.0f)));
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "G INTERFERENCE TORCH:N/A");
+}
+
+static void testWorkerWageRecordSpoofTogglesClearedReadout() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(registry, player, worker, workplace, object);
+    registry.assign<InheritedGadgetComponent>(player);
+
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(worker);
+
+    const std::string before_spoof =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(before_spoof.find("DOCK RISK: ACTIVE") != std::string::npos);
+    assert(before_spoof.find("DOCK RISK: CLEARED") == std::string::npos);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "INTERFERENCE TORCH RESULT: SPOOFED WAGE RECORD: INCIDENT CLEARED");
+    assert(registry.get<FixedActorComponent>(worker).wage_record_spoofed);
+    assert(inheritedGadgetSpoofPromptReadout(registry, player, 22.0f) ==
+           "G INTERFERENCE TORCH RESTORE WAGE RECORD");
+
+    const std::string after_spoof =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(after_spoof.find("DOCK RISK: ACTIVE") == std::string::npos);
+    assert(after_spoof.find("DOCK RISK: CLEARED") != std::string::npos);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "INTERFERENCE TORCH RESULT: RESTORED WAGE RECORD: INCIDENT ACTIVE");
+    assert(!registry.get<FixedActorComponent>(worker).wage_record_spoofed);
+
+    const std::string after_restore =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(after_restore.find("DOCK RISK: ACTIVE") != std::string::npos);
+    assert(after_restore.find("DOCK RISK: CLEARED") == std::string::npos);
+}
+
+static void testTinySaveRoundTripRestoresWageRecordSpoofed() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(registry, player, worker, workplace, object);
+
+    registry.get<FixedActorComponent>(worker).wage_record_spoofed = true;
+    const std::string save_text = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(save_text.find("NEON_TINY_SAVE_V9") != std::string::npos);
+
+    TinySaveState state;
+    assert(deserializeTinySaveState(save_text, state) == TinySaveStatus::OK);
+    assert(state.worker_wage_record_spoofed);
+
+    registry.get<FixedActorComponent>(worker).wage_record_spoofed = false;
+    assert(applyTinySaveState(registry, player, state) == TinySaveStatus::OK);
+    assert(registry.get<FixedActorComponent>(worker).wage_record_spoofed);
+
+    registry.get<FixedActorComponent>(worker).wage_record_spoofed = false;
+    const std::string save_text2 = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState state2;
+    assert(deserializeTinySaveState(save_text2, state2) == TinySaveStatus::OK);
+    assert(!state2.worker_wage_record_spoofed);
+    assert(applyTinySaveState(registry, player, state2) == TinySaveStatus::OK);
+    assert(!registry.get<FixedActorComponent>(worker).wage_record_spoofed);
+}
+
 int main() {
     testBuildWorldCreatesOnlyHousingBaseline();
     testConfiguredHousingCountCreatesNonOverlappingBuildings();
@@ -5451,5 +5571,9 @@ int main() {
     testSpoofedRouteSignalConsequenceDoesNotMutateProductionState();
     testTinySaveRoundTripRestoresSpoofedSignpostState();
     testTinySaveRoundTripRestoresRouteFlowPersistenceBoundary();
+    testWorkerScanShowsWageImpactWhenSuspicionRecordExists();
+    testWorkerWageRecordSpoofRequiresSuspicionRecord();
+    testWorkerWageRecordSpoofTogglesClearedReadout();
+    testTinySaveRoundTripRestoresWageRecordSpoofed();
     return 0;
 }

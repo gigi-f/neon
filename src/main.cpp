@@ -658,10 +658,6 @@ int main(int, char**) {
                 }
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_E) {
-                bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
-
-                Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
-
                 if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
                     returnSuspiciousWorkplaceOutput(registry, player);
                 } else if (playerCanHideSuspiciousItemInHousing(registry, player)) {
@@ -674,11 +670,21 @@ int main(int, char**) {
                     stockWorkplaceBench(registry, player);
                 } else if (playerCanWorkWorkplaceBench(registry, player)) {
                     workWorkplaceBench(registry, player);
-                } else if (near_worker != MAX_ENTITIES && !inside) {
-                    auto& actor_comp = registry.get<FixedActorComponent>(near_worker);
-                    actor_comp.acknowledged = !actor_comp.acknowledged;
                 } else {
                     toggleBuildingInteraction(registry, player, BUILDING_INTERACTION_RANGE_WU);
+                }
+            }
+            if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_T) {
+                const bool inside =
+                    registry.has<BuildingInteractionComponent>(player) &&
+                    registry.get<BuildingInteractionComponent>(player).inside_building;
+                const Entity near_worker = nearestWorkerInRange(
+                    registry,
+                    registry.get<TransformComponent>(player),
+                    BUILDING_INTERACTION_RANGE_WU);
+                if (near_worker != MAX_ENTITIES && !inside) {
+                    auto& actor_comp = registry.get<FixedActorComponent>(near_worker);
+                    actor_comp.acknowledged = !actor_comp.acknowledged;
                 }
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_SPACE) {
@@ -745,7 +751,7 @@ int main(int, char**) {
             float fps = dt > 0.0f ? 1.0f / dt : 0.0f;
             std::snprintf(line, sizeof(line), "FPS:%03.0f ENT:%zu BASELINE:PLAYER + HOUSING + WORKPLACE + SUPPLY + MARKET + CLINIC + WORKER", fps, registry.entity_count());
             drawText(renderer, font, line, 6, 6, hud, 0.7f);
-            std::snprintf(line, sizeof(line), "WASD MOVE  E ACT/DOORS  F PICK/DROP  SPACE DEBUGGER  G INTERFERENCE TORCH  F5 SAVE  F9 LOAD  CAM:%.0f,%.0f Z:%.2f",
+            std::snprintf(line, sizeof(line), "WASD MOVE  E ACT/DOORS  T TALK  F PICK/DROP  SPACE DEBUGGER  G INTERFERENCE TORCH  F5 SAVE  F9 LOAD  CAM:%.0f,%.0f Z:%.2f",
                           active_camera.x, active_camera.y, active_camera.scale);
             drawText(renderer, font, line, 6, 20, SDL_Color{110, 190, 230, 220}, 0.65f);
             const PlayerLocationState location_state =
@@ -806,9 +812,10 @@ int main(int, char**) {
                               carryableObjectLabel(registry, near_carryable));
             } else if (near_worker != MAX_ENTITIES && !inside) {
                 bool ack = registry.get<FixedActorComponent>(near_worker).acknowledged;
-                std::snprintf(line, sizeof(line), "LOCATION:%s  E %s  [CARRIED: NONE]",
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s  T %s  [CARRIED: NONE]",
                               locationStateName(location_state),
-                              ack ? "DISMISS WORKER [WORKER ACKNOWLEDGED]" : "ACKNOWLEDGE WORKER");
+                              locationPrompt(location_state),
+                              ack ? "DISMISS WORKER [WORKER ACKNOWLEDGED]" : "TALK WORKER");
             } else {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  %s  [CARRIED: NONE]",
                               locationStateName(location_state),

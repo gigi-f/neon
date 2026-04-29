@@ -3150,11 +3150,21 @@ inline std::string inheritedGadgetWorkerScan(Registry& registry, Entity worker) 
     }
 
     std::string readout = "WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1";
-    const std::string suspicion = localSuspicionDebuggerReadoutForTarget(
+    if (registry.has<LocalSuspicionComponent>(worker)) {
+        const auto& suspicion_comp = registry.get<LocalSuspicionComponent>(worker);
+        if (localSuspicionRecordExists(suspicion_comp)) {
+            if (registry.get<FixedActorComponent>(worker).wage_record_spoofed) {
+                readout += "; WAGE IMPACT: RECORD ALTERED; DOCK RISK: CLEARED";
+            } else {
+                readout += "; WAGE IMPACT: INCIDENT LOGGED; DOCK RISK: ACTIVE";
+            }
+        }
+    }
+    const std::string suspicion_readout = localSuspicionDebuggerReadoutForTarget(
         registry,
         InspectionTarget{worker, InspectionTargetType::WORKER});
-    if (!suspicion.empty()) {
-        readout += "; " + suspicion;
+    if (!suspicion_readout.empty()) {
+        readout += "; " + suspicion_readout;
     }
     return readout;
 }
@@ -3252,10 +3262,20 @@ inline bool inspectionTargetIsDependencyTarget(const InspectionTarget& target) {
     return false;
 }
 
-inline bool inheritedGadgetCanSpoofTarget(const InspectionTarget& target) {
-    return target.entity != MAX_ENTITIES &&
-           (target.type == InspectionTargetType::ROUTE_SIGNPOST ||
-            inspectionTargetIsDependencyTarget(target));
+inline bool inheritedGadgetCanSpoofTarget(Registry& registry,
+                                           const InspectionTarget& target) {
+    if (target.entity == MAX_ENTITIES) return false;
+    if (target.type == InspectionTargetType::ROUTE_SIGNPOST ||
+        inspectionTargetIsDependencyTarget(target)) {
+        return true;
+    }
+    if (target.type == InspectionTargetType::WORKER &&
+        registry.alive(target.entity) &&
+        registry.has<LocalSuspicionComponent>(target.entity)) {
+        return localSuspicionRecordExists(
+            registry.get<LocalSuspicionComponent>(target.entity));
+    }
+    return false;
 }
 
 inline bool playerCanUseInheritedGadget(Registry& registry, Entity player) {
@@ -3284,13 +3304,18 @@ inline std::string inheritedGadgetSpoofPromptReadout(Registry& registry,
     }
 
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
-    if (!inheritedGadgetCanSpoofTarget(target)) {
+    if (!inheritedGadgetCanSpoofTarget(registry, target)) {
         return "G INTERFERENCE TORCH:N/A";
     }
     if (inspectionTargetIsDependencyTarget(target)) {
         return dependencyDisrupted(registry) ?
             "G INTERFERENCE TORCH RESTORE DEPENDENCY" :
             "G INTERFERENCE TORCH DISRUPT DEPENDENCY";
+    }
+    if (target.type == InspectionTargetType::WORKER) {
+        return registry.get<FixedActorComponent>(target.entity).wage_record_spoofed ?
+            "G INTERFERENCE TORCH RESTORE WAGE RECORD" :
+            "G INTERFERENCE TORCH SPOOF WAGE RECORD";
     }
     return routeSignpostSpoofed(registry, target.entity) ?
         "G INTERFERENCE TORCH RESTORE SIGNPOST" :
@@ -3304,6 +3329,8 @@ inline bool useInheritedGadget(Registry& registry, Entity player, float range_wu
 
     auto& gadget = registry.get<InheritedGadgetComponent>(player);
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
+    gadget.last_result_target_entity = target.entity;
+    gadget.last_result_target_type = target.type;
     if (target.entity == MAX_ENTITIES) {
         gadget.last_result_kind = InheritedGadgetResultKind::DEBUGGER;
         gadget.last_result = "NO SIGNAL";
@@ -3324,13 +3351,29 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
     auto& gadget = registry.get<InheritedGadgetComponent>(player);
     gadget.last_result_kind = InheritedGadgetResultKind::INTERFERENCE_TORCH;
     const InspectionTarget target = playerInspectionTarget(registry, player, range_wu);
+    gadget.last_result_target_entity = target.entity;
+    gadget.last_result_target_type = target.type;
     if (target.entity == MAX_ENTITIES) {
         gadget.last_result = "FAILED: NO SIGNAL";
         return false;
     }
-    if (!inheritedGadgetCanSpoofTarget(target)) {
+    if (!inheritedGadgetCanSpoofTarget(registry, target)) {
         gadget.last_result = "FAILED: SIGNPOST OR DEPENDENCY REQUIRED";
         return false;
+    }
+
+    if (target.type == InspectionTargetType::WORKER) {
+        if (!registry.alive(target.entity) ||
+            !registry.has<FixedActorComponent>(target.entity)) {
+            gadget.last_result = "FAILED: WORKER SIGNAL LOST";
+            return false;
+        }
+        auto& actor = registry.get<FixedActorComponent>(target.entity);
+        actor.wage_record_spoofed = !actor.wage_record_spoofed;
+        gadget.last_result = actor.wage_record_spoofed ?
+            "SPOOFED WAGE RECORD: INCIDENT CLEARED" :
+            "RESTORED WAGE RECORD: INCIDENT ACTIVE";
+        return true;
     }
 
     if (inspectionTargetIsDependencyTarget(target)) {

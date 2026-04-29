@@ -139,6 +139,8 @@ struct InheritedGadgetComponent {
     std::string label = "MOTHER'S DEBUGGER";
     std::string last_result;
     InheritedGadgetResultKind last_result_kind = InheritedGadgetResultKind::DEBUGGER;
+    Entity last_result_target_entity = MAX_ENTITIES;
+    InspectionTargetType last_result_target_type = InspectionTargetType::NONE;
 };
 
 struct CarryableComponent {
@@ -186,6 +188,7 @@ struct FixedActorComponent {
     float direction = 1.0f;
     float speed_wu = 24.0f;
     bool acknowledged = false;
+    bool wage_record_spoofed = false;
 };
 
 struct LocalSuspicionComponent {
