@@ -2,12 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 #include "components.h"
 #include "ecs.h"
 #include "world_config.h"
 
 inline int configuredFixedWorkerCount(const WorldConfig& config) {
-    return std::clamp(config.fixed_worker_count, 0, 1);
+    return std::clamp(config.fixed_worker_count, 0, 2);
 }
 
 inline Entity firstPedestrianPath(Registry& registry) {
@@ -190,6 +191,18 @@ inline Entity spawnFixedWorker(Registry& registry, Entity path_entity) {
     return actor;
 }
 
+inline std::vector<Entity> fixedWorkerSpawnPaths(Registry& registry) {
+    std::vector<Entity> paths;
+    auto path_entities = registry.view<PathComponent>();
+    for (Entity path : path_entities) {
+        if (registry.get<PathComponent>(path).kind == PathKind::PEDESTRIAN) {
+            paths.push_back(path);
+        }
+    }
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
 inline size_t spawnFixedActors(Registry& registry, const WorldConfig& config) {
     const int worker_count = configuredFixedWorkerCount(config);
     if (worker_count <= 0) return 0;
@@ -197,12 +210,14 @@ inline size_t spawnFixedActors(Registry& registry, const WorldConfig& config) {
     const auto existing_workers = registry.view<FixedActorComponent>();
     if (existing_workers.size() >= static_cast<size_t>(worker_count)) return 0;
 
-    const Entity path = firstPedestrianPath(registry);
-    if (path == MAX_ENTITIES) return 0;
+    const std::vector<Entity> paths = fixedWorkerSpawnPaths(registry);
+    if (paths.empty()) return 0;
 
     size_t spawned = 0;
     const size_t remaining = static_cast<size_t>(worker_count) - existing_workers.size();
     for (size_t i = 0; i < remaining; ++i) {
+        const size_t path_index = std::min(existing_workers.size() + i, paths.size() - 1);
+        const Entity path = paths[path_index];
         if (spawnFixedWorker(registry, path) != MAX_ENTITIES) {
             ++spawned;
         }

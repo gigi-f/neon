@@ -79,7 +79,7 @@ trap 'rm -f "$HARNESS_STATE" "$HARNESS_SNAPSHOT"' EXIT
 "$BUILD_DIR/neon_ai_playtest" reset default --state "$HARNESS_STATE" >"$HARNESS_SNAPSHOT"
 
 require_file_contains "$HARNESS_SNAPSHOT" "COMMANDS: snapshot | key W/A/S/D/E/F/T/SPACE/G"
-require_file_contains "$HARNESS_SNAPSHOT" "-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ --"
+require_file_contains "$HARNESS_SNAPSHOT" "-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ PHASE:"
 require_file_contains "$HARNESS_SNAPSHOT" "ACTION:"
 require_file_contains "$HARNESS_SNAPSHOT" "TARGET:"
 require_file_contains "$HARNESS_SNAPSHOT" "DEBUGGER_RESULT:"
@@ -100,7 +100,7 @@ fi
 require_file_contains "$TRANSCRIPT" "=== NEON INTERACTIVE PLAYTEST ==="
 require_file_contains "$TRANSCRIPT" "ai>"
 require_file_contains "$TRANSCRIPT" "=== FINAL OUTPUT ==="
-require_file_contains "$TRANSCRIPT" "-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ --"
+require_file_contains "$TRANSCRIPT" "-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ PHASE:"
 require_file_contains "$TRANSCRIPT" "ACTION:"
 require_file_contains "$TRANSCRIPT" "TARGET:"
 require_file_contains "$TRANSCRIPT" "DEBUGGER_RESULT:"

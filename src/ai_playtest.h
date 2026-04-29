@@ -40,8 +40,9 @@ inline WorldConfig makeAiPlaytestConfig() {
     config.market_building_count = 1;
     config.clinic_micro_zone_count = 1;
     config.clinic_building_count = 1;
-    config.fixed_worker_count = 1;
+    config.fixed_worker_count = 2;
     config.carryable_object_count = 1;
+    config.world_phase_interval_seconds = 1.2f;
     return config;
 }
 
@@ -263,6 +264,7 @@ inline bool loadAiPlaytestSession(AiPlaytestSession& session,
 }
 
 inline void advanceAiPlaytestSimulation(Registry& registry, float dt) {
+    advanceWorldPhase(registry, dt);
     updateFixedActors(registry, dt);
     updateWorkerSupplyPickups(registry);
     updateWorkerSupplyDeliveryRoutes(registry, dt);
@@ -422,7 +424,9 @@ inline bool applyAiPlaytestKey(AiPlaytestSession& session,
             session.registry,
             session.registry.get<TransformComponent>(session.player),
             kAiPlaytestInteractionRangeWu);
-        if (near_worker != MAX_ENTITIES && !inside) {
+        if (inside && playerInsideHousingInterior(session.registry, session.player)) {
+            useLayLowInHousing(session.registry, session.player);
+        } else if (near_worker != MAX_ENTITIES && !inside) {
             auto& actor = session.registry.get<FixedActorComponent>(near_worker);
             actor.acknowledged = !actor.acknowledged;
         }
@@ -803,6 +807,8 @@ inline std::string aiPlaytestActionLine(Registry& registry, Entity player) {
     out << "LOCATION:" << aiLocationStateName(location) << " ";
     if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
         out << "E RETURN SUSPECT PART " << workplaceBenchReadout(registry);
+    } else if (playerCanLayLowInHousing(registry, player)) {
+        out << "T LAY LOW " << shelterSupplyReadout(registry);
     } else if (playerCanHideSuspiciousItemInHousing(registry, player)) {
         out << "E HIDE SUSPECT PART";
     } else if (playerCanImproveBuilding(registry, player)) {
@@ -850,9 +856,12 @@ inline std::string aiPlaytestGadgetResultReadout(Registry& registry, Entity play
         return "DEBUGGER RESULT: IDLE";
     }
 
-    const char* label = gadget.last_result_kind == InheritedGadgetResultKind::INTERFERENCE_TORCH ?
-        "INTERFERENCE TORCH RESULT: " :
-        "DEBUGGER RESULT: ";
+    const char* label = "DEBUGGER RESULT: ";
+    if (gadget.last_result_kind == InheritedGadgetResultKind::INTERFERENCE_TORCH) {
+        label = "INTERFERENCE TORCH RESULT: ";
+    } else if (gadget.last_result_kind == InheritedGadgetResultKind::ACTION) {
+        label = "ACTION RESULT: ";
+    }
     std::string result = std::string(label);
     if (gadget.last_result_target_entity != MAX_ENTITIES) {
         result += "ON ";
@@ -901,12 +910,14 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
         << "\n";
     out << "TARGET: " << aiInspectionTargetName(target.type)
         << " entity=" << target.entity << "\n";
-    out << "TARGET_DETAIL: " << aiInspectionDetail(registry, target) << "\n";
+    out << "TARGET_DETAIL: " << worldPhaseReadout(registry) << "; "
+        << aiInspectionDetail(registry, target) << "\n";
     out << "TARGET_DEBUGGER_SCAN: " << inheritedGadgetScanResult(registry, target) << "\n";
     out << "DEBUGGER_RESULT: " << aiPlaytestGadgetResultReadout(registry, player) << "\n";
 
     const std::string local_notice = localSuspicionHudReadout(registry);
     out << "SYSTEMS: " << productionLoopSummaryReadout(registry)
+        << " | " << worldPhaseReadout(registry)
         << " | " << shelterSupplyReadout(registry)
         << " | " << workplaceBenchReadout(registry)
         << " | " << buildingImprovementReadout(registry);
@@ -915,7 +926,8 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
     }
     out << "\n";
 
-    out << "-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ --\n";
+    out << "-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ "
+        << worldPhaseReadout(registry) << " --\n";
     out << "LEGEND: @ player ^v<> facing H housing W workplace S supply M market C clinic "
         << "# solid . path w worker + signpost ! spoofed o object\n";
     for (const std::string& row : aiPlaytestPlayerView(registry, player)) {

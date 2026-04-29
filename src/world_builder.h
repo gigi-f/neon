@@ -379,6 +379,13 @@ inline std::vector<Entity> buildWorld(Registry& registry, const WorldConfig& con
                                             config));
         }
     }
+    if (!macros.empty()) {
+        WorldPhaseComponent phase;
+        phase.phase = config.initial_world_phase;
+        phase.elapsed_seconds = 0.0f;
+        phase.interval_seconds = std::max(1.0f, config.world_phase_interval_seconds);
+        registry.assign<WorldPhaseComponent>(macros.front(), phase);
+    }
 
     if (config.carryable_object_count > 0) {
         const Entity supply = firstWorldBuilderBuildingByRole(registry, MicroZoneRole::SUPPLY);
@@ -427,6 +434,53 @@ inline float aabbDistance(const TransformComponent& a, const TransformComponent&
     const float dx = std::max(0.0f, std::fabs(a.x - b.x) - (a.width + b.width) * 0.5f);
     const float dy = std::max(0.0f, std::fabs(a.y - b.y) - (a.height + b.height) * 0.5f);
     return std::sqrt(dx * dx + dy * dy);
+}
+
+inline Entity worldPhaseEntity(Registry& registry) {
+    auto phases = registry.view<WorldPhaseComponent>();
+    return phases.empty() ? MAX_ENTITIES : phases.front();
+}
+
+inline WorldPhase currentWorldPhase(Registry& registry) {
+    const Entity phase_entity = worldPhaseEntity(registry);
+    if (phase_entity == MAX_ENTITIES) {
+        return WorldPhase::DAY;
+    }
+    return registry.get<WorldPhaseComponent>(phase_entity).phase;
+}
+
+inline const char* worldPhaseName(WorldPhase phase) {
+    switch (phase) {
+        case WorldPhase::DAY: return "DAY";
+        case WorldPhase::NIGHT: return "NIGHT";
+    }
+    return "DAY";
+}
+
+inline std::string worldPhaseReadout(Registry& registry) {
+    const Entity phase_entity = worldPhaseEntity(registry);
+    if (phase_entity == MAX_ENTITIES) {
+        return "PHASE: DAY";
+    }
+    const auto& phase = registry.get<WorldPhaseComponent>(phase_entity);
+    return std::string("PHASE: ") + worldPhaseName(phase.phase) +
+           "; TIME: " + std::to_string(static_cast<int>(phase.elapsed_seconds)) +
+           "/" + std::to_string(static_cast<int>(std::max(1.0f, phase.interval_seconds))) +
+           "s";
+}
+
+inline void advanceWorldPhase(Registry& registry, float dt_seconds) {
+    if (dt_seconds <= 0.0f) return;
+    const Entity phase_entity = worldPhaseEntity(registry);
+    if (phase_entity == MAX_ENTITIES) return;
+
+    auto& phase = registry.get<WorldPhaseComponent>(phase_entity);
+    phase.interval_seconds = std::max(1.0f, phase.interval_seconds);
+    phase.elapsed_seconds += dt_seconds;
+    while (phase.elapsed_seconds >= phase.interval_seconds) {
+        phase.elapsed_seconds -= phase.interval_seconds;
+        phase.phase = phase.phase == WorldPhase::DAY ? WorldPhase::NIGHT : WorldPhase::DAY;
+    }
 }
 
 inline bool carryableObjectIsKind(Registry& registry, Entity object, ItemKind kind);
@@ -1477,6 +1531,8 @@ inline const char* localSuspicionResolutionLabel(LocalSuspicionResolution resolu
             return "CORRECTED";
         case LocalSuspicionResolution::HIDDEN_ITEM:
             return "HIDDEN";
+        case LocalSuspicionResolution::LAID_LOW:
+            return "LAID LOW";
         case LocalSuspicionResolution::NONE:
             return "ACTIVE";
     }
@@ -1554,6 +1610,16 @@ inline bool clinicAccessSpoofed(Registry& registry, Entity clinic) {
     return registry.alive(clinic) &&
            registry.has<ClinicAccessLedgerComponent>(clinic) &&
            registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed;
+}
+
+inline bool anyClinicAccessSpoofed(Registry& registry) {
+    auto ledgers = registry.view<ClinicAccessLedgerComponent>();
+    for (Entity clinic : ledgers) {
+        if (registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed) {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic) {
@@ -1765,6 +1831,33 @@ inline bool workerNearTransform(Registry& registry,
            aabbDistance(registry.get<TransformComponent>(worker), transform) <= range_wu;
 }
 
+inline size_t workersNearTransformCount(Registry& registry,
+                                        const TransformComponent& transform,
+                                        float range_wu) {
+    size_t count = 0;
+    auto workers = registry.view<FixedActorComponent, TransformComponent>();
+    for (Entity worker : workers) {
+        if (registry.get<FixedActorComponent>(worker).kind != FixedActorKind::WORKER) continue;
+        if (aabbDistance(registry.get<TransformComponent>(worker), transform) <= range_wu) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+inline float effectiveLocalWitnessRange(Registry& registry,
+                                        const TransformComponent& event_transform,
+                                        float base_range_wu) {
+    float effective = base_range_wu;
+    if (currentWorldPhase(registry) == WorldPhase::NIGHT) {
+        effective *= 0.5f;
+    }
+    if (workersNearTransformCount(registry, event_transform, effective) >= 2) {
+        effective *= 0.5f;
+    }
+    return effective;
+}
+
 inline Entity workerWitnessingWorkplaceOutputTake(Registry& registry,
                                                   Entity player,
                                                   Entity workplace,
@@ -1776,11 +1869,14 @@ inline Entity workerWitnessingWorkplaceOutputTake(Registry& registry,
 
     const auto& player_transform = registry.get<TransformComponent>(player);
     const auto& workplace_transform = registry.get<TransformComponent>(workplace);
+    const float player_range =
+        effectiveLocalWitnessRange(registry, player_transform, range_wu);
+    const float workplace_range =
+        effectiveLocalWitnessRange(registry, workplace_transform, range_wu);
     auto workers = registry.view<FixedActorComponent>();
     for (Entity worker : workers) {
-        if (workerCanTakeWorkplaceOutput(registry, worker) ||
-            workerNearTransform(registry, worker, player_transform, range_wu) ||
-            workerNearTransform(registry, worker, workplace_transform, range_wu)) {
+        if (workerNearTransform(registry, worker, player_transform, player_range) ||
+            workerNearTransform(registry, worker, workplace_transform, workplace_range)) {
             return worker;
         }
     }
@@ -1798,11 +1894,13 @@ inline Entity workerWitnessingRouteTampering(Registry& registry,
 
     const auto& signpost = registry.get<RouteSignpostComponent>(signpost_entity);
     const auto& signpost_transform = registry.get<TransformComponent>(signpost_entity);
+    const float effective_range =
+        effectiveLocalWitnessRange(registry, signpost_transform, range_wu);
     auto workers = registry.view<FixedActorComponent>();
     for (Entity worker : workers) {
         const auto& actor = registry.get<FixedActorComponent>(worker);
         if (actor.path_entity == signpost.path_entity &&
-            workerNearTransform(registry, worker, signpost_transform, range_wu)) {
+            workerNearTransform(registry, worker, signpost_transform, effective_range)) {
             return worker;
         }
     }
@@ -2870,6 +2968,65 @@ inline bool hideSuspiciousItemInHousing(Registry& registry, Entity player) {
                                     housing);
 }
 
+inline Entity playerHousingInteriorEntity(Registry& registry, Entity player) {
+    if (!playerInsideHousingInterior(registry, player) ||
+        !registry.has<BuildingInteractionComponent>(player)) {
+        return MAX_ENTITIES;
+    }
+    return registry.get<BuildingInteractionComponent>(player).building_entity;
+}
+
+inline bool playerCanLayLowInHousing(Registry& registry, Entity player) {
+    const Entity housing = playerHousingInteriorEntity(registry, player);
+    if (housing == MAX_ENTITIES || !registry.has<ShelterStockComponent>(housing)) {
+        return false;
+    }
+    if (registry.get<ShelterStockComponent>(housing).current_supply <= 0) {
+        return false;
+    }
+    return firstLocalSuspicionWorker(registry) != MAX_ENTITIES;
+}
+
+inline bool useLayLowInHousing(Registry& registry, Entity player) {
+    if (!registry.alive(player) || !registry.has<InheritedGadgetComponent>(player)) {
+        return false;
+    }
+
+    auto& gadget = registry.get<InheritedGadgetComponent>(player);
+    gadget.last_result_kind = InheritedGadgetResultKind::ACTION;
+    gadget.last_result_target_entity = playerHousingInteriorEntity(registry, player);
+    gadget.last_result_target_type = InspectionTargetType::HOUSING_INTERIOR;
+
+    const Entity housing = playerHousingInteriorEntity(registry, player);
+    if (housing == MAX_ENTITIES || !registry.has<ShelterStockComponent>(housing)) {
+        gadget.last_result = "LAY LOW FAILED: HOUSING REQUIRED";
+        return false;
+    }
+
+    const Entity worker = firstLocalSuspicionWorker(registry);
+    if (worker == MAX_ENTITIES) {
+        gadget.last_result = "LAY LOW FAILED: NO ACTIVE LOCAL SUSPICION";
+        return false;
+    }
+
+    auto& shelter = registry.get<ShelterStockComponent>(housing);
+    if (shelter.current_supply <= 0) {
+        gadget.last_result = "LAY LOW FAILED: SHELTER SUPPLY REQUIRED";
+        return false;
+    }
+
+    --shelter.current_supply;
+    if (!deEscalateLocalSuspicion(registry,
+                                  worker,
+                                  LocalSuspicionResolution::LAID_LOW,
+                                  housing)) {
+        gadget.last_result = "LAY LOW FAILED: LOCAL RECORD LOST";
+        return false;
+    }
+    gadget.last_result = "LAY LOW: LOCAL NOTICE QUIETED";
+    return true;
+}
+
 inline bool playerCanImproveBuilding(Registry& registry, Entity player) {
     if (!playerInsideHousingInterior(registry, player) || !registry.has<PlayerComponent>(player)) {
         return false;
@@ -3058,9 +3215,12 @@ inline std::string inheritedGadgetResultReadout(Registry& registry, Entity playe
     if (gadget.last_result.empty()) {
         return "DEBUGGER RESULT: IDLE";
     }
-    const char* label = gadget.last_result_kind == InheritedGadgetResultKind::INTERFERENCE_TORCH ?
-        "INTERFERENCE TORCH RESULT: " :
-        "DEBUGGER RESULT: ";
+    const char* label = "DEBUGGER RESULT: ";
+    if (gadget.last_result_kind == InheritedGadgetResultKind::INTERFERENCE_TORCH) {
+        label = "INTERFERENCE TORCH RESULT: ";
+    } else if (gadget.last_result_kind == InheritedGadgetResultKind::ACTION) {
+        label = "ACTION RESULT: ";
+    }
     return std::string(label) + gadget.last_result;
 }
 
@@ -3207,6 +3367,9 @@ inline std::string inheritedGadgetWorkerScan(Registry& registry, Entity worker) 
                 readout += "; WAGE IMPACT: RECORD ALTERED; DOCK RISK: CLEARED";
             } else {
                 readout += "; WAGE IMPACT: INCIDENT LOGGED; DOCK RISK: ACTIVE";
+            }
+            if (anyClinicAccessSpoofed(registry)) {
+                readout += "; CLINIC ACCESS: GHOST CLEARANCE MISMATCH";
             }
         }
     }

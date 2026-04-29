@@ -118,7 +118,8 @@ struct PlayerComponent {
 
 enum class InheritedGadgetResultKind {
     DEBUGGER,
-    INTERFERENCE_TORCH
+    INTERFERENCE_TORCH,
+    ACTION
 };
 
 enum class LocalSuspicionCause {
@@ -131,7 +132,13 @@ enum class LocalSuspicionResolution {
     NONE,
     RETURNED_OUTPUT,
     CORRECTED_ROUTE,
-    HIDDEN_ITEM
+    HIDDEN_ITEM,
+    LAID_LOW
+};
+
+enum class WorldPhase {
+    DAY,
+    NIGHT
 };
 
 struct InheritedGadgetComponent {
@@ -200,6 +207,12 @@ struct LocalSuspicionComponent {
     Entity path_entity = MAX_ENTITIES;
     Entity resolution_entity = MAX_ENTITIES;
     bool institutional_log_recovered = false;
+};
+
+struct WorldPhaseComponent {
+    WorldPhase phase = WorldPhase::DAY;
+    float elapsed_seconds = 0.0f;
+    float interval_seconds = 240.0f;
 };
 
 struct SolidComponent {

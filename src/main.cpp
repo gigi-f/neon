@@ -590,7 +590,7 @@ int main(int, char**) {
     world_config.market_building_count = 1;
     world_config.clinic_micro_zone_count = 1;
     world_config.clinic_building_count = 1;
-    world_config.fixed_worker_count = 1;
+    world_config.fixed_worker_count = 2;
     world_config.carryable_object_count = 1;
     buildWorld(registry, world_config);
     if (!validateWorld(registry, world_config)) {
@@ -682,7 +682,9 @@ int main(int, char**) {
                     registry,
                     registry.get<TransformComponent>(player),
                     BUILDING_INTERACTION_RANGE_WU);
-                if (near_worker != MAX_ENTITIES && !inside) {
+                if (inside && playerInsideHousingInterior(registry, player)) {
+                    useLayLowInHousing(registry, player);
+                } else if (near_worker != MAX_ENTITIES && !inside) {
                     auto& actor_comp = registry.get<FixedActorComponent>(near_worker);
                     actor_comp.acknowledged = !actor_comp.acknowledged;
                 }
@@ -717,6 +719,7 @@ int main(int, char**) {
 
         const uint8_t* keys = SDL_GetKeyboardState(nullptr);
         updatePlayer(registry, player, dt, keys);
+        advanceWorldPhase(registry, dt);
         updateFixedActors(registry, dt);
         updateWorkerSupplyPickups(registry);
         updateWorkerSupplyDeliveryRoutes(registry, dt);
@@ -766,6 +769,13 @@ int main(int, char**) {
                               locationStateName(location_state),
                               workplaceBenchReadout(registry).c_str(),
                               carryableObjectLabel(registry, player_comp.carried_object));
+            } else if (playerCanLayLowInHousing(registry, player)) {
+                std::snprintf(line, sizeof(line), "LOCATION:%s  T LAY LOW  %s  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              shelterSupplyReadout(registry).c_str(),
+                              player_comp.carried_object != MAX_ENTITIES ?
+                                  carryableObjectLabel(registry, player_comp.carried_object) :
+                                  "NONE");
             } else if (playerCanHideSuspiciousItemInHousing(registry, player)) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  E HIDE SUSPECT PART  [CARRIED: %s]",
                               locationStateName(location_state),
@@ -848,10 +858,11 @@ int main(int, char**) {
                 drawText(renderer, font, workplaceBenchReadout(registry).c_str(), 6, 118, SDL_Color{245, 185, 120, 220}, 0.65f);
             }
             drawText(renderer, font, productionLoopSummaryReadout(registry).c_str(), 6, 132, SDL_Color{235, 170, 210, 220}, 0.65f);
-            drawText(renderer, font, inheritedGadgetResultReadout(registry, player).c_str(), 6, 146, SDL_Color{205, 215, 255, 220}, 0.65f);
+            drawText(renderer, font, worldPhaseReadout(registry).c_str(), 6, 146, SDL_Color{190, 225, 245, 220}, 0.65f);
+            drawText(renderer, font, inheritedGadgetResultReadout(registry, player).c_str(), 6, 160, SDL_Color{205, 215, 255, 220}, 0.65f);
             const std::string local_notice = localSuspicionHudReadout(registry);
             if (!local_notice.empty()) {
-                drawText(renderer, font, local_notice.c_str(), 6, 160, SDL_Color{255, 155, 120, 230}, 0.65f);
+                drawText(renderer, font, local_notice.c_str(), 6, 174, SDL_Color{255, 155, 120, 230}, 0.65f);
             }
         }
 

@@ -1375,3 +1375,39 @@ Logical next step: Public Infrastructure Clue — foreshadow city infrastructure
 - [x] `G` on the clinic toggles exactly one local spoof state, `CLINIC ACCESS: GHOST CLEARANCE`, with reversible spoof/restored last-result messages.
 - [x] The spoof state is visible through clinic ordinary inspection, clinic Debugger inspection, and `neon_ai_playtest` target details.
 - [x] Acceptance: the clinic remains non-enterable; no health, injury, medicine, doctor, appointment, public-works, or faction system is introduced; tests and an interactive terminal playtest cover flagged, spoofed, restored, and no-record cases.
+
+## Phase 86: Connect clinic access to the worker record readout.
+
+- [x] Worker Debugger scan reflects the clinic spoof as a local access mismatch, distinct from the wage-record spoof.
+- [x] Clinic access spoofing does not clear local suspicion, wage/dock risk, route blockage, or workplace audit traces unless the player uses the existing matching verbs.
+- [x] Acceptance: readouts make the difference between `WAGE RECORD`, `CLINIC ACCESS`, and `LOCAL SUSPICION` explicit; AI playtest snapshots expose all three states when present.
+
+## Completed Session: Tense Streets — Cover, Crowds, And Hiding
+
+Gameplay outcome: being witnessed becomes a real risk surface. The player picks *when* and *where* to act, has a place to retreat, and the existing suspicion mechanics gain teeth instead of being more readouts.
+
+Big Picture: the local-risk loop has the bones (witness, suspicion, resolution) but no rhythm and no pressure. Adding a tiny day/night cycle, a second authored worker, and a "lay low" verb in housing turns the existing inspect-and-spoof verbs into stealth-flavored decisions without introducing simulation breadth (no schedules, no NPC AI, no pursuit).
+
+Logical next step: with cover and crowds working, transit can carry the player to a second authored district that mirrors the loop and stress-tests per-district state.
+
+## Phase 87: Add a deterministic day/night phase that modulates witness range.
+
+- [x] Add a `WorldPhaseComponent` carrying a two-state phase (`DAY`, `NIGHT`) and an elapsed-time counter that flips on a configurable interval. No real-time clock, no NPC schedules.
+- [x] At `NIGHT`, the witness range used by `workerWitnessing*` for output theft and route tampering halves.
+- [x] HUD shows a single short `PHASE: DAY|NIGHT` line; AI playtest target detail and map header include the phase.
+- [x] Tiny save/load preserves the current phase and elapsed offset (save version bumped to V10).
+- [x] Acceptance: tests verify the same theft witnessed at `DAY` is not witnessed at `NIGHT` from the same distance; round-trip preserves the phase; one-phase baseline still works.
+
+## Phase 88: Allow a second fixed worker and crowd camouflage.
+
+- [x] Lift the `at most one fixed worker` runtime rule for `WorldConfig`; allow `fixed_worker_count = 2` to spawn a second worker on a distinct route.
+- [x] When two or more workers are inside witness range of an interference event, halve the effective range further (stacks with `NIGHT`).
+- [x] Each worker is independently inspectable; suspicion records remain per-worker; wage/dock state and `wage_record_spoofed` are independent.
+- [x] Acceptance: tests cover the one-worker baseline, two-workers reducing effective witness range, save/load round-tripping both workers; AI playtest snapshots show both worker glyphs on the terminal map.
+
+## Phase 89: Add a "lay low" verb in housing that decays an active suspicion at supply cost.
+
+- [x] Inside housing, `T` consumes exactly one stored shelter `SUPPLY` and decays the active local suspicion to a new `LAID_LOW` resolution; the witness's HUD `LOCAL NOTICE` clears, but the suspicion record persists as inspectable history.
+- [x] If no shelter supply is stored or no suspicion is active, the verb fails with a clear short readout (no resource consumed).
+- [x] `LAID_LOW` is distinct from `RETURNED_OUTPUT`, `CORRECTED_ROUTE`, `HIDDEN_ITEM`: the player keeps the stolen part / spoofed signpost.
+- [x] Acceptance: tests cover lay-low with and without supply, with and without an active record, and across both phases; `LAID_LOW` round-trips through save/load; AI playtest can choose the new prompt and report the result.

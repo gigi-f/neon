@@ -969,7 +969,7 @@ static void testCarryableItemKindLabelsAndSaveRoundTrip() {
     assert(workerCarryReadout(registry, worker) == "WORKER ROUTINE: DELIVERING SUPPLY; REASON: WAGE ROUTE; CARRYING: SUPPLY");
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V9") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V10") != std::string::npos);
     assert(serialized.find("CARRYABLE 1 SUPPLY") != std::string::npos);
 
     TinySaveState parsed;
@@ -4570,7 +4570,8 @@ static void testTinySaveRoundTripRestoresLocalSuspicionStates() {
 
     const std::string active_save =
         serializeTinySaveState(captureTinySaveState(active_registry, player));
-    assert(active_save.find("LOCAL_SUSPICION 1 1 MISSING_PART NONE") != std::string::npos);
+    assert(active_save.find("LOCAL_SUSPICION 0 1 1 MISSING_PART NONE") !=
+           std::string::npos);
 
     TinySaveState active_state;
     assert(deserializeTinySaveState(active_save, active_state) == TinySaveStatus::OK);
@@ -4599,7 +4600,7 @@ static void testTinySaveRoundTripRestoresLocalSuspicionStates() {
     assert(hideSuspiciousItemInHousing(hidden_registry, hidden_player));
     const std::string hidden_save =
         serializeTinySaveState(captureTinySaveState(hidden_registry, hidden_player));
-    assert(hidden_save.find("LOCAL_SUSPICION 1 0 MISSING_PART HIDDEN_ITEM") !=
+    assert(hidden_save.find("LOCAL_SUSPICION 0 1 0 MISSING_PART HIDDEN_ITEM") !=
            std::string::npos);
     TinySaveState hidden_state;
     assert(deserializeTinySaveState(hidden_save, hidden_state) == TinySaveStatus::OK);
@@ -5483,7 +5484,7 @@ static void testTinySaveRoundTripRestoresWageRecordSpoofed() {
 
     registry.get<FixedActorComponent>(worker).wage_record_spoofed = true;
     const std::string save_text = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(save_text.find("NEON_TINY_SAVE_V9") != std::string::npos);
+    assert(save_text.find("NEON_TINY_SAVE_V10") != std::string::npos);
 
     TinySaveState state;
     assert(deserializeTinySaveState(save_text, state) == TinySaveStatus::OK);
@@ -5585,6 +5586,380 @@ static void testClinicAccessLedgerSpoofTogglesReadouts() {
     assert(restored_scan.find("CLINIC LEDGER: WORK RECORD FLAGGED") != std::string::npos);
     assert(restored_scan.find("GHOST CLEARANCE") == std::string::npos);
     assert(localSuspicionWorkerForWorker(registry, worker) == worker);
+}
+
+static void testWorkerScanShowsClinicAccessMismatchWhenClinicSpoofed() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity clinic = MAX_ENTITIES;
+    setupClinicAccessLedgerSuspicion(registry, player, worker, clinic);
+
+    const std::string scan_before =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(scan_before.find("DOCK RISK: ACTIVE") != std::string::npos);
+    assert(scan_before.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") ==
+           std::string::npos);
+
+    registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed = true;
+
+    const std::string scan_spoofed =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(scan_spoofed.find("WAGE IMPACT: INCIDENT LOGGED") != std::string::npos);
+    assert(scan_spoofed.find("DOCK RISK: ACTIVE") != std::string::npos);
+    assert(scan_spoofed.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") !=
+           std::string::npos);
+    assert(scan_spoofed.find("LOCAL WITNESS") != std::string::npos);
+
+    registry.get<FixedActorComponent>(worker).wage_record_spoofed = true;
+    const std::string scan_wage_spoofed =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(scan_wage_spoofed.find("WAGE IMPACT: RECORD ALTERED") != std::string::npos);
+    assert(scan_wage_spoofed.find("DOCK RISK: CLEARED") != std::string::npos);
+    assert(scan_wage_spoofed.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") !=
+           std::string::npos);
+
+    registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed = false;
+    const std::string scan_restored =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(scan_restored.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") ==
+           std::string::npos);
+    assert(scan_restored.find("DOCK RISK: CLEARED") != std::string::npos);
+
+    registry.remove<LocalSuspicionComponent>(worker);
+    registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed = true;
+    const std::string scan_no_record =
+        inheritedGadgetScanResult(registry,
+                                  InspectionTarget{worker, InspectionTargetType::WORKER});
+    assert(scan_no_record.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") ==
+           std::string::npos);
+    assert(scan_no_record.find("DOCK RISK") == std::string::npos);
+}
+
+static void testClinicAccessSpoofPreservesWorkerSuspicionAndWageState() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity clinic = MAX_ENTITIES;
+    setupClinicAccessLedgerSuspicion(registry, player, worker, clinic);
+
+    const auto& suspicion_before = registry.get<LocalSuspicionComponent>(worker);
+    const bool record_before = localSuspicionRecordExists(suspicion_before);
+    const bool wage_before = registry.get<FixedActorComponent>(worker).wage_record_spoofed;
+    const bool log_recovered_before = suspicion_before.institutional_log_recovered;
+    const bool dependency_before = dependencyDisrupted(registry);
+    assert(record_before);
+    assert(!wage_before);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed);
+
+    const auto& suspicion_after_spoof = registry.get<LocalSuspicionComponent>(worker);
+    assert(localSuspicionRecordExists(suspicion_after_spoof) == record_before);
+    assert(suspicion_after_spoof.cause == suspicion_before.cause);
+    assert(suspicion_after_spoof.resolution == suspicion_before.resolution);
+    assert(suspicion_after_spoof.institutional_log_recovered == log_recovered_before);
+    assert(registry.get<FixedActorComponent>(worker).wage_record_spoofed == wage_before);
+    assert(dependencyDisrupted(registry) == dependency_before);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(!registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed);
+
+    const auto& suspicion_after_restore = registry.get<LocalSuspicionComponent>(worker);
+    assert(localSuspicionRecordExists(suspicion_after_restore) == record_before);
+    assert(suspicion_after_restore.cause == suspicion_before.cause);
+    assert(suspicion_after_restore.resolution == suspicion_before.resolution);
+    assert(suspicion_after_restore.institutional_log_recovered == log_recovered_before);
+    assert(registry.get<FixedActorComponent>(worker).wage_record_spoofed == wage_before);
+    assert(dependencyDisrupted(registry) == dependency_before);
+}
+
+static void setWorldPhaseForTest(Registry& registry,
+                                 WorldPhase phase,
+                                 float elapsed_seconds = 0.0f) {
+    const Entity phase_entity = worldPhaseEntity(registry);
+    assert(phase_entity != MAX_ENTITIES);
+    auto& component = registry.get<WorldPhaseComponent>(phase_entity);
+    component.phase = phase;
+    component.elapsed_seconds = elapsed_seconds;
+    component.interval_seconds = 8.0f;
+}
+
+static void setupTheftWitnessRangeFixture(Registry& registry,
+                                          Entity& player,
+                                          Entity& worker,
+                                          Entity& workplace,
+                                          Entity& object,
+                                          int worker_count,
+                                          WorldPhase phase) {
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = worker_count;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+    setWorldPhaseForTest(registry, phase);
+
+    workplace = firstWorkplaceBenchBuilding(registry);
+    worker = firstFixedWorker(registry);
+    object = firstCarryableObject(registry);
+    assert(workplace != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+
+    player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(workplace));
+    assert(enterBuildingInterior(registry, player, workplace));
+
+    hideCarryableObject(registry, object);
+    registry.get<WorkplaceBenchComponent>(workplace).state = WorkplaceBenchState::OUTPUT_READY;
+}
+
+static void placeWorkerAtAabbDistance(Registry& registry,
+                                      Entity worker,
+                                      const TransformComponent& target,
+                                      float distance_wu) {
+    TransformComponent worker_transform = target;
+    worker_transform.width = 10.0f;
+    worker_transform.height = 10.0f;
+    worker_transform.x = target.x + distance_wu + (target.width + worker_transform.width) * 0.5f;
+    registry.get<TransformComponent>(worker) = worker_transform;
+}
+
+static void testWorldPhaseModulatesOutputTheftWitnessRange() {
+    Registry day_registry;
+    Entity day_player = MAX_ENTITIES;
+    Entity day_worker = MAX_ENTITIES;
+    Entity day_workplace = MAX_ENTITIES;
+    Entity day_object = MAX_ENTITIES;
+    setupTheftWitnessRangeFixture(day_registry,
+                                  day_player,
+                                  day_worker,
+                                  day_workplace,
+                                  day_object,
+                                  1,
+                                  WorldPhase::DAY);
+    placeWorkerAtAabbDistance(day_registry,
+                              day_worker,
+                              day_registry.get<TransformComponent>(day_workplace),
+                              16.0f);
+    assert(takeWorkplaceOutput(day_registry, day_player));
+    assert(localSuspicionActive(day_registry));
+    assert(day_registry.get<PlayerComponent>(day_player).carried_object == day_object);
+
+    Registry night_registry;
+    Entity night_player = MAX_ENTITIES;
+    Entity night_worker = MAX_ENTITIES;
+    Entity night_workplace = MAX_ENTITIES;
+    Entity night_object = MAX_ENTITIES;
+    setupTheftWitnessRangeFixture(night_registry,
+                                  night_player,
+                                  night_worker,
+                                  night_workplace,
+                                  night_object,
+                                  1,
+                                  WorldPhase::NIGHT);
+    placeWorkerAtAabbDistance(night_registry,
+                              night_worker,
+                              night_registry.get<TransformComponent>(night_workplace),
+                              16.0f);
+    assert(takeWorkplaceOutput(night_registry, night_player));
+    assert(!localSuspicionActive(night_registry));
+    assert(night_registry.view<LocalSuspicionComponent>().empty());
+    assert(worldPhaseReadout(night_registry).find("PHASE: NIGHT") != std::string::npos);
+}
+
+static void testWorldPhaseUsesElapsedTimeNotFrames() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    buildWorld(registry, config);
+
+    const Entity phase_entity = worldPhaseEntity(registry);
+    assert(phase_entity != MAX_ENTITIES);
+    assert(currentWorldPhase(registry) == WorldPhase::DAY);
+    assert(closeTo(registry.get<WorldPhaseComponent>(phase_entity).interval_seconds, 240.0f));
+
+    for (int i = 0; i < 120; ++i) {
+        advanceWorldPhase(registry, 1.0f / 60.0f);
+    }
+    assert(currentWorldPhase(registry) == WorldPhase::DAY);
+
+    advanceWorldPhase(registry, 238.0f);
+    assert(currentWorldPhase(registry) == WorldPhase::NIGHT);
+}
+
+static void testTwoWorkersCreateCrowdCamouflageAndDistinctRoutes() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity first_worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupTheftWitnessRangeFixture(registry,
+                                  player,
+                                  first_worker,
+                                  workplace,
+                                  object,
+                                  2,
+                                  WorldPhase::DAY);
+
+    const auto workers = fixedWorkersInSaveOrder(registry);
+    assert(workers.size() == 2);
+    assert(registry.get<FixedActorComponent>(workers[0]).path_entity !=
+           registry.get<FixedActorComponent>(workers[1]).path_entity);
+
+    const TransformComponent event_transform = registry.get<TransformComponent>(workplace);
+    placeWorkerAtAabbDistance(registry, workers[0], event_transform, 16.0f);
+    placeWorkerAtAabbDistance(registry, workers[1], event_transform, 16.0f);
+    assert(effectiveLocalWitnessRange(registry, event_transform, kLocalWitnessRangeWu) ==
+           kLocalWitnessRangeWu * 0.5f);
+    assert(takeWorkplaceOutput(registry, player));
+    assert(!localSuspicionActive(registry));
+}
+
+static void testTinySaveRoundTripRestoresWorldPhaseAndTwoWorkers() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.fixed_worker_count = 2;
+    config.carryable_object_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+    setWorldPhaseForTest(registry, WorldPhase::NIGHT, 3);
+
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.assign<TransformComponent>(player, TransformComponent{0, 0, 12, 12});
+
+    auto workers = fixedWorkersInSaveOrder(registry);
+    assert(workers.size() == 2);
+    registry.get<FixedActorComponent>(workers[0]).route_t = 0.25f;
+    registry.get<FixedActorComponent>(workers[0]).direction = 1.0f;
+    registry.get<FixedActorComponent>(workers[0]).wage_record_spoofed = true;
+    registry.get<FixedActorComponent>(workers[1]).route_t = 0.75f;
+    registry.get<FixedActorComponent>(workers[1]).direction = -1.0f;
+    registry.get<FixedActorComponent>(workers[1]).acknowledged = true;
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(serialized.find("NEON_TINY_SAVE_V10") != std::string::npos);
+    assert(serialized.find("WORLD_PHASE NIGHT 3") != std::string::npos);
+    assert(serialized.find("WORKERS 2") != std::string::npos);
+
+    TinySaveState state;
+    assert(deserializeTinySaveState(serialized, state) == TinySaveStatus::OK);
+    registry.get<WorldPhaseComponent>(worldPhaseEntity(registry)).phase = WorldPhase::DAY;
+    registry.get<FixedActorComponent>(workers[0]).route_t = 0.0f;
+    registry.get<FixedActorComponent>(workers[0]).wage_record_spoofed = false;
+    registry.get<FixedActorComponent>(workers[1]).route_t = 0.0f;
+    registry.get<FixedActorComponent>(workers[1]).acknowledged = false;
+    assert(applyTinySaveState(registry, player, state) == TinySaveStatus::OK);
+    workers = fixedWorkersInSaveOrder(registry);
+    assert(currentWorldPhase(registry) == WorldPhase::NIGHT);
+    assert(closeTo(registry.get<WorldPhaseComponent>(worldPhaseEntity(registry)).elapsed_seconds,
+                   3.0f));
+    assert(closeTo(registry.get<FixedActorComponent>(workers[0]).route_t, 0.25f));
+    assert(registry.get<FixedActorComponent>(workers[0]).wage_record_spoofed);
+    assert(closeTo(registry.get<FixedActorComponent>(workers[1]).route_t, 0.75f));
+    assert(registry.get<FixedActorComponent>(workers[1]).acknowledged);
+}
+
+static void testLayLowConsumesSupplyAndPreservesRecord() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(registry, player, worker, workplace, object);
+
+    Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    assert(housing != MAX_ENTITIES);
+    assert(exitBuildingInterior(registry, player));
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(registry, player, housing));
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.get<ShelterStockComponent>(housing).current_supply = 1;
+
+    assert(playerCanLayLowInHousing(registry, player));
+    assert(useLayLowInHousing(registry, player));
+    assert(registry.get<ShelterStockComponent>(housing).current_supply == 0);
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(!localSuspicionActive(registry));
+    const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    assert(suspicion.resolution == LocalSuspicionResolution::LAID_LOW);
+    assert(workerCarryReadout(registry, worker).find("SUSPICION QUIET: LAID LOW MISSING PART") !=
+           std::string::npos);
+    assert(localSuspicionHudReadout(registry).empty());
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "ACTION RESULT: LAY LOW: LOCAL NOTICE QUIETED");
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(serialized.find("LAID_LOW") != std::string::npos);
+    TinySaveState state;
+    assert(deserializeTinySaveState(serialized, state) == TinySaveStatus::OK);
+    registry.remove<LocalSuspicionComponent>(worker);
+    registry.get<ShelterStockComponent>(housing).current_supply = 1;
+    assert(applyTinySaveState(registry, player, state) == TinySaveStatus::OK);
+    assert(registry.get<ShelterStockComponent>(housing).current_supply == 0);
+    assert(registry.get<LocalSuspicionComponent>(worker).resolution ==
+           LocalSuspicionResolution::LAID_LOW);
+}
+
+static void testLayLowFailureCasesAndNightPhase() {
+    Registry no_supply;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity workplace = MAX_ENTITIES;
+    Entity object = MAX_ENTITIES;
+    setupWitnessedMissingPartSuspicion(no_supply, player, worker, workplace, object);
+    Entity housing = firstBuildingByRole(no_supply, MicroZoneRole::HOUSING);
+    assert(housing != MAX_ENTITIES);
+    assert(exitBuildingInterior(no_supply, player));
+    no_supply.get<TransformComponent>(player) = no_supply.get<TransformComponent>(housing);
+    assert(enterBuildingInterior(no_supply, player, housing));
+    no_supply.assign<InheritedGadgetComponent>(player);
+    no_supply.get<ShelterStockComponent>(housing).current_supply = 0;
+    assert(!useLayLowInHousing(no_supply, player));
+    assert(localSuspicionActive(no_supply));
+    assert(inheritedGadgetResultReadout(no_supply, player) ==
+           "ACTION RESULT: LAY LOW FAILED: SHELTER SUPPLY REQUIRED");
+
+    Registry no_suspicion;
+    WorldConfig config = makeSandboxConfig();
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    buildWorld(no_suspicion, config);
+    deriveInfrastructure(no_suspicion, config);
+    setWorldPhaseForTest(no_suspicion, WorldPhase::NIGHT, 2);
+    Entity no_suspicion_housing = firstBuildingByRole(no_suspicion, MicroZoneRole::HOUSING);
+    Entity no_suspicion_player = no_suspicion.create();
+    no_suspicion.assign<PlayerComponent>(no_suspicion_player);
+    no_suspicion.assign<InheritedGadgetComponent>(no_suspicion_player);
+    no_suspicion.assign<BuildingInteractionComponent>(no_suspicion_player);
+    no_suspicion.assign<TransformComponent>(
+        no_suspicion_player,
+        no_suspicion.get<TransformComponent>(no_suspicion_housing));
+    no_suspicion.get<ShelterStockComponent>(no_suspicion_housing).current_supply = 1;
+    assert(enterBuildingInterior(no_suspicion, no_suspicion_player, no_suspicion_housing));
+    assert(!useLayLowInHousing(no_suspicion, no_suspicion_player));
+    assert(no_suspicion.get<ShelterStockComponent>(no_suspicion_housing).current_supply == 1);
+    assert(currentWorldPhase(no_suspicion) == WorldPhase::NIGHT);
+    assert(inheritedGadgetResultReadout(no_suspicion, no_suspicion_player) ==
+           "ACTION RESULT: LAY LOW FAILED: NO ACTIVE LOCAL SUSPICION");
 }
 
 int main() {
@@ -5719,5 +6094,13 @@ int main() {
     testClinicAccessLedgerRequiresWorkerRecord();
     testClinicAccessLedgerShowsFlaggedWorkerRecord();
     testClinicAccessLedgerSpoofTogglesReadouts();
+    testWorkerScanShowsClinicAccessMismatchWhenClinicSpoofed();
+    testClinicAccessSpoofPreservesWorkerSuspicionAndWageState();
+    testWorldPhaseModulatesOutputTheftWitnessRange();
+    testWorldPhaseUsesElapsedTimeNotFrames();
+    testTwoWorkersCreateCrowdCamouflageAndDistinctRoutes();
+    testTinySaveRoundTripRestoresWorldPhaseAndTwoWorkers();
+    testLayLowConsumesSupplyAndPreservesRecord();
+    testLayLowFailureCasesAndNightPhase();
     return 0;
 }

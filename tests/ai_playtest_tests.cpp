@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include <string>
 
 #include "ai_playtest.h"
@@ -14,14 +15,43 @@ static void testDefaultSnapshotExposesAiReadableState() {
     assert(snapshot.find("COMMANDS: snapshot | key W/A/S/D/E/F/T/SPACE/G") != std::string::npos);
     assert(snapshot.find("PLAYER:") != std::string::npos);
     assert(snapshot.find("GADGET:") != std::string::npos);
-    assert(snapshot.find("-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ --") != std::string::npos);
+    assert(snapshot.find("-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ PHASE: DAY") != std::string::npos);
+    assert(snapshot.find("TARGET_DETAIL: PHASE: DAY") != std::string::npos);
     assert(snapshot.find("LEGEND: @ player ^v<> facing") != std::string::npos);
     assert(snapshot.find('@') != std::string::npos);
+    assert(std::count(snapshot.begin(), snapshot.end(), 'w') >= 2);
 
     const auto view = aiPlaytestPlayerView(session.registry, session.player);
     assert(view.size() == 17);
     assert(view[0].size() == 33);
     assert(view[8][16] == '@');
+}
+
+static void testSuspicionFixtureLetsAiLayLowInHousing() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session, AiPlaytestScenario::SUSPICION));
+
+    Entity housing = firstBuildingByRole(session.registry, MicroZoneRole::HOUSING);
+    assert(housing != MAX_ENTITIES);
+    session.registry.get<ShelterStockComponent>(housing).current_supply = 1;
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "HOUSING", &result));
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(result == "KEY E OK");
+    const std::string ready = aiPlaytestSnapshot(session);
+    assert(ready.find("location=\"INSIDE HOUSING\"") != std::string::npos);
+    assert(ready.find("T LAY LOW") != std::string::npos);
+    assert(ready.find("BUILDING SUPPLY: 1/1") != std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "T", &result));
+    assert(result == "KEY T OK");
+    const std::string laid_low = aiPlaytestSnapshot(session);
+    assert(laid_low.find("ACTION RESULT: ON HOUSING INTERIOR") != std::string::npos);
+    assert(laid_low.find("LAY LOW: LOCAL NOTICE QUIETED") != std::string::npos);
+    assert(laid_low.find("BUILDING SUPPLY: 0/1") != std::string::npos);
+    assert(laid_low.find("WORKER SAW MISSING PART") == std::string::npos);
+    assert(laid_low.find("carrying=PART") != std::string::npos);
 }
 
 static void testSyntheticKeysMutateSameGameState() {
@@ -100,6 +130,26 @@ static void testSuspicionFixtureExposesClinicAccessLedgerLoop() {
     assert(spoofed.find("G INTERFERENCE TORCH RESTORE CLINIC ACCESS") !=
            std::string::npos);
 
+    assert(warpAiPlaytestPlayer(session, "WORKER", &result));
+    const std::string worker_mismatch = aiPlaytestSnapshot(session);
+    assert(worker_mismatch.find("TARGET: WORKER") != std::string::npos);
+    assert(worker_mismatch.find("WAGE IMPACT: INCIDENT LOGGED") != std::string::npos);
+    assert(worker_mismatch.find("DOCK RISK: ACTIVE") != std::string::npos);
+    assert(worker_mismatch.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") !=
+           std::string::npos);
+    assert(worker_mismatch.find("LOCAL WITNESS: WORKER") != std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "G", &result));
+    assert(result == "KEY G OK");
+    const std::string worker_wage_spoofed = aiPlaytestSnapshot(session);
+    assert(worker_wage_spoofed.find("TARGET: WORKER") != std::string::npos);
+    assert(worker_wage_spoofed.find("WAGE IMPACT: RECORD ALTERED") != std::string::npos);
+    assert(worker_wage_spoofed.find("DOCK RISK: CLEARED") != std::string::npos);
+    assert(worker_wage_spoofed.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") !=
+           std::string::npos);
+    assert(worker_wage_spoofed.find("LOCAL WITNESS: WORKER") != std::string::npos);
+
+    assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
     assert(applyAiPlaytestKey(session, "G", &result));
     assert(result == "KEY G OK");
     const std::string restored = aiPlaytestSnapshot(session);
@@ -134,6 +184,7 @@ int main() {
     testSyntheticKeysMutateSameGameState();
     testSuspicionFixtureLetsAiExerciseWageSpoofLoop();
     testSuspicionFixtureExposesClinicAccessLedgerLoop();
+    testSuspicionFixtureLetsAiLayLowInHousing();
     testPlaytestStateFileRoundTrip();
     return 0;
 }
