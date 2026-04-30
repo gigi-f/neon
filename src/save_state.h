@@ -99,6 +99,15 @@ struct TinySaveState {
     WorldPhase world_phase = WorldPhase::DAY;
     float world_phase_elapsed_seconds = 0.0f;
     float world_phase_interval_seconds = 240.0f;
+
+    bool in_transit = false;
+    uint64_t transit_origin_station_stable_id = 0;
+    uint64_t transit_destination_station_stable_id = 0;
+    float transit_elapsed_seconds = 0.0f;
+    float transit_stop_interval_seconds = 4.0f;
+    bool transit_doors_open = false;
+    SavedTransform transit_exterior_position{};
+    SavedTransform transit_interior_position{};
 };
 
 inline SavedTransform savedTransformFromTransform(const TransformComponent& transform) {
@@ -374,6 +383,26 @@ inline TinySaveState captureTinySaveState(Registry& registry, Entity player) {
         state.world_phase_interval_seconds = std::max(1.0f, phase.interval_seconds);
     }
 
+    if (registry.has<TransitRideComponent>(player)) {
+        const auto& ride = registry.get<TransitRideComponent>(player);
+        state.in_transit = true;
+        if (registry.alive(ride.origin_station) &&
+            registry.has<StationComponent>(ride.origin_station)) {
+            state.transit_origin_station_stable_id =
+                registry.get<StationComponent>(ride.origin_station).stable_id;
+        }
+        if (registry.alive(ride.destination_station) &&
+            registry.has<StationComponent>(ride.destination_station)) {
+            state.transit_destination_station_stable_id =
+                registry.get<StationComponent>(ride.destination_station).stable_id;
+        }
+        state.transit_elapsed_seconds = std::max(0.0f, ride.elapsed_seconds);
+        state.transit_stop_interval_seconds = std::max(1.0f, ride.stop_interval_seconds);
+        state.transit_doors_open = ride.doors_open;
+        state.transit_exterior_position = savedTransformFromTransform(ride.exterior_position);
+        state.transit_interior_position = savedTransformFromTransform(ride.interior_position);
+    }
+
     const std::vector<Entity> workers = fixedWorkersInSaveOrder(registry);
     for (Entity worker : workers) {
         const auto& worker_component = registry.get<FixedActorComponent>(worker);
@@ -494,7 +523,7 @@ inline bool readSavedTransform(std::istream& in, SavedTransform& transform) {
 
 inline std::string serializeTinySaveState(const TinySaveState& state) {
     std::ostringstream out;
-    out << "NEON_TINY_SAVE_V10\n";
+    out << "NEON_TINY_SAVE_V11\n";
     out << "PLAYER ";
     writeSavedTransform(out, state.player);
     out << ' ' << (state.player_carrying ? 1 : 0) << "\n";
@@ -521,6 +550,17 @@ inline std::string serializeTinySaveState(const TinySaveState& state) {
         << worldPhaseSaveName(state.world_phase) << ' '
         << std::max(0.0f, state.world_phase_elapsed_seconds) << ' '
         << std::max(1.0f, state.world_phase_interval_seconds) << "\n";
+    out << "TRANSIT "
+        << (state.in_transit ? 1 : 0) << ' '
+        << state.transit_origin_station_stable_id << ' '
+        << state.transit_destination_station_stable_id << ' '
+        << std::max(0.0f, state.transit_elapsed_seconds) << ' '
+        << std::max(1.0f, state.transit_stop_interval_seconds) << ' '
+        << (state.transit_doors_open ? 1 : 0) << ' ';
+    writeSavedTransform(out, state.transit_exterior_position);
+    out << ' ';
+    writeSavedTransform(out, state.transit_interior_position);
+    out << "\n";
 
     std::vector<SavedWorker> workers = state.workers;
     if (workers.empty() && state.has_worker) {
@@ -588,16 +628,20 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
     std::string tag;
     if (!(in >> tag) ||
         (tag != "NEON_TINY_SAVE_V7" && tag != "NEON_TINY_SAVE_V8" &&
-         tag != "NEON_TINY_SAVE_V9" && tag != "NEON_TINY_SAVE_V10")) {
+         tag != "NEON_TINY_SAVE_V9" && tag != "NEON_TINY_SAVE_V10" &&
+         tag != "NEON_TINY_SAVE_V11")) {
         return TinySaveStatus::INVALID_FORMAT;
     }
     const bool has_local_suspicion_record =
         tag == "NEON_TINY_SAVE_V8" || tag == "NEON_TINY_SAVE_V9" ||
-        tag == "NEON_TINY_SAVE_V10";
+        tag == "NEON_TINY_SAVE_V10" || tag == "NEON_TINY_SAVE_V11";
     const bool has_wage_record_field = tag == "NEON_TINY_SAVE_V9" ||
-        tag == "NEON_TINY_SAVE_V10";
-    const bool has_world_phase_field = tag == "NEON_TINY_SAVE_V10";
-    const bool has_multi_worker_field = tag == "NEON_TINY_SAVE_V10";
+        tag == "NEON_TINY_SAVE_V10" || tag == "NEON_TINY_SAVE_V11";
+    const bool has_world_phase_field = tag == "NEON_TINY_SAVE_V10" ||
+        tag == "NEON_TINY_SAVE_V11";
+    const bool has_multi_worker_field = tag == "NEON_TINY_SAVE_V10" ||
+        tag == "NEON_TINY_SAVE_V11";
+    const bool has_transit_field = tag == "NEON_TINY_SAVE_V11";
 
     int flag = 0;
     if (!(in >> tag) || tag != "PLAYER") return TinySaveStatus::INVALID_FORMAT;
@@ -654,6 +698,35 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
         parsed.world_phase_elapsed_seconds =
             std::fmod(parsed.world_phase_elapsed_seconds,
                       parsed.world_phase_interval_seconds);
+    }
+
+    if (has_transit_field) {
+        int transit_flag = 0;
+        int doors_flag = 0;
+        if (!(in >> tag) || tag != "TRANSIT") return TinySaveStatus::INVALID_FORMAT;
+        if (!(in >> transit_flag >>
+              parsed.transit_origin_station_stable_id >>
+              parsed.transit_destination_station_stable_id >>
+              parsed.transit_elapsed_seconds >>
+              parsed.transit_stop_interval_seconds >>
+              doors_flag)) {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
+        parsed.in_transit = transit_flag != 0;
+        parsed.transit_doors_open = doors_flag != 0;
+        if (!readSavedTransform(in, parsed.transit_exterior_position)) {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
+        if (!readSavedTransform(in, parsed.transit_interior_position)) {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
+        parsed.transit_stop_interval_seconds = std::max(1.0f, parsed.transit_stop_interval_seconds);
+        parsed.transit_elapsed_seconds = std::clamp(parsed.transit_elapsed_seconds,
+                                                    0.0f,
+                                                    parsed.transit_stop_interval_seconds);
+        if (parsed.transit_elapsed_seconds >= parsed.transit_stop_interval_seconds) {
+            parsed.transit_doors_open = true;
+        }
     }
 
     auto read_worker = [&](SavedWorker& worker) {
@@ -908,6 +981,30 @@ inline TinySaveStatus applyTinySaveState(Registry& registry, Entity player, cons
                       phase.interval_seconds);
     }
 
+    if (registry.has<TransitRideComponent>(player)) {
+        registry.remove<TransitRideComponent>(player);
+    }
+    if (state.in_transit) {
+        const Entity origin =
+            stationByStableId(registry, state.transit_origin_station_stable_id);
+        const Entity destination =
+            stationByStableId(registry, state.transit_destination_station_stable_id);
+        if (origin != MAX_ENTITIES && destination != MAX_ENTITIES) {
+            TransitRideComponent ride;
+            ride.origin_station = origin;
+            ride.destination_station = destination;
+            ride.origin_district_id = registry.get<StationComponent>(origin).district_id;
+            ride.destination_district_id = registry.get<StationComponent>(destination).district_id;
+            ride.elapsed_seconds = std::max(0.0f, state.transit_elapsed_seconds);
+            ride.stop_interval_seconds = std::max(1.0f, state.transit_stop_interval_seconds);
+            ride.doors_open = state.transit_doors_open ||
+                ride.elapsed_seconds >= ride.stop_interval_seconds;
+            ride.exterior_position = transformFromSavedTransform(state.transit_exterior_position);
+            ride.interior_position = transformFromSavedTransform(state.transit_interior_position);
+            registry.assign<TransitRideComponent>(player, ride);
+        }
+    }
+
     const std::vector<Entity> workers = fixedWorkersInSaveOrder(registry);
     std::vector<SavedWorker> saved_workers = state.workers;
     if (saved_workers.empty()) {
@@ -1061,6 +1158,8 @@ inline const char* tinySaveLocationName(PlayerLocationState state) {
         case PlayerLocationState::INSIDE_WORKPLACE: return "INSIDE WORKPLACE";
         case PlayerLocationState::NEAR_SUPPLY: return "NEAR SUPPLY";
         case PlayerLocationState::INSIDE_SUPPLY: return "INSIDE SUPPLY";
+        case PlayerLocationState::NEAR_TRANSIT: return "NEAR TRANSIT";
+        case PlayerLocationState::INSIDE_TRANSIT: return "INSIDE TRANSIT";
     }
     return "OUTSIDE";
 }

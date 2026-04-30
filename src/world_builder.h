@@ -50,6 +50,14 @@ inline const char* roleDisplayName(MicroZoneRole role) {
     return "UNKNOWN";
 }
 
+inline char districtTag(uint32_t district_id) {
+    return static_cast<char>('A' + std::min<uint32_t>(district_id, 25u));
+}
+
+inline std::string districtLabel(uint32_t district_id) {
+    return std::string(1, districtTag(district_id));
+}
+
 struct BuildingPurposeInfo {
     MicroZoneRole role = MicroZoneRole::HOUSING;
     const char* label = "DWELLING";
@@ -188,10 +196,69 @@ inline Entity buildBuildingUnit(Registry& registry,
     return building;
 }
 
+inline uint64_t stableIdForStation(uint32_t district_id, uint32_t transit_link_id) {
+    return (uint64_t{0x5A7u} << 48) ^
+           (static_cast<uint64_t>(district_id) << 16) ^
+           static_cast<uint64_t>(transit_link_id);
+}
+
+inline Entity buildStationUnit(Registry& registry,
+                               const MacroZoneComponent& macro,
+                               uint32_t district_id,
+                               uint32_t transit_link_id,
+                               float x,
+                               float y) {
+    Entity station = registry.create();
+    registry.assign<TransformComponent>(station, x, y, 22.0f, 22.0f);
+    StationComponent component;
+    component.stable_id = stableIdForStation(district_id, transit_link_id);
+    component.district_id = district_id;
+    component.transit_link_id = transit_link_id;
+    registry.assign<StationComponent>(station, component);
+    registry.assign<GlyphComponent>(station, std::string("T"),
+        static_cast<uint8_t>(120), static_cast<uint8_t>(220), static_cast<uint8_t>(255),
+        static_cast<uint8_t>(255), 1.0f, true, false);
+    (void)macro;
+    return station;
+}
+
 inline Entity firstWorldBuilderBuildingByRole(Registry& registry, MicroZoneRole role) {
     auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
     for (Entity building : buildings) {
         if (registry.get<BuildingUseComponent>(building).role == role) {
+            return building;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline Entity macroForPoint(Registry& registry, float x, float y) {
+    auto macros = registry.view<MacroZoneComponent>();
+    for (Entity macro : macros) {
+        const auto& component = registry.get<MacroZoneComponent>(macro);
+        if (x >= component.x0 && x <= component.x1 &&
+            y >= component.y0 && y <= component.y1) {
+            return macro;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline Entity macroForEntity(Registry& registry, Entity entity) {
+    if (!registry.alive(entity) || !registry.has<TransformComponent>(entity)) {
+        return MAX_ENTITIES;
+    }
+    const auto& transform = registry.get<TransformComponent>(entity);
+    return macroForPoint(registry, transform.x, transform.y);
+}
+
+inline Entity firstWorldBuilderBuildingByRoleInMacro(Registry& registry,
+                                                     Entity macro,
+                                                     MicroZoneRole role) {
+    auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
+    for (Entity building : buildings) {
+        if (registry.get<BuildingUseComponent>(building).role == role &&
+            macroForEntity(registry, building) == macro) {
             return building;
         }
     }
@@ -385,6 +452,28 @@ inline std::vector<Entity> buildWorld(Registry& registry, const WorldConfig& con
         phase.elapsed_seconds = 0.0f;
         phase.interval_seconds = std::max(1.0f, config.world_phase_interval_seconds);
         registry.assign<WorldPhaseComponent>(macros.front(), phase);
+    }
+
+    if (config.transit_enabled && macros.size() >= 2) {
+        std::vector<Entity> stations;
+        stations.reserve(macros.size());
+        constexpr uint32_t transit_link_id = 1;
+        for (Entity macro : macros) {
+            const auto& component = registry.get<MacroZoneComponent>(macro);
+            const bool left_side = component.grid_x > 0;
+            const float x = left_side ? component.x0 + 24.0f : component.x1 - 24.0f;
+            const float y = (component.y0 + component.y1) * 0.5f;
+            stations.push_back(buildStationUnit(registry,
+                                                component,
+                                                component.macro_id,
+                                                transit_link_id,
+                                                x,
+                                                y));
+        }
+        for (size_t i = 0; i < stations.size(); ++i) {
+            auto& station = registry.get<StationComponent>(stations[i]);
+            station.linked_station = stations[(i + 1) % stations.size()];
+        }
     }
 
     if (config.carryable_object_count > 0) {
@@ -601,6 +690,206 @@ inline Entity nearestCarryableObjectInRange(Registry& registry,
         }
     }
     return nearest;
+}
+
+inline Entity nearestStationInRange(Registry& registry,
+                                    const TransformComponent& player_transform,
+                                    float range_wu) {
+    Entity nearest = MAX_ENTITIES;
+    float nearest_distance = range_wu;
+    auto stations = registry.view<StationComponent, TransformComponent>();
+    for (Entity station : stations) {
+        const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(station));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            nearest = station;
+        }
+    }
+    return nearest;
+}
+
+inline Entity stationByStableId(Registry& registry, uint64_t stable_id) {
+    if (stable_id == 0) return MAX_ENTITIES;
+    auto stations = registry.view<StationComponent>();
+    for (Entity station : stations) {
+        if (registry.get<StationComponent>(station).stable_id == stable_id) {
+            return station;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline Entity currentTransitDestinationStation(Registry& registry, Entity player) {
+    if (!registry.alive(player) || !registry.has<TransitRideComponent>(player)) {
+        return MAX_ENTITIES;
+    }
+    const auto& ride = registry.get<TransitRideComponent>(player);
+    return registry.alive(ride.destination_station) ? ride.destination_station : MAX_ENTITIES;
+}
+
+inline bool playerInsideTransitInterior(Registry& registry, Entity player) {
+    return registry.alive(player) && registry.has<TransitRideComponent>(player);
+}
+
+inline TransformComponent transitInteriorBounds() {
+    return TransformComponent{0.0f, 0.0f, 120.0f, 42.0f};
+}
+
+inline TransformComponent transitWindowZone() {
+    return TransformComponent{36.0f, -6.0f, 22.0f, 18.0f};
+}
+
+inline TransformComponent transitInteriorSpawnPosition() {
+    return TransformComponent{-36.0f, 4.0f, 12.0f, 12.0f};
+}
+
+inline TransformComponent movedTransitInteriorPosition(const TransformComponent& current,
+                                                       float dx,
+                                                       float dy,
+                                                       float speed,
+                                                       float dt) {
+    TransformComponent next = current;
+    next.x += dx * speed * dt;
+    next.y += dy * speed * dt;
+    const TransformComponent bounds = transitInteriorBounds();
+    next.x = std::clamp(next.x,
+                        bounds.x - bounds.width * 0.5f + next.width * 0.5f,
+                        bounds.x + bounds.width * 0.5f - next.width * 0.5f);
+    next.y = std::clamp(next.y,
+                        bounds.y - bounds.height * 0.5f + next.height * 0.5f,
+                        bounds.y + bounds.height * 0.5f - next.height * 0.5f);
+    return next;
+}
+
+inline TransformComponent stationExitTransform(Registry& registry, Entity station) {
+    TransformComponent destination = registry.get<TransformComponent>(station);
+    destination.y += destination.height * 0.5f + 7.0f;
+    destination.width = 12.0f;
+    destination.height = 12.0f;
+    return destination;
+}
+
+inline std::string stationReadout(Registry& registry, Entity station) {
+    if (!registry.alive(station) || !registry.has<StationComponent>(station)) {
+        return "TRANSIT: NO PLATFORM";
+    }
+    const auto& component = registry.get<StationComponent>(station);
+    std::string readout = "TRANSIT STATION: DISTRICT " + districtLabel(component.district_id);
+    if (registry.alive(component.linked_station) &&
+        registry.has<StationComponent>(component.linked_station)) {
+        const auto& linked = registry.get<StationComponent>(component.linked_station);
+        readout += "; DESTINATION: DISTRICT " + districtLabel(linked.district_id);
+    }
+    readout += "; E BOARD";
+    return readout;
+}
+
+inline std::string transitRideReadout(Registry& registry, Entity player) {
+    if (!playerInsideTransitInterior(registry, player)) {
+        return "TRANSIT: NOT RIDING";
+    }
+    const auto& ride = registry.get<TransitRideComponent>(player);
+    std::string readout = "TRANSIT: RIDING DISTRICT " +
+        districtLabel(ride.origin_district_id) + "->" +
+        districtLabel(ride.destination_district_id);
+    readout += ride.doors_open ? "; DOORS: OPEN; E EXIT" :
+        "; DOORS: CLOSED; E LOOK OUT WINDOW";
+    readout += "; TIME: " +
+        std::to_string(static_cast<int>(std::min(ride.elapsed_seconds,
+                                                 ride.stop_interval_seconds))) +
+        "/" + std::to_string(static_cast<int>(std::max(1.0f, ride.stop_interval_seconds))) + "s";
+    return readout;
+}
+
+inline bool playerCanBoardTransit(Registry& registry, Entity player, float range_wu) {
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player) ||
+        playerInsideTransitInterior(registry, player)) {
+        return false;
+    }
+    const Entity station = nearestStationInRange(registry,
+                                                 registry.get<TransformComponent>(player),
+                                                 range_wu);
+    return station != MAX_ENTITIES &&
+           registry.has<StationComponent>(station) &&
+           registry.alive(registry.get<StationComponent>(station).linked_station);
+}
+
+inline bool enterTransitRide(Registry& registry,
+                             Entity player,
+                             float range_wu,
+                             float ride_seconds) {
+    if (!playerCanBoardTransit(registry, player, range_wu)) {
+        return false;
+    }
+    const Entity station = nearestStationInRange(registry,
+                                                 registry.get<TransformComponent>(player),
+                                                 range_wu);
+    const auto& station_component = registry.get<StationComponent>(station);
+    const Entity destination = station_component.linked_station;
+    if (registry.has<BuildingInteractionComponent>(player) &&
+        registry.get<BuildingInteractionComponent>(player).inside_building) {
+        auto& interaction = registry.get<BuildingInteractionComponent>(player);
+        interaction.inside_building = false;
+        interaction.building_entity = MAX_ENTITIES;
+    }
+    TransitRideComponent ride;
+    ride.origin_station = station;
+    ride.destination_station = destination;
+    ride.origin_district_id = station_component.district_id;
+    ride.destination_district_id = registry.get<StationComponent>(destination).district_id;
+    ride.stop_interval_seconds = std::max(1.0f, ride_seconds);
+    ride.exterior_position = registry.get<TransformComponent>(player);
+    ride.interior_position = transitInteriorSpawnPosition();
+    registry.assign<TransitRideComponent>(player, ride);
+    if (registry.has<InheritedGadgetComponent>(player)) {
+        auto& gadget = registry.get<InheritedGadgetComponent>(player);
+        gadget.last_result_kind = InheritedGadgetResultKind::ACTION;
+        gadget.last_result_target_entity = station;
+        gadget.last_result_target_type = InspectionTargetType::TRANSIT_STATION;
+        gadget.last_result = "RIDING TRANSIT...";
+    }
+    return true;
+}
+
+inline bool finishTransitRide(Registry& registry, Entity player, bool looked_out_window) {
+    if (!playerInsideTransitInterior(registry, player)) {
+        return false;
+    }
+    const auto ride = registry.get<TransitRideComponent>(player);
+    const Entity destination = ride.destination_station;
+    if (!registry.alive(destination) || !registry.has<TransformComponent>(destination)) {
+        return false;
+    }
+    registry.get<TransformComponent>(player) = stationExitTransform(registry, destination);
+    registry.remove<TransitRideComponent>(player);
+    if (registry.has<BuildingInteractionComponent>(player)) {
+        auto& interaction = registry.get<BuildingInteractionComponent>(player);
+        interaction.inside_building = false;
+        interaction.building_entity = MAX_ENTITIES;
+    }
+    if (registry.has<InheritedGadgetComponent>(player)) {
+        auto& gadget = registry.get<InheritedGadgetComponent>(player);
+        gadget.last_result_kind = InheritedGadgetResultKind::ACTION;
+        gadget.last_result_target_entity = destination;
+        gadget.last_result_target_type = InspectionTargetType::TRANSIT_STATION;
+        gadget.last_result = looked_out_window ?
+            "LOOKED OUT WINDOW: DESTINATION PLATFORM" :
+            "TRANSIT ARRIVED: DOORS OPEN";
+    }
+    return true;
+}
+
+inline void advanceTransitRide(Registry& registry, Entity player, float dt_seconds) {
+    if (!playerInsideTransitInterior(registry, player) || dt_seconds <= 0.0f) {
+        return;
+    }
+    auto& ride = registry.get<TransitRideComponent>(player);
+    ride.stop_interval_seconds = std::max(1.0f, ride.stop_interval_seconds);
+    ride.elapsed_seconds = std::min(ride.stop_interval_seconds,
+                                    ride.elapsed_seconds + dt_seconds);
+    if (ride.elapsed_seconds >= ride.stop_interval_seconds) {
+        ride.doors_open = true;
+    }
 }
 
 inline Entity firstCarryableObject(Registry& registry) {
@@ -3084,6 +3373,25 @@ inline InspectionTargetType inspectionTypeForRole(MicroZoneRole role) {
     return InspectionTargetType::NONE;
 }
 
+inline uint32_t playerCurrentDistrictId(Registry& registry, Entity player) {
+    if (playerInsideTransitInterior(registry, player)) {
+        return registry.get<TransitRideComponent>(player).destination_district_id;
+    }
+    const Entity macro = macroForEntity(registry, player);
+    if (macro != MAX_ENTITIES && registry.has<MacroZoneComponent>(macro)) {
+        return registry.get<MacroZoneComponent>(macro).macro_id;
+    }
+    return 0;
+}
+
+inline std::string playerDistrictReadout(Registry& registry, Entity player) {
+    if (playerInsideTransitInterior(registry, player)) {
+        return "DISTRICT: IN TRANSIT TO " +
+            districtLabel(registry.get<TransitRideComponent>(player).destination_district_id);
+    }
+    return "DISTRICT: " + districtLabel(playerCurrentDistrictId(registry, player));
+}
+
 struct InspectionTarget {
     Entity entity = MAX_ENTITIES;
     InspectionTargetType type = InspectionTargetType::NONE;
@@ -3102,6 +3410,16 @@ inline InspectionTarget nearestInspectionTargetInRange(Registry& registry,
             nearest_distance = distance;
             target.entity = building;
             target.type = inspectionTypeForRole(registry.get<BuildingUseComponent>(building).role);
+        }
+    }
+
+    auto stations = registry.view<StationComponent, TransformComponent>();
+    for (Entity station : stations) {
+        const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(station));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            target.entity = station;
+            target.type = InspectionTargetType::TRANSIT_STATION;
         }
     }
 
@@ -3183,6 +3501,12 @@ inline InspectionTarget playerInspectionTarget(Registry& registry,
         }
     }
 
+    if (playerInsideTransitInterior(registry, player)) {
+        target.entity = currentTransitDestinationStation(registry, player);
+        target.type = InspectionTargetType::TRANSIT_INTERIOR;
+        return target;
+    }
+
     return nearestInspectionTargetInRange(registry, registry.get<TransformComponent>(player), range_wu);
 }
 
@@ -3236,6 +3560,8 @@ inline const char* inheritedGadgetTargetLabel(InspectionTargetType type) {
             return "MARKET";
         case InspectionTargetType::CLINIC:
             return "CLINIC";
+        case InspectionTargetType::TRANSIT_STATION:
+            return "TRANSIT STATION";
         case InspectionTargetType::PEDESTRIAN_PATH:
             return "PATH";
         case InspectionTargetType::ROUTE_SIGNPOST:
@@ -3248,6 +3574,8 @@ inline const char* inheritedGadgetTargetLabel(InspectionTargetType type) {
             return "WORKPLACE INTERIOR";
         case InspectionTargetType::SUPPLY_INTERIOR:
             return "SUPPLY INTERIOR";
+        case InspectionTargetType::TRANSIT_INTERIOR:
+            return "TRANSIT INTERIOR";
         case InspectionTargetType::CARRYABLE_OBJECT:
             return "CARRYABLE OBJECT";
         case InspectionTargetType::NONE:
@@ -3281,7 +3609,9 @@ inline std::string localSuspicionDebuggerReadoutForTarget(Registry& registry,
         case InspectionTargetType::SUPPLY:
         case InspectionTargetType::MARKET:
         case InspectionTargetType::CLINIC:
+        case InspectionTargetType::TRANSIT_STATION:
         case InspectionTargetType::SUPPLY_INTERIOR:
+        case InspectionTargetType::TRANSIT_INTERIOR:
         case InspectionTargetType::CARRYABLE_OBJECT:
             break;
     }
@@ -3311,11 +3641,13 @@ inline Entity localSuspicionWorkerForInstitutionalLogTarget(Registry& registry,
         case InspectionTargetType::SUPPLY:
         case InspectionTargetType::MARKET:
         case InspectionTargetType::CLINIC:
+        case InspectionTargetType::TRANSIT_STATION:
         case InspectionTargetType::PEDESTRIAN_PATH:
         case InspectionTargetType::ROUTE_SIGNPOST:
         case InspectionTargetType::WORKER:
         case InspectionTargetType::HOUSING_INTERIOR:
         case InspectionTargetType::SUPPLY_INTERIOR:
+        case InspectionTargetType::TRANSIT_INTERIOR:
         case InspectionTargetType::CARRYABLE_OBJECT:
             return MAX_ENTITIES;
     }
@@ -3425,6 +3757,10 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
             return building_scan(MicroZoneRole::MARKET, target.entity);
         case InspectionTargetType::CLINIC:
             return building_scan(MicroZoneRole::CLINIC, target.entity);
+        case InspectionTargetType::TRANSIT_STATION:
+            return stationReadout(registry, target.entity);
+        case InspectionTargetType::TRANSIT_INTERIOR:
+            return "TRANSIT CAR: MOVING; WINDOW: DESTINATION PLATFORM";
         case InspectionTargetType::ROUTE_SIGNPOST:
             if (registry.alive(target.entity) && registry.has<RouteSignpostComponent>(target.entity)) {
                 const auto& signpost = registry.get<RouteSignpostComponent>(target.entity);
@@ -3471,10 +3807,12 @@ inline bool inspectionTargetIsDependencyTarget(const InspectionTarget& target) {
         case InspectionTargetType::HOUSING:
         case InspectionTargetType::MARKET:
         case InspectionTargetType::CLINIC:
+        case InspectionTargetType::TRANSIT_STATION:
         case InspectionTargetType::PEDESTRIAN_PATH:
         case InspectionTargetType::ROUTE_SIGNPOST:
         case InspectionTargetType::WORKER:
         case InspectionTargetType::HOUSING_INTERIOR:
+        case InspectionTargetType::TRANSIT_INTERIOR:
         case InspectionTargetType::CARRYABLE_OBJECT:
             return false;
     }
@@ -3698,6 +4036,16 @@ inline PlayerLocationState playerLocationState(Registry& registry,
         if (interaction.inside_building) {
             return locationStateForRole(interaction.building_role, true);
         }
+    }
+
+    if (playerInsideTransitInterior(registry, player)) {
+        return PlayerLocationState::INSIDE_TRANSIT;
+    }
+
+    if (nearestStationInRange(registry,
+                              registry.get<TransformComponent>(player),
+                              interaction_range_wu) != MAX_ENTITIES) {
+        return PlayerLocationState::NEAR_TRANSIT;
     }
 
     const Entity nearest = nearestInteractableBuildingInRange(registry,

@@ -1411,3 +1411,20 @@ Logical next step: with cover and crowds working, transit can carry the player t
 - [x] If no shelter supply is stored or no suspicion is active, the verb fails with a clear short readout (no resource consumed).
 - [x] `LAID_LOW` is distinct from `RETURNED_OUTPUT`, `CORRECTED_ROUTE`, `HIDDEN_ITEM`: the player keeps the stolen part / spoofed signpost.
 - [x] Acceptance: tests cover lay-low with and without supply, with and without an active record, and across both phases; `LAID_LOW` round-trips through save/load; AI playtest can choose the new prompt and report the result.
+
+## Completed Session: Transit — Cracking Open The World
+
+Gameplay outcome: the world now has two authored districts connected by paired transit stations. Entering transit puts the player inside a small ride interior where they can move while the trip advances in real time.
+
+Big Picture: the first transit slice widens the sandbox without adding routes, schedules, traffic, vehicles, or city-scale infrastructure. The player chooses between looking out the window to jump to the destination platform immediately, or waiting for the stop to arrive and the doors to open before exiting.
+
+Logical next step: per-district worker labels, routes, and suspicion scope can now build on the two-district layout.
+
+## Phase 90: Add a station, a second authored district, and a player ride verb.
+
+- [x] Allow `WorldConfig` to authorize a second `MicroZone` cluster with its own housing, workplace, supply, market, clinic, and signposts. Each cluster is self-contained.
+- [x] Add a `StationComponent` and one station glyph on the boundary of each district, paired by a `transit_link_id`.
+- [x] `E` at a station boards a transit interior; the player can move inside while the ride advances in real time.
+- [x] `E` while doors are closed looks out the window and jumps to the destination platform; waiting until arrival opens the doors and lets `E` exit normally.
+- [x] Tiny save/load preserves the player's current district and in-progress transit ride state; save version bumped beyond `V10`.
+- [x] Acceptance: 2-district and 1-district configs both build cleanly; ride from A->B and B->A round-trip with and without a carried object; AI playtest map renders both clusters and reports the player's current district.

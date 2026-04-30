@@ -969,7 +969,7 @@ static void testCarryableItemKindLabelsAndSaveRoundTrip() {
     assert(workerCarryReadout(registry, worker) == "WORKER ROUTINE: DELIVERING SUPPLY; REASON: WAGE ROUTE; CARRYING: SUPPLY");
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V10") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V11") != std::string::npos);
     assert(serialized.find("CARRYABLE 1 SUPPLY") != std::string::npos);
 
     TinySaveState parsed;
@@ -5484,7 +5484,7 @@ static void testTinySaveRoundTripRestoresWageRecordSpoofed() {
 
     registry.get<FixedActorComponent>(worker).wage_record_spoofed = true;
     const std::string save_text = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(save_text.find("NEON_TINY_SAVE_V10") != std::string::npos);
+    assert(save_text.find("NEON_TINY_SAVE_V11") != std::string::npos);
 
     TinySaveState state;
     assert(deserializeTinySaveState(save_text, state) == TinySaveStatus::OK);
@@ -5856,7 +5856,7 @@ static void testTinySaveRoundTripRestoresWorldPhaseAndTwoWorkers() {
     registry.get<FixedActorComponent>(workers[1]).acknowledged = true;
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V10") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V11") != std::string::npos);
     assert(serialized.find("WORLD_PHASE NIGHT 3") != std::string::npos);
     assert(serialized.find("WORKERS 2") != std::string::npos);
 
@@ -5960,6 +5960,143 @@ static void testLayLowFailureCasesAndNightPhase() {
     assert(currentWorldPhase(no_suspicion) == WorldPhase::NIGHT);
     assert(inheritedGadgetResultReadout(no_suspicion, no_suspicion_player) ==
            "ACTION RESULT: LAY LOW FAILED: NO ACTIVE LOCAL SUSPICION");
+}
+
+static WorldConfig makeTransitTestConfig(int macro_count_x = 2) {
+    WorldConfig config = makeSandboxConfig();
+    config.macro_count_x = macro_count_x;
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    config.fixed_worker_count = 2;
+    config.carryable_object_count = 1;
+    config.transit_enabled = macro_count_x >= 2;
+    config.transit_ride_seconds = 1.0f;
+    return config;
+}
+
+static Entity buildTransitWorld(Registry& registry, const WorldConfig& config) {
+    buildWorld(registry, config);
+    assert(validateWorld(registry, config));
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<BuildingInteractionComponent>(player);
+    registry.assign<TransformComponent>(player, TransformComponent{0, 0, 12, 12});
+    return player;
+}
+
+static std::vector<Entity> stationsInOrder(Registry& registry) {
+    auto stations = registry.view<StationComponent>();
+    std::vector<Entity> ordered(stations.begin(), stations.end());
+    std::sort(ordered.begin(), ordered.end());
+    return ordered;
+}
+
+static void testTransitStationsRequireTwoDistrictConfig() {
+    Registry one_district;
+    WorldConfig one = makeTransitTestConfig(1);
+    Entity one_player = buildTransitWorld(one_district, one);
+    assert(stationsInOrder(one_district).empty());
+    assert(!playerCanBoardTransit(one_district, one_player, 18.0f));
+
+    Registry two_districts;
+    WorldConfig two = makeTransitTestConfig(2);
+    buildTransitWorld(two_districts, two);
+    const auto stations = stationsInOrder(two_districts);
+    assert(stations.size() == 2);
+    const auto& a = two_districts.get<StationComponent>(stations[0]);
+    const auto& b = two_districts.get<StationComponent>(stations[1]);
+    assert(a.linked_station == stations[1]);
+    assert(b.linked_station == stations[0]);
+    assert(a.district_id != b.district_id);
+    assert(stationReadout(two_districts, stations[0]).find("DESTINATION: DISTRICT B") !=
+           std::string::npos);
+}
+
+static void testTransitRideLookOutWindowCarriesObjectToDestination() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    Entity player = buildTransitWorld(registry, config);
+    const auto stations = stationsInOrder(registry);
+    assert(stations.size() == 2);
+    Entity object = firstCarryableObject(registry);
+    assert(object != MAX_ENTITIES);
+    registry.get<PlayerComponent>(player).carried_object = object;
+    hideCarryableObject(registry, object);
+    registry.get<TransformComponent>(player) = stationExitTransform(registry, stations[0]);
+
+    assert(playerCanBoardTransit(registry, player, 18.0f));
+    assert(enterTransitRide(registry, player, 18.0f, config.transit_ride_seconds));
+    assert(playerInsideTransitInterior(registry, player));
+    assert(playerLocationState(registry, player, 18.0f) == PlayerLocationState::INSIDE_TRANSIT);
+    auto& ride = registry.get<TransitRideComponent>(player);
+    const float old_x = ride.interior_position.x;
+    ride.interior_position = movedTransitInteriorPosition(ride.interior_position,
+                                                          1.0f,
+                                                          0.0f,
+                                                          90.0f,
+                                                          0.2f);
+    assert(ride.interior_position.x > old_x);
+
+    assert(finishTransitRide(registry, player, true));
+    assert(!playerInsideTransitInterior(registry, player));
+    assert(registry.get<PlayerComponent>(player).carried_object == object);
+    assert(playerCurrentDistrictId(registry, player) ==
+           registry.get<StationComponent>(stations[1]).district_id);
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "ACTION RESULT: LOOKED OUT WINDOW: DESTINATION PLATFORM");
+}
+
+static void testTransitRideCanWaitForDoorsThenExit() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    Entity player = buildTransitWorld(registry, config);
+    const auto stations = stationsInOrder(registry);
+    registry.get<TransformComponent>(player) = stationExitTransform(registry, stations[0]);
+
+    assert(enterTransitRide(registry, player, 18.0f, config.transit_ride_seconds));
+    advanceTransitRide(registry, player, 0.5f);
+    assert(!registry.get<TransitRideComponent>(player).doors_open);
+    advanceTransitRide(registry, player, 0.6f);
+    assert(registry.get<TransitRideComponent>(player).doors_open);
+    assert(finishTransitRide(registry, player, false));
+    assert(playerCurrentDistrictId(registry, player) ==
+           registry.get<StationComponent>(stations[1]).district_id);
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "ACTION RESULT: TRANSIT ARRIVED: DOORS OPEN");
+}
+
+static void testTinySaveRoundTripRestoresTransitInterior() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    Entity player = buildTransitWorld(registry, config);
+    const auto stations = stationsInOrder(registry);
+    registry.get<TransformComponent>(player) = stationExitTransform(registry, stations[0]);
+    assert(enterTransitRide(registry, player, 18.0f, config.transit_ride_seconds));
+    advanceTransitRide(registry, player, 0.75f);
+    registry.get<TransitRideComponent>(player).interior_position.x = 18.0f;
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(serialized.find("NEON_TINY_SAVE_V11") != std::string::npos);
+    assert(serialized.find("TRANSIT 1") != std::string::npos);
+
+    TinySaveState state;
+    assert(deserializeTinySaveState(serialized, state) == TinySaveStatus::OK);
+    registry.remove<TransitRideComponent>(player);
+    assert(applyTinySaveState(registry, player, state) == TinySaveStatus::OK);
+    assert(playerInsideTransitInterior(registry, player));
+    const auto& ride = registry.get<TransitRideComponent>(player);
+    assert(closeTo(ride.elapsed_seconds, 0.75f));
+    assert(closeTo(ride.interior_position.x, 18.0f));
+    assert(ride.destination_station == stations[1]);
 }
 
 int main() {
@@ -6102,5 +6239,9 @@ int main() {
     testTinySaveRoundTripRestoresWorldPhaseAndTwoWorkers();
     testLayLowConsumesSupplyAndPreservesRecord();
     testLayLowFailureCasesAndNightPhase();
+    testTransitStationsRequireTwoDistrictConfig();
+    testTransitRideLookOutWindowCarriesObjectToDestination();
+    testTransitRideCanWaitForDoorsThenExit();
+    testTinySaveRoundTripRestoresTransitInterior();
     return 0;
 }

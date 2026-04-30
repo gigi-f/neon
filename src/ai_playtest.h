@@ -32,6 +32,7 @@ struct AiPlaytestSession {
 
 inline WorldConfig makeAiPlaytestConfig() {
     WorldConfig config = makeSandboxConfig();
+    config.macro_count_x = 2;
     config.workplace_micro_zone_count = 1;
     config.workplace_building_count = 1;
     config.supply_micro_zone_count = 1;
@@ -42,6 +43,8 @@ inline WorldConfig makeAiPlaytestConfig() {
     config.clinic_building_count = 1;
     config.fixed_worker_count = 2;
     config.carryable_object_count = 1;
+    config.transit_enabled = true;
+    config.transit_ride_seconds = 1.0f;
     config.world_phase_interval_seconds = 1.2f;
     return config;
 }
@@ -65,6 +68,8 @@ inline const char* aiLocationStateName(PlayerLocationState state) {
         case PlayerLocationState::INSIDE_WORKPLACE: return "INSIDE WORKPLACE";
         case PlayerLocationState::NEAR_SUPPLY: return "NEAR SUPPLY";
         case PlayerLocationState::INSIDE_SUPPLY: return "INSIDE SUPPLY";
+        case PlayerLocationState::NEAR_TRANSIT: return "NEAR TRANSIT";
+        case PlayerLocationState::INSIDE_TRANSIT: return "INSIDE TRANSIT";
     }
     return "OUTSIDE";
 }
@@ -78,6 +83,8 @@ inline const char* aiLocationPrompt(PlayerLocationState state) {
         case PlayerLocationState::INSIDE_WORKPLACE: return "E EXIT WORKPLACE";
         case PlayerLocationState::NEAR_SUPPLY: return "E ENTER SUPPLY";
         case PlayerLocationState::INSIDE_SUPPLY: return "E EXIT SUPPLY";
+        case PlayerLocationState::NEAR_TRANSIT: return "E BOARD TRANSIT";
+        case PlayerLocationState::INSIDE_TRANSIT: return "E LOOK OUT WINDOW";
     }
     return "";
 }
@@ -90,12 +97,14 @@ inline const char* aiInspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::SUPPLY: return "SUPPLY";
         case InspectionTargetType::MARKET: return "MARKET";
         case InspectionTargetType::CLINIC: return "CLINIC";
+        case InspectionTargetType::TRANSIT_STATION: return "TRANSIT STATION";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
         case InspectionTargetType::ROUTE_SIGNPOST: return "SIGNPOST";
         case InspectionTargetType::WORKER: return "WORKER";
         case InspectionTargetType::HOUSING_INTERIOR: return "HOUSING INTERIOR";
         case InspectionTargetType::WORKPLACE_INTERIOR: return "WORKPLACE INTERIOR";
         case InspectionTargetType::SUPPLY_INTERIOR: return "SUPPLY INTERIOR";
+        case InspectionTargetType::TRANSIT_INTERIOR: return "TRANSIT INTERIOR";
         case InspectionTargetType::CARRYABLE_OBJECT: return "CARRYABLE OBJECT";
     }
     return "NO TARGET";
@@ -117,6 +126,14 @@ inline std::string aiInspectionDetail(Registry& registry, const InspectionTarget
         registry.alive(target.entity) &&
         registry.has<BuildingUseComponent>(target.entity)) {
         return buildingInspectionReadout(registry, target.entity);
+    }
+    if (target.type == InspectionTargetType::TRANSIT_STATION &&
+        registry.alive(target.entity) &&
+        registry.has<StationComponent>(target.entity)) {
+        return stationReadout(registry, target.entity);
+    }
+    if (target.type == InspectionTargetType::TRANSIT_INTERIOR) {
+        return "TRANSIT CAR: MOVING; WINDOW: DESTINATION PLATFORM";
     }
     if (target.type == InspectionTargetType::HOUSING_INTERIOR &&
         registry.alive(target.entity) &&
@@ -227,6 +244,14 @@ inline bool buildAiPlaytestSession(AiPlaytestSession& session,
         if (!takeWorkplaceOutput(session.registry, session.player)) {
             return false;
         }
+        if (!localSuspicionActive(session.registry)) {
+            recordLocalSuspicion(session.registry,
+                                 worker,
+                                 LocalSuspicionCause::MISSING_PART,
+                                 workplace,
+                                 object,
+                                 path);
+        }
         exitBuildingInterior(session.registry, session.player);
         session.registry.get<TransformComponent>(session.player) =
             session.registry.get<TransformComponent>(worker);
@@ -264,6 +289,10 @@ inline bool loadAiPlaytestSession(AiPlaytestSession& session,
 }
 
 inline void advanceAiPlaytestSimulation(Registry& registry, float dt) {
+    auto players = registry.view<PlayerComponent>();
+    for (Entity player : players) {
+        advanceTransitRide(registry, player, dt);
+    }
     advanceWorldPhase(registry, dt);
     updateFixedActors(registry, dt);
     updateWorkerSupplyPickups(registry);
@@ -308,6 +337,16 @@ inline void moveAiPlaytestPlayer(Registry& registry,
         return;
     }
 
+    if (registry.has<TransitRideComponent>(player)) {
+        auto& ride = registry.get<TransitRideComponent>(player);
+        ride.interior_position = movedTransitInteriorPosition(ride.interior_position,
+                                                              dx,
+                                                              dy,
+                                                              player_component.speed,
+                                                              dt);
+        return;
+    }
+
     TransformComponent proposed = registry.get<TransformComponent>(player);
     proposed.x += dx * player_component.speed * dt;
     proposed.y += dy * player_component.speed * dt;
@@ -323,6 +362,11 @@ inline void toggleAiPlaytestBuildingInteraction(Registry& registry, Entity playe
     }
 
     auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    if (registry.has<TransitRideComponent>(player)) {
+        const auto& ride = registry.get<TransitRideComponent>(player);
+        finishTransitRide(registry, player, !ride.doors_open);
+        return;
+    }
     if (interaction.inside_building) {
         exitBuildingInterior(registry, player);
         return;
@@ -381,8 +425,9 @@ inline bool applyAiPlaytestKey(AiPlaytestSession& session,
     } else if (key == "F") {
         auto& player_component = session.registry.get<PlayerComponent>(session.player);
         const bool inside =
-            session.registry.has<BuildingInteractionComponent>(session.player) &&
-            session.registry.get<BuildingInteractionComponent>(session.player).inside_building;
+            (session.registry.has<BuildingInteractionComponent>(session.player) &&
+             session.registry.get<BuildingInteractionComponent>(session.player).inside_building) ||
+            session.registry.has<TransitRideComponent>(session.player);
         if (player_component.carried_object != MAX_ENTITIES) {
             if (!inside &&
                 !transformOverlapsSolid(session.registry,
@@ -401,7 +446,10 @@ inline bool applyAiPlaytestKey(AiPlaytestSession& session,
                                       kAiPlaytestInteractionRangeWu);
         }
     } else if (key == "E") {
-        if (playerCanReturnSuspiciousWorkplaceOutput(session.registry, session.player)) {
+        if (playerInsideTransitInterior(session.registry, session.player)) {
+            const auto& ride = session.registry.get<TransitRideComponent>(session.player);
+            finishTransitRide(session.registry, session.player, !ride.doors_open);
+        } else if (playerCanReturnSuspiciousWorkplaceOutput(session.registry, session.player)) {
             returnSuspiciousWorkplaceOutput(session.registry, session.player);
         } else if (playerCanHideSuspiciousItemInHousing(session.registry, session.player)) {
             hideSuspiciousItemInHousing(session.registry, session.player);
@@ -413,13 +461,21 @@ inline bool applyAiPlaytestKey(AiPlaytestSession& session,
             stockWorkplaceBench(session.registry, session.player);
         } else if (playerCanWorkWorkplaceBench(session.registry, session.player)) {
             workWorkplaceBench(session.registry, session.player);
+        } else if (playerCanBoardTransit(session.registry,
+                                         session.player,
+                                         kAiPlaytestInteractionRangeWu)) {
+            enterTransitRide(session.registry,
+                             session.player,
+                             kAiPlaytestInteractionRangeWu,
+                             session.config.transit_ride_seconds);
         } else {
             toggleAiPlaytestBuildingInteraction(session.registry, session.player);
         }
     } else if (key == "T") {
         const bool inside =
-            session.registry.has<BuildingInteractionComponent>(session.player) &&
-            session.registry.get<BuildingInteractionComponent>(session.player).inside_building;
+            (session.registry.has<BuildingInteractionComponent>(session.player) &&
+             session.registry.get<BuildingInteractionComponent>(session.player).inside_building) ||
+            session.registry.has<TransitRideComponent>(session.player);
         const Entity near_worker = nearestWorkerInRange(
             session.registry,
             session.registry.get<TransformComponent>(session.player),
@@ -472,6 +528,9 @@ inline bool warpAiPlaytestPlayer(AiPlaytestSession& session,
     } else if (target == "SIGNPOST") {
         auto signposts = session.registry.view<RouteSignpostComponent>();
         if (!signposts.empty()) entity = signposts.front();
+    } else if (target == "STATION" || target == "TRANSIT") {
+        auto stations = session.registry.view<StationComponent>();
+        if (!stations.empty()) entity = stations.front();
     }
 
     if (entity == MAX_ENTITIES || !session.registry.has<TransformComponent>(entity)) {
@@ -481,6 +540,9 @@ inline bool warpAiPlaytestPlayer(AiPlaytestSession& session,
     if (session.registry.has<BuildingInteractionComponent>(session.player) &&
         session.registry.get<BuildingInteractionComponent>(session.player).inside_building) {
         exitBuildingInterior(session.registry, session.player);
+    }
+    if (session.registry.has<TransitRideComponent>(session.player)) {
+        session.registry.remove<TransitRideComponent>(session.player);
     }
     TransformComponent destination = session.registry.get<TransformComponent>(entity);
     if (session.registry.has<BuildingUseComponent>(entity)) {
@@ -650,6 +712,12 @@ inline std::vector<std::string> aiPlaytestPlayerView(Registry& registry, Entity 
         aiPlaceViewPoint(view, priority, t.x, t.y, origin_x, origin_y, cell_size, marker, 50);
     }
 
+    auto stations = registry.view<StationComponent, TransformComponent>();
+    for (Entity station : stations) {
+        const auto& t = registry.get<TransformComponent>(station);
+        aiPlaceViewPoint(view, priority, t.x, t.y, origin_x, origin_y, cell_size, 'T', 55);
+    }
+
     auto carryables = registry.view<CarryableComponent, TransformComponent>();
     for (Entity object : carryables) {
         if (carryableObjectIsHeld(registry, object)) continue;
@@ -769,6 +837,11 @@ inline std::vector<std::string> aiPlaytestMap(Registry& registry, Entity player)
         const char marker = registry.get<RouteSignpostComponent>(signpost).spoofed ? '!' : '+';
         aiPlaceMarker(map, t.x, t.y, min_x, min_y, scale, marker);
     }
+    auto stations = registry.view<StationComponent, TransformComponent>();
+    for (Entity station : stations) {
+        const auto& t = registry.get<TransformComponent>(station);
+        aiPlaceMarker(map, t.x, t.y, min_x, min_y, scale, 'T');
+    }
     auto carryables = registry.view<CarryableComponent, TransformComponent>();
     for (Entity object : carryables) {
         if (carryableObjectIsHeld(registry, object)) continue;
@@ -791,8 +864,9 @@ inline std::string aiPlaytestActionLine(Registry& registry, Entity player) {
     const PlayerLocationState location =
         playerLocationState(registry, player, kAiPlaytestInteractionRangeWu);
     const bool inside =
-        registry.has<BuildingInteractionComponent>(player) &&
-        registry.get<BuildingInteractionComponent>(player).inside_building;
+        (registry.has<BuildingInteractionComponent>(player) &&
+         registry.get<BuildingInteractionComponent>(player).inside_building) ||
+        registry.has<TransitRideComponent>(player);
     const Entity near_worker = nearestWorkerInRange(
         registry,
         registry.get<TransformComponent>(player),
@@ -807,6 +881,10 @@ inline std::string aiPlaytestActionLine(Registry& registry, Entity player) {
     out << "LOCATION:" << aiLocationStateName(location) << " ";
     if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
         out << "E RETURN SUSPECT PART " << workplaceBenchReadout(registry);
+    } else if (playerInsideTransitInterior(registry, player)) {
+        const auto& ride = registry.get<TransitRideComponent>(player);
+        out << (ride.doors_open ? "E EXIT TRANSIT " : "E LOOK OUT WINDOW ")
+            << transitRideReadout(registry, player);
     } else if (playerCanLayLowInHousing(registry, player)) {
         out << "T LAY LOW " << shelterSupplyReadout(registry);
     } else if (playerCanHideSuspiciousItemInHousing(registry, player)) {
@@ -819,6 +897,8 @@ inline std::string aiPlaytestActionLine(Registry& registry, Entity player) {
         out << "E STOCK BENCH " << workplaceBenchReadout(registry);
     } else if (playerCanWorkWorkplaceBench(registry, player)) {
         out << "E WORK BENCH " << workplaceBenchReadout(registry);
+    } else if (playerCanBoardTransit(registry, player, kAiPlaytestInteractionRangeWu)) {
+        out << "E BOARD TRANSIT";
     } else if (player_component.carried_object != MAX_ENTITIES) {
         out << aiLocationPrompt(location) << " F DROP "
             << carryableObjectLabel(registry, player_component.carried_object);
@@ -879,14 +959,15 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
     const PlayerLocationState location =
         playerLocationState(registry, player, kAiPlaytestInteractionRangeWu);
     const bool inside =
-        registry.has<BuildingInteractionComponent>(player) &&
-        registry.get<BuildingInteractionComponent>(player).inside_building;
+        (registry.has<BuildingInteractionComponent>(player) &&
+         registry.get<BuildingInteractionComponent>(player).inside_building) ||
+        registry.has<TransitRideComponent>(player);
     const InspectionTarget target =
         playerInspectionTarget(registry, player, kAiPlaytestInspectionRangeWu);
 
     out << "=== NEON AI PLAYTEST ===\n";
     out << "COMMANDS: snapshot | key W/A/S/D/E/F/T/SPACE/G | step N | reset [default|suspicion] | warp TARGET\n";
-    out << "TARGETS: HOUSING WORKPLACE SUPPLY MARKET CLINIC WORKER SIGNPOST CARRYABLE\n";
+    out << "TARGETS: HOUSING WORKPLACE SUPPLY MARKET CLINIC STATION WORKER SIGNPOST CARRYABLE\n";
     out << "PLAYER: x=" << player_transform.x
         << " y=" << player_transform.y
         << " facing=" << aiFacingName(player_component.facing)
@@ -896,8 +977,13 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
         << (player_component.carried_object != MAX_ENTITIES
                 ? carryableObjectLabel(registry, player_component.carried_object)
                 : "NONE")
+        << " " << playerDistrictReadout(registry, player)
         << "\n";
-    if (inside) {
+    if (playerInsideTransitInterior(registry, player)) {
+        out << "TRANSIT: " << transitRideReadout(registry, player) << "\n";
+    }
+    if (registry.has<BuildingInteractionComponent>(player) &&
+        registry.get<BuildingInteractionComponent>(player).inside_building) {
         const auto& interaction = registry.get<BuildingInteractionComponent>(player);
         out << "INTERIOR: role=" << roleDisplayName(interaction.building_role)
             << " local_x=" << interaction.interior_position.x
@@ -917,6 +1003,7 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
 
     const std::string local_notice = localSuspicionHudReadout(registry);
     out << "SYSTEMS: " << productionLoopSummaryReadout(registry)
+        << " | " << playerDistrictReadout(registry, player)
         << " | " << worldPhaseReadout(registry)
         << " | " << shelterSupplyReadout(registry)
         << " | " << workplaceBenchReadout(registry)
@@ -929,7 +1016,7 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
     out << "-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ "
         << worldPhaseReadout(registry) << " --\n";
     out << "LEGEND: @ player ^v<> facing H housing W workplace S supply M market C clinic "
-        << "# solid . path w worker + signpost ! spoofed o object\n";
+        << "T transit # solid . path w worker + signpost ! spoofed o object\n";
     for (const std::string& row : aiPlaytestPlayerView(registry, player)) {
         out << row << "\n";
     }

@@ -169,6 +169,16 @@ static void updatePlayer(Registry& registry, Entity player, float dt, const uint
         return;
     }
 
+    if (registry.has<TransitRideComponent>(player)) {
+        auto& ride = registry.get<TransitRideComponent>(player);
+        ride.interior_position = movedTransitInteriorPosition(ride.interior_position,
+                                                              dx,
+                                                              dy,
+                                                              player_component.speed,
+                                                              dt);
+        return;
+    }
+
     auto current = registry.get<TransformComponent>(player);
     TransformComponent proposed = current;
     proposed.x += dx * player_component.speed * dt;
@@ -227,6 +237,8 @@ static const char* locationStateName(PlayerLocationState state) {
         case PlayerLocationState::INSIDE_WORKPLACE: return "INSIDE WORKPLACE";
         case PlayerLocationState::NEAR_SUPPLY: return "NEAR SUPPLY";
         case PlayerLocationState::INSIDE_SUPPLY: return "INSIDE SUPPLY";
+        case PlayerLocationState::NEAR_TRANSIT: return "NEAR TRANSIT";
+        case PlayerLocationState::INSIDE_TRANSIT: return "INSIDE TRANSIT";
     }
     return "OUTSIDE";
 }
@@ -240,6 +252,8 @@ static const char* locationPrompt(PlayerLocationState state) {
         case PlayerLocationState::INSIDE_WORKPLACE: return "E EXIT WORKPLACE";
         case PlayerLocationState::NEAR_SUPPLY: return "E ENTER SUPPLY";
         case PlayerLocationState::INSIDE_SUPPLY: return "E EXIT SUPPLY";
+        case PlayerLocationState::NEAR_TRANSIT: return "E BOARD TRANSIT";
+        case PlayerLocationState::INSIDE_TRANSIT: return "E LOOK OUT WINDOW";
     }
     return "";
 }
@@ -252,12 +266,14 @@ static const char* inspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::SUPPLY: return "SUPPLY";
         case InspectionTargetType::MARKET: return "MARKET";
         case InspectionTargetType::CLINIC: return "CLINIC";
+        case InspectionTargetType::TRANSIT_STATION: return "TRANSIT STATION";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
         case InspectionTargetType::ROUTE_SIGNPOST: return "SIGNPOST";
         case InspectionTargetType::WORKER: return "WORKER";
         case InspectionTargetType::HOUSING_INTERIOR: return "HOUSING INTERIOR";
         case InspectionTargetType::WORKPLACE_INTERIOR: return "WORKPLACE INTERIOR";
         case InspectionTargetType::SUPPLY_INTERIOR: return "SUPPLY INTERIOR";
+        case InspectionTargetType::TRANSIT_INTERIOR: return "TRANSIT INTERIOR";
         case InspectionTargetType::CARRYABLE_OBJECT: return "CARRYABLE OBJECT";
     }
     return "NO TARGET";
@@ -277,6 +293,8 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "Commercial site. Observation only in this pass.";
         case InspectionTargetType::CLINIC:
             return "Public clinic. Municipal authority. Observation only.";
+        case InspectionTargetType::TRANSIT_STATION:
+            return "Transit platform. Board to ride between authored districts.";
         case InspectionTargetType::PEDESTRIAN_PATH:
             return "Foot path. Non-solid access between buildings.";
         case InspectionTargetType::ROUTE_SIGNPOST:
@@ -289,6 +307,8 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "WORK BENCH: Heavy machinery array.";
         case InspectionTargetType::SUPPLY_INTERIOR:
             return "STOCK SHELF: Usable cache markers, no inventory system yet.";
+        case InspectionTargetType::TRANSIT_INTERIOR:
+            return "TRANSIT CAR: Doors, window, handrails, and moving platform lights.";
         case InspectionTargetType::CARRYABLE_OBJECT:
             return "SUPPLY: Carryable object.";
     }
@@ -336,6 +356,17 @@ static const char* inspectionDetail(Registry& registry, const InspectionComponen
         registry.alive(inspection.target_entity) &&
         registry.has<RouteSignpostComponent>(inspection.target_entity)) {
         dynamic_detail = routeSignpostReadout(registry, inspection.target_entity);
+        return dynamic_detail.c_str();
+    }
+    if (inspection.target_type == InspectionTargetType::TRANSIT_STATION &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<StationComponent>(inspection.target_entity)) {
+        dynamic_detail = stationReadout(registry, inspection.target_entity);
+        return dynamic_detail.c_str();
+    }
+    if (inspection.target_type == InspectionTargetType::TRANSIT_INTERIOR &&
+        registry.alive(inspection.target_entity)) {
+        dynamic_detail = "TRANSIT CAR: MOVING; WINDOW: DESTINATION PLATFORM";
         return dynamic_detail.c_str();
     }
     if (inspection.target_type == InspectionTargetType::CARRYABLE_OBJECT &&
@@ -554,6 +585,63 @@ static void renderInterior(SDL_Renderer* renderer, SDL_Texture* font, Registry& 
     }
 }
 
+static void renderTransitInterior(SDL_Renderer* renderer, SDL_Texture* font, Registry& registry,
+                                  Entity player, const CameraComponent& camera) {
+    if (!registry.alive(player) || !registry.has<TransitRideComponent>(player)) {
+        return;
+    }
+
+    const auto& ride = registry.get<TransitRideComponent>(player);
+    const TransformComponent bounds = transitInteriorBounds();
+    const float hud_top = 86.0f;
+    const float usable_w = std::max(1.0f, camera.screenWidth - 120.0f);
+    const float usable_h = std::max(1.0f, camera.screenHeight - hud_top - 50.0f);
+    const float room_scale = std::max(1.0f, std::min(usable_w / bounds.width,
+                                                     usable_h / bounds.height) * 0.78f);
+    const float room_cx = camera.screenWidth * 0.5f;
+    const float room_cy = hud_top + usable_h * 0.5f;
+
+    const SDL_Rect car_rect{
+        static_cast<int>(room_cx - bounds.width * room_scale * 0.5f),
+        static_cast<int>(room_cy - bounds.height * room_scale * 0.5f),
+        static_cast<int>(bounds.width * room_scale),
+        static_cast<int>(bounds.height * room_scale)
+    };
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 10, 18, 24, 255);
+    SDL_RenderFillRect(renderer, &car_rect);
+    SDL_SetRenderDrawColor(renderer, 48, 96, 118, 230);
+    SDL_RenderDrawRect(renderer, &car_rect);
+
+    const SDL_Rect window_rect = interiorLocalRect(transitWindowZone(),
+                                                   room_cx,
+                                                   room_cy,
+                                                   room_scale);
+    SDL_SetRenderDrawColor(renderer, 32, 88, 126, 230);
+    SDL_RenderFillRect(renderer, &window_rect);
+    SDL_SetRenderDrawColor(renderer, 130, 230, 255, 240);
+    SDL_RenderDrawRect(renderer, &window_rect);
+
+    const SDL_Rect player_rect = interiorLocalRect(ride.interior_position,
+                                                   room_cx,
+                                                   room_cy,
+                                                   room_scale);
+    if (font) {
+        drawGlyphToRect(renderer, font, '@', player_rect,
+                        SDL_Color{245, 245, 210, 255});
+        drawTextCentered(renderer,
+                         font,
+                         ride.doors_open ? "DOORS OPEN" : "WINDOW",
+                         window_rect.x + window_rect.w / 2,
+                         window_rect.y + window_rect.h / 2,
+                         SDL_Color{225, 250, 255, 230},
+                         0.75f);
+    } else {
+        SDL_SetRenderDrawColor(renderer, 245, 245, 210, 255);
+        SDL_RenderFillRect(renderer, &player_rect);
+    }
+}
+
 int main(int, char**) {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
@@ -582,6 +670,7 @@ int main(int, char**) {
 
     Registry registry;
     WorldConfig world_config = makeSandboxConfig();
+    world_config.macro_count_x = 2;
     world_config.workplace_micro_zone_count = 1;
     world_config.workplace_building_count = 1;
     world_config.supply_micro_zone_count = 1;
@@ -592,6 +681,8 @@ int main(int, char**) {
     world_config.clinic_building_count = 1;
     world_config.fixed_worker_count = 2;
     world_config.carryable_object_count = 1;
+    world_config.transit_enabled = true;
+    world_config.transit_ride_seconds = 4.0f;
     buildWorld(registry, world_config);
     if (!validateWorld(registry, world_config)) {
         std::cerr << "Generated world validation failed during startup." << std::endl;
@@ -642,7 +733,10 @@ int main(int, char**) {
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) running = false;
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F) {
                 auto& player_comp = registry.get<PlayerComponent>(player);
-                bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
+                bool inside =
+                    (registry.has<BuildingInteractionComponent>(player) &&
+                     registry.get<BuildingInteractionComponent>(player).inside_building) ||
+                    registry.has<TransitRideComponent>(player);
 
                 if (player_comp.carried_object != MAX_ENTITIES) {
                     if (!inside && !transformOverlapsSolid(registry, registry.get<TransformComponent>(player))) {
@@ -658,7 +752,10 @@ int main(int, char**) {
                 }
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_E) {
-                if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
+                if (playerInsideTransitInterior(registry, player)) {
+                    const auto& ride = registry.get<TransitRideComponent>(player);
+                    finishTransitRide(registry, player, !ride.doors_open);
+                } else if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
                     returnSuspiciousWorkplaceOutput(registry, player);
                 } else if (playerCanHideSuspiciousItemInHousing(registry, player)) {
                     hideSuspiciousItemInHousing(registry, player);
@@ -670,14 +767,17 @@ int main(int, char**) {
                     stockWorkplaceBench(registry, player);
                 } else if (playerCanWorkWorkplaceBench(registry, player)) {
                     workWorkplaceBench(registry, player);
+                } else if (playerCanBoardTransit(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
+                    enterTransitRide(registry, player, BUILDING_INTERACTION_RANGE_WU, world_config.transit_ride_seconds);
                 } else {
                     toggleBuildingInteraction(registry, player, BUILDING_INTERACTION_RANGE_WU);
                 }
             }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_T) {
                 const bool inside =
-                    registry.has<BuildingInteractionComponent>(player) &&
-                    registry.get<BuildingInteractionComponent>(player).inside_building;
+                    (registry.has<BuildingInteractionComponent>(player) &&
+                     registry.get<BuildingInteractionComponent>(player).inside_building) ||
+                    registry.has<TransitRideComponent>(player);
                 const Entity near_worker = nearestWorkerInRange(
                     registry,
                     registry.get<TransformComponent>(player),
@@ -719,6 +819,7 @@ int main(int, char**) {
 
         const uint8_t* keys = SDL_GetKeyboardState(nullptr);
         updatePlayer(registry, player, dt, keys);
+        advanceTransitRide(registry, player, dt);
         advanceWorldPhase(registry, dt);
         updateFixedActors(registry, dt);
         updateWorkerSupplyPickups(registry);
@@ -742,7 +843,9 @@ int main(int, char**) {
         const bool inside_render =
             registry.has<BuildingInteractionComponent>(player) &&
             registry.get<BuildingInteractionComponent>(player).inside_building;
-        if (inside_render) {
+        if (playerInsideTransitInterior(registry, player)) {
+            renderTransitInterior(renderer, font, registry, player, active_camera);
+        } else if (inside_render) {
             renderInterior(renderer, font, registry, player, active_camera);
         } else {
             renderWorld(renderer, font, registry, active_camera);
@@ -761,10 +864,21 @@ int main(int, char**) {
                 playerLocationState(registry, player, BUILDING_INTERACTION_RANGE_WU);
             Entity near_worker = nearestWorkerInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
             Entity near_carryable = nearestCarryableObjectInRange(registry, registry.get<TransformComponent>(player), BUILDING_INTERACTION_RANGE_WU);
-            bool inside = registry.has<BuildingInteractionComponent>(player) && registry.get<BuildingInteractionComponent>(player).inside_building;
+            bool inside =
+                (registry.has<BuildingInteractionComponent>(player) &&
+                 registry.get<BuildingInteractionComponent>(player).inside_building) ||
+                registry.has<TransitRideComponent>(player);
             auto& player_comp = registry.get<PlayerComponent>(player);
 
-            if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
+            if (playerInsideTransitInterior(registry, player)) {
+                const auto& ride = registry.get<TransitRideComponent>(player);
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              ride.doors_open ? "E EXIT TRANSIT" : "E LOOK OUT WINDOW",
+                              player_comp.carried_object != MAX_ENTITIES ?
+                                  carryableObjectLabel(registry, player_comp.carried_object) :
+                                  "NONE");
+            } else if (playerCanReturnSuspiciousWorkplaceOutput(registry, player)) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  E RETURN SUSPECT PART  %s  [CARRIED: %s]",
                               locationStateName(location_state),
                               workplaceBenchReadout(registry).c_str(),
@@ -860,9 +974,14 @@ int main(int, char**) {
             drawText(renderer, font, productionLoopSummaryReadout(registry).c_str(), 6, 132, SDL_Color{235, 170, 210, 220}, 0.65f);
             drawText(renderer, font, worldPhaseReadout(registry).c_str(), 6, 146, SDL_Color{190, 225, 245, 220}, 0.65f);
             drawText(renderer, font, inheritedGadgetResultReadout(registry, player).c_str(), 6, 160, SDL_Color{205, 215, 255, 220}, 0.65f);
+            if (playerInsideTransitInterior(registry, player)) {
+                drawText(renderer, font, transitRideReadout(registry, player).c_str(), 6, 174, SDL_Color{130, 230, 255, 230}, 0.65f);
+            } else {
+                drawText(renderer, font, playerDistrictReadout(registry, player).c_str(), 6, 174, SDL_Color{130, 230, 255, 230}, 0.65f);
+            }
             const std::string local_notice = localSuspicionHudReadout(registry);
             if (!local_notice.empty()) {
-                drawText(renderer, font, local_notice.c_str(), 6, 174, SDL_Color{255, 155, 120, 230}, 0.65f);
+                drawText(renderer, font, local_notice.c_str(), 6, 188, SDL_Color{255, 155, 120, 230}, 0.65f);
             }
         }
 

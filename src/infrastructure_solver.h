@@ -203,10 +203,66 @@ inline size_t derivePedestrianPaths(Registry& registry, const ConnectionSpec& sp
     return 1;
 }
 
+inline bool infrastructurePointInMacro(const TransformComponent& transform,
+                                       const MacroZoneComponent& macro) {
+    return transform.x >= macro.x0 && transform.x <= macro.x1 &&
+           transform.y >= macro.y0 && transform.y <= macro.y1;
+}
+
+inline Entity infrastructureFirstBuildingByRoleInMacro(Registry& registry,
+                                                       Entity macro,
+                                                       MicroZoneRole role) {
+    if (!registry.alive(macro) || !registry.has<MacroZoneComponent>(macro)) {
+        return MAX_ENTITIES;
+    }
+    const auto& macro_component = registry.get<MacroZoneComponent>(macro);
+    auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
+    for (Entity building : buildings) {
+        if (registry.get<BuildingUseComponent>(building).role == role &&
+            infrastructurePointInMacro(registry.get<TransformComponent>(building),
+                                       macro_component)) {
+            return building;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline size_t derivePedestrianPathsInMacro(Registry& registry,
+                                           Entity macro,
+                                           const ConnectionSpec& spec) {
+    if (spec.path_kind != PathKind::PEDESTRIAN) return 0;
+
+    const Entity from = infrastructureFirstBuildingByRoleInMacro(registry, macro, spec.from_role);
+    const Entity to = infrastructureFirstBuildingByRoleInMacro(registry, macro, spec.to_role);
+    if (from == MAX_ENTITIES || to == MAX_ENTITIES) return 0;
+    if (pathExistsBetween(registry, from, to, spec.path_kind)) return 0;
+
+    const Entity path = createPedestrianPath(registry, from, to);
+    if (path == MAX_ENTITIES) return 0;
+
+    createRouteSignpost(registry, path, from, to);
+    createRouteSignpost(registry, path, to, from);
+    return 1;
+}
+
 inline size_t deriveInfrastructure(Registry& registry, const WorldConfig& config) {
     (void)config;
     size_t created = 0;
-    created += derivePedestrianPaths(registry, kHousingToWorkplacePedestrianAccess);
-    created += derivePedestrianPaths(registry, kWorkplaceToSupplyPedestrianAccess);
+    auto macros = registry.view<MacroZoneComponent>();
+    if (macros.empty()) {
+        created += derivePedestrianPaths(registry, kHousingToWorkplacePedestrianAccess);
+        created += derivePedestrianPaths(registry, kWorkplaceToSupplyPedestrianAccess);
+        return created;
+    }
+    for (Entity macro : macros) {
+        created += derivePedestrianPathsInMacro(registry,
+                                                macro,
+                                                kHousingToWorkplacePedestrianAccess);
+    }
+    for (Entity macro : macros) {
+        created += derivePedestrianPathsInMacro(registry,
+                                                macro,
+                                                kWorkplaceToSupplyPedestrianAccess);
+    }
     return created;
 }

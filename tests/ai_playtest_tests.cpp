@@ -18,6 +18,10 @@ static void testDefaultSnapshotExposesAiReadableState() {
     assert(snapshot.find("-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ PHASE: DAY") != std::string::npos);
     assert(snapshot.find("TARGET_DETAIL: PHASE: DAY") != std::string::npos);
     assert(snapshot.find("LEGEND: @ player ^v<> facing") != std::string::npos);
+    assert(snapshot.find("TARGETS: HOUSING WORKPLACE SUPPLY MARKET CLINIC STATION") !=
+           std::string::npos);
+    assert(snapshot.find("DISTRICT:") != std::string::npos);
+    assert(snapshot.find("T transit") != std::string::npos);
     assert(snapshot.find('@') != std::string::npos);
     assert(std::count(snapshot.begin(), snapshot.end(), 'w') >= 2);
 
@@ -86,6 +90,73 @@ static void testSyntheticKeysMutateSameGameState() {
     const Entity worker = firstFixedWorker(session.registry);
     assert(worker != MAX_ENTITIES);
     assert(session.registry.get<FixedActorComponent>(worker).acknowledged);
+}
+
+static void testTransitLookOutWindowChoiceMovesToDestination() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "STATION", &result));
+    const uint32_t origin_district = playerCurrentDistrictId(session.registry, session.player);
+    assert(aiPlaytestActionLine(session.registry, session.player).find("E BOARD TRANSIT") !=
+           std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(result == "KEY E OK");
+    assert(session.registry.has<TransitRideComponent>(session.player));
+    const auto ride = session.registry.get<TransitRideComponent>(session.player);
+    assert(ride.destination_district_id != origin_district);
+    const float interior_x = ride.interior_position.x;
+
+    const std::string riding = aiPlaytestSnapshot(session);
+    assert(riding.find("location=\"INSIDE TRANSIT\"") != std::string::npos);
+    assert(riding.find("E LOOK OUT WINDOW") != std::string::npos);
+    assert(riding.find("DOORS: CLOSED") != std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "D", &result));
+    assert(session.registry.has<TransitRideComponent>(session.player));
+    assert(session.registry.get<TransitRideComponent>(session.player).interior_position.x >
+           interior_x);
+
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(result == "KEY E OK");
+    assert(!session.registry.has<TransitRideComponent>(session.player));
+    assert(playerCurrentDistrictId(session.registry, session.player) ==
+           ride.destination_district_id);
+    const std::string arrived = aiPlaytestSnapshot(session);
+    assert(arrived.find("location=\"NEAR TRANSIT\"") != std::string::npos);
+    assert(arrived.find("E BOARD TRANSIT") != std::string::npos);
+}
+
+static void testTransitWaitChoiceOpensDoorsBeforeExit() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "STATION", &result));
+    const uint32_t origin_district = playerCurrentDistrictId(session.registry, session.player);
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(session.registry.has<TransitRideComponent>(session.player));
+    const uint32_t destination_district =
+        session.registry.get<TransitRideComponent>(session.player).destination_district_id;
+    assert(destination_district != origin_district);
+
+    for (int i = 0; i < 10; ++i) {
+        assert(applyAiPlaytestKey(session, "WAIT", &result));
+        assert(result == "KEY WAIT OK");
+    }
+
+    assert(session.registry.has<TransitRideComponent>(session.player));
+    assert(session.registry.get<TransitRideComponent>(session.player).doors_open);
+    const std::string stopped = aiPlaytestSnapshot(session);
+    assert(stopped.find("E EXIT TRANSIT") != std::string::npos);
+    assert(stopped.find("DOORS: OPEN") != std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(result == "KEY E OK");
+    assert(!session.registry.has<TransitRideComponent>(session.player));
+    assert(playerCurrentDistrictId(session.registry, session.player) == destination_district);
 }
 
 static void testSuspicionFixtureLetsAiExerciseWageSpoofLoop() {
@@ -182,6 +253,8 @@ static void testPlaytestStateFileRoundTrip() {
 int main() {
     testDefaultSnapshotExposesAiReadableState();
     testSyntheticKeysMutateSameGameState();
+    testTransitLookOutWindowChoiceMovesToDestination();
+    testTransitWaitChoiceOpensDoorsBeforeExit();
     testSuspicionFixtureLetsAiExerciseWageSpoofLoop();
     testSuspicionFixtureExposesClinicAccessLedgerLoop();
     testSuspicionFixtureLetsAiLayLowInHousing();

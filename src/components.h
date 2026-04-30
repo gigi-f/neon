@@ -31,12 +31,14 @@ enum class InspectionTargetType {
     SUPPLY,
     MARKET,
     CLINIC,
+    TRANSIT_STATION,
     PEDESTRIAN_PATH,
     ROUTE_SIGNPOST,
     WORKER,
     HOUSING_INTERIOR,
     WORKPLACE_INTERIOR,
     SUPPLY_INTERIOR,
+    TRANSIT_INTERIOR,
     CARRYABLE_OBJECT
 };
 
@@ -91,7 +93,9 @@ enum class PlayerLocationState {
     NEAR_WORKPLACE,
     INSIDE_WORKPLACE,
     NEAR_SUPPLY,
-    INSIDE_SUPPLY
+    INSIDE_SUPPLY,
+    NEAR_TRANSIT,
+    INSIDE_TRANSIT
 };
 
 struct TransformComponent {
@@ -287,4 +291,23 @@ struct RouteSignpostComponent {
     MicroZoneRole target_role = MicroZoneRole::HOUSING;
     bool spoofed = false;
     bool signal_recovered = false;
+};
+
+struct StationComponent {
+    uint64_t stable_id = 0;
+    uint32_t district_id = 0;
+    uint32_t transit_link_id = 0;
+    Entity linked_station = MAX_ENTITIES;
+};
+
+struct TransitRideComponent {
+    Entity origin_station = MAX_ENTITIES;
+    Entity destination_station = MAX_ENTITIES;
+    uint32_t origin_district_id = 0;
+    uint32_t destination_district_id = 0;
+    float elapsed_seconds = 0.0f;
+    float stop_interval_seconds = 4.0f;
+    bool doors_open = false;
+    TransformComponent exterior_position{};
+    TransformComponent interior_position{};
 };

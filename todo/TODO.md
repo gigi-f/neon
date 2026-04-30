@@ -52,17 +52,9 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 
 Gameplay outcome: the world is no longer one site cluster. A transit station carries the player between two parallel districts, each with its own worker, sites, and per-district suspicion state.
 
-Big Picture: the no-transit limitation has served its purpose (kept the prototype small while the verb vocabulary stabilized). Lifting it now mirrors the existing loop in a second authored district without adding routes, schedules, vehicles, or city-scale infrastructure. Transit is one stop, one direction, manual ride. Per-district state proves the underlying mechanics survive scale.
+Big Picture: the no-transit limitation has served its purpose (kept the prototype small while the verb vocabulary stabilized). Lifting it now mirrors the existing loop in a second authored district without adding routes, schedules, vehicles, or city-scale infrastructure. Transit is one stop, one direction, a small ride interior, and a real-time arrival choice. Per-district state proves the underlying mechanics survive scale.
 
 Logical next step: with two districts and transit, the next small step is one piece of state that *travels* between districts (an institutional record that follows the player, or a carried object whose provenance changes meaning across districts).
-
-## Phase 90: Add a station, a second authored district, and a player ride verb.
-
-- [ ] Allow `WorldConfig` to authorize a second `MicroZone` cluster with its own housing, workplace, supply, market, clinic, and signposts. Each cluster is self-contained.
-- [ ] Add a `StationComponent` and one station glyph on the boundary of each district, paired by a `transit_link_id`.
-- [ ] `E` at a station moves the player instantly to the connected station in the other district with a short `RIDING TRANSIT...` HUD message; carried object follows the player.
-- [ ] Tiny save/load preserves the player's current district and station state; save version bumped beyond current `V10`.
-- [ ] Acceptance: 2-district and 1-district configs both build cleanly; ride from A→B and B→A round-trip with and without a carried object; AI playtest map renders both clusters and reports the player's current district.
 
 ## Phase 91: Per-district worker spawn, routes, and inspection labels.
 

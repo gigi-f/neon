@@ -56,6 +56,8 @@ struct WorldConfig {
     int clinic_building_count = 0;
     int fixed_worker_count = 0;
     int carryable_object_count = 0;
+    bool transit_enabled = false;
+    float transit_ride_seconds = 4.0f;
     float world_phase_interval_seconds = 240.0f;
     WorldPhase initial_world_phase = WorldPhase::DAY;
     uint32_t seed = kDefaultWorldSeed;
