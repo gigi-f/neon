@@ -969,7 +969,7 @@ static void testCarryableItemKindLabelsAndSaveRoundTrip() {
     assert(workerCarryReadout(registry, worker) == "WORKER ROUTINE: DELIVERING SUPPLY; REASON: WAGE ROUTE; CARRYING: SUPPLY");
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V11") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V12") != std::string::npos);
     assert(serialized.find("CARRYABLE 1 SUPPLY") != std::string::npos);
 
     TinySaveState parsed;
@@ -5484,7 +5484,7 @@ static void testTinySaveRoundTripRestoresWageRecordSpoofed() {
 
     registry.get<FixedActorComponent>(worker).wage_record_spoofed = true;
     const std::string save_text = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(save_text.find("NEON_TINY_SAVE_V11") != std::string::npos);
+    assert(save_text.find("NEON_TINY_SAVE_V12") != std::string::npos);
 
     TinySaveState state;
     assert(deserializeTinySaveState(save_text, state) == TinySaveStatus::OK);
@@ -5856,7 +5856,7 @@ static void testTinySaveRoundTripRestoresWorldPhaseAndTwoWorkers() {
     registry.get<FixedActorComponent>(workers[1]).acknowledged = true;
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V11") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V12") != std::string::npos);
     assert(serialized.find("WORLD_PHASE NIGHT 3") != std::string::npos);
     assert(serialized.find("WORKERS 2") != std::string::npos);
 
@@ -6000,6 +6000,54 @@ static std::vector<Entity> stationsInOrder(Registry& registry) {
     return ordered;
 }
 
+static Entity firstBuildingByRoleInDistrict(Registry& registry,
+                                            MicroZoneRole role,
+                                            uint32_t district_id) {
+    auto buildings = registry.view<BuildingComponent, BuildingUseComponent, TransformComponent>();
+    for (Entity building : buildings) {
+        if (registry.get<BuildingUseComponent>(building).role == role &&
+            districtIdForEntity(registry, building) == district_id) {
+            return building;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+static Entity firstPathBetweenRolesInDistrict(Registry& registry,
+                                              MicroZoneRole from_role,
+                                              MicroZoneRole to_role,
+                                              uint32_t district_id) {
+    auto paths = registry.view<PathComponent>();
+    for (Entity path_entity : paths) {
+        const auto& path = registry.get<PathComponent>(path_entity);
+        if (path.kind != PathKind::PEDESTRIAN ||
+            districtIdForEntity(registry, path_entity) != district_id ||
+            !registry.alive(path.from) ||
+            !registry.alive(path.to) ||
+            !registry.has<BuildingUseComponent>(path.from) ||
+            !registry.has<BuildingUseComponent>(path.to)) {
+            continue;
+        }
+        const MicroZoneRole from = registry.get<BuildingUseComponent>(path.from).role;
+        const MicroZoneRole to = registry.get<BuildingUseComponent>(path.to).role;
+        if ((from == from_role && to == to_role) ||
+            (from == to_role && to == from_role)) {
+            return path_entity;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+static Entity firstWorkerInDistrict(Registry& registry, uint32_t district_id) {
+    const std::vector<Entity> workers = fixedWorkersInSaveOrder(registry);
+    for (Entity worker : workers) {
+        if (districtIdForEntity(registry, worker) == district_id) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
 static void testTransitStationsRequireTwoDistrictConfig() {
     Registry one_district;
     WorldConfig one = makeTransitTestConfig(1);
@@ -6085,7 +6133,7 @@ static void testTinySaveRoundTripRestoresTransitInterior() {
     registry.get<TransitRideComponent>(player).interior_position.x = 18.0f;
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V11") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V12") != std::string::npos);
     assert(serialized.find("TRANSIT 1") != std::string::npos);
 
     TinySaveState state;
@@ -6097,6 +6145,310 @@ static void testTinySaveRoundTripRestoresTransitInterior() {
     assert(closeTo(ride.elapsed_seconds, 0.75f));
     assert(closeTo(ride.interior_position.x, 18.0f));
     assert(ride.destination_station == stations[1]);
+}
+
+static void testPerDistrictWorkersSpawnOnLocalLaborRoutes() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    buildTransitWorld(registry, config);
+
+    const std::vector<Entity> workers = fixedWorkersInSaveOrder(registry);
+    assert(workers.size() == 2);
+    assert(firstWorkerInDistrict(registry, 0) != MAX_ENTITIES);
+    assert(firstWorkerInDistrict(registry, 1) != MAX_ENTITIES);
+
+    for (Entity worker : workers) {
+        const uint32_t district_id = districtIdForEntity(registry, worker);
+        const auto& actor = registry.get<FixedActorComponent>(worker);
+        assert(pathConnectsRoles(registry,
+                                 actor.path_entity,
+                                 MicroZoneRole::HOUSING,
+                                 MicroZoneRole::WORKPLACE));
+        assert(districtIdForEntity(registry, actor.path_entity) == district_id);
+        assert(workerCarryReadout(registry, worker).find(
+                   districtLabel(district_id) + ":WORKER") != std::string::npos);
+    }
+
+    for (int i = 0; i < 120; ++i) {
+        updateFixedActors(registry, 0.1f);
+    }
+    for (Entity worker : workers) {
+        assert(districtIdForEntity(registry,
+                                   registry.get<FixedActorComponent>(worker).path_entity) ==
+               districtIdForEntity(registry, worker));
+    }
+}
+
+static void testDistrictTagsAppearOnInspectionLabels() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    buildTransitWorld(registry, config);
+
+    const Entity workplace_a = firstBuildingByRoleInDistrict(registry, MicroZoneRole::WORKPLACE, 0);
+    const Entity path_a = firstPathBetweenRolesInDistrict(registry,
+                                                         MicroZoneRole::HOUSING,
+                                                         MicroZoneRole::WORKPLACE,
+                                                         0);
+    const Entity signpost_a = firstRouteSignpostForPath(registry, path_a);
+    const Entity worker_a = firstWorkerInDistrict(registry, 0);
+    assert(workplace_a != MAX_ENTITIES);
+    assert(path_a != MAX_ENTITIES);
+    assert(signpost_a != MAX_ENTITIES);
+    assert(worker_a != MAX_ENTITIES);
+
+    assert(buildingInspectionReadout(registry, workplace_a).find("A:WORKPLACE") !=
+           std::string::npos);
+    assert(pathInspectionReadout(registry, path_a).find("A:ROUTE: LABOR ROUTE") !=
+           std::string::npos);
+    assert(routeSignpostReadout(registry, signpost_a).find("A:ROUTE: LABOR ROUTE") !=
+           std::string::npos);
+    assert(inheritedGadgetWorkerScan(registry, worker_a).find("A:WORKER SIGNAL") !=
+           std::string::npos);
+}
+
+static void testDistrictSuspicionAndWageReadoutsDoNotLeak() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    buildTransitWorld(registry, config);
+
+    const Entity worker_a = firstWorkerInDistrict(registry, 0);
+    const Entity worker_b = firstWorkerInDistrict(registry, 1);
+    const Entity workplace_a = firstBuildingByRoleInDistrict(registry, MicroZoneRole::WORKPLACE, 0);
+    const Entity workplace_b = firstBuildingByRoleInDistrict(registry, MicroZoneRole::WORKPLACE, 1);
+    const Entity clinic_a = firstBuildingByRoleInDistrict(registry, MicroZoneRole::CLINIC, 0);
+    const Entity clinic_b = firstBuildingByRoleInDistrict(registry, MicroZoneRole::CLINIC, 1);
+    const Entity object = firstCarryableObject(registry);
+    assert(worker_a != MAX_ENTITIES);
+    assert(worker_b != MAX_ENTITIES);
+    assert(workplace_a != MAX_ENTITIES);
+    assert(workplace_b != MAX_ENTITIES);
+    assert(clinic_a != MAX_ENTITIES);
+    assert(clinic_b != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+
+    recordLocalSuspicion(registry,
+                         worker_a,
+                         LocalSuspicionCause::MISSING_PART,
+                         workplace_a,
+                         object,
+                         MAX_ENTITIES);
+
+    assert(localSuspicionHudReadout(registry).find("LOCAL NOTICE: A:WORKER SAW MISSING PART") !=
+           std::string::npos);
+    assert(workerCarryReadout(registry, worker_a).find("SUSPICION: MISSING PART") !=
+           std::string::npos);
+    assert(workerCarryReadout(registry, worker_b).find("SUSPICION") == std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace_a).find("SUSPICION: MISSING PART") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace_b).find("SUSPICION") ==
+           std::string::npos);
+
+    const std::string scan_a = inheritedGadgetWorkerScan(registry, worker_a);
+    const std::string scan_b = inheritedGadgetWorkerScan(registry, worker_b);
+    assert(scan_a.find("A:WAGE IMPACT: INCIDENT LOGGED") != std::string::npos);
+    assert(scan_a.find("LOCAL WITNESS: A:WORKER") != std::string::npos);
+    assert(scan_b.find("WAGE IMPACT") == std::string::npos);
+    assert(scan_b.find("LOCAL WITNESS") == std::string::npos);
+
+    assert(!clinicAccessLedgerReadout(registry, clinic_a).empty());
+    assert(clinicAccessLedgerReadout(registry, clinic_b).empty());
+    assert(clinicAccessCanSpoof(registry, clinic_a));
+    assert(!clinicAccessCanSpoof(registry, clinic_b));
+
+    registry.get<ClinicAccessLedgerComponent>(clinic_a).access_spoofed = true;
+    assert(inheritedGadgetWorkerScan(registry, worker_a)
+               .find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") != std::string::npos);
+    assert(inheritedGadgetWorkerScan(registry, worker_b)
+               .find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") == std::string::npos);
+
+    registry.get<FixedActorComponent>(worker_a).wage_record_spoofed = true;
+    assert(inheritedGadgetWorkerScan(registry, worker_a)
+               .find("A:WAGE IMPACT: RECORD ALTERED") != std::string::npos);
+    assert(inheritedGadgetWorkerScan(registry, worker_b).find("WAGE IMPACT") ==
+           std::string::npos);
+}
+
+static void testDistrictDependencyDisruptionDoesNotLeak() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    buildTransitWorld(registry, config);
+
+    const Entity workplace_a = firstBuildingByRoleInDistrict(registry, MicroZoneRole::WORKPLACE, 0);
+    const Entity workplace_b = firstBuildingByRoleInDistrict(registry, MicroZoneRole::WORKPLACE, 1);
+    const Entity supply_a = firstBuildingByRoleInDistrict(registry, MicroZoneRole::SUPPLY, 0);
+    const Entity supply_b = firstBuildingByRoleInDistrict(registry, MicroZoneRole::SUPPLY, 1);
+    assert(workplace_a != MAX_ENTITIES);
+    assert(workplace_b != MAX_ENTITIES);
+    assert(supply_a != MAX_ENTITIES);
+    assert(supply_b != MAX_ENTITIES);
+
+    assert(toggleDependencyDisruption(registry, kWorkplaceDependsOnSupply, 0));
+    assert(dependencyDisrupted(registry, kWorkplaceDependsOnSupply, 0));
+    assert(!dependencyDisrupted(registry, kWorkplaceDependsOnSupply, 1));
+    assert(buildingInspectionReadout(registry, workplace_a).find("DEPENDENCY: DISRUPTED") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, supply_a).find("DEPENDENCY: DISRUPTED") !=
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, workplace_b).find("DEPENDENCY: DISRUPTED") ==
+           std::string::npos);
+    assert(buildingInspectionReadout(registry, supply_b).find("DEPENDENCY: DISRUPTED") ==
+           std::string::npos);
+    assert(dependencyScanReadout(registry,
+                                 MicroZoneRole::WORKPLACE,
+                                 kWorkplaceDependsOnSupply,
+                                 1)
+               .find("FLOW STATUS: CONFUSED") == std::string::npos);
+}
+
+static void testTinySaveRoundTripRestoresTwoDistrictWorkersAndRecords() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    Entity player = buildTransitWorld(registry, config);
+
+    const Entity worker_a = firstWorkerInDistrict(registry, 0);
+    const Entity worker_b = firstWorkerInDistrict(registry, 1);
+    const Entity workplace_a = firstBuildingByRoleInDistrict(registry, MicroZoneRole::WORKPLACE, 0);
+    const Entity object = firstCarryableObject(registry);
+    assert(worker_a != MAX_ENTITIES);
+    assert(worker_b != MAX_ENTITIES);
+    assert(workplace_a != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+
+    registry.get<FixedActorComponent>(worker_a).wage_record_spoofed = true;
+    registry.get<FixedActorComponent>(worker_b).acknowledged = true;
+    recordLocalSuspicion(registry,
+                         worker_a,
+                         LocalSuspicionCause::MISSING_PART,
+                         workplace_a,
+                         object,
+                         MAX_ENTITIES);
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState state;
+    assert(deserializeTinySaveState(serialized, state) == TinySaveStatus::OK);
+
+    Registry loaded;
+    Entity loaded_player = buildTransitWorld(loaded, config);
+    assert(applyTinySaveState(loaded, loaded_player, state) == TinySaveStatus::OK);
+
+    const Entity loaded_worker_a = firstWorkerInDistrict(loaded, 0);
+    const Entity loaded_worker_b = firstWorkerInDistrict(loaded, 1);
+    assert(loaded_worker_a != MAX_ENTITIES);
+    assert(loaded_worker_b != MAX_ENTITIES);
+    assert(loaded.get<FixedActorComponent>(loaded_worker_a).wage_record_spoofed);
+    assert(loaded.get<FixedActorComponent>(loaded_worker_b).acknowledged);
+    assert(loaded.has<LocalSuspicionComponent>(loaded_worker_a));
+    assert(localSuspicionRecordExists(loaded.get<LocalSuspicionComponent>(loaded_worker_a)));
+    assert(!loaded.has<LocalSuspicionComponent>(loaded_worker_b));
+}
+
+static void testTinySaveRoundTripRestoresPerDistrictInterferenceBoundary() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    Entity player = buildTransitWorld(registry, config);
+
+    const auto stations = stationsInOrder(registry);
+    assert(stations.size() == 2);
+    const Entity worker_a = firstWorkerInDistrict(registry, 0);
+    const Entity worker_b = firstWorkerInDistrict(registry, 1);
+    const Entity workplace_a = firstBuildingByRoleInDistrict(registry, MicroZoneRole::WORKPLACE, 0);
+    const Entity workplace_b = firstBuildingByRoleInDistrict(registry, MicroZoneRole::WORKPLACE, 1);
+    const Entity object = firstCarryableObject(registry);
+    const Entity supply_path_a = firstPathBetweenRolesInDistrict(registry,
+                                                                 MicroZoneRole::WORKPLACE,
+                                                                 MicroZoneRole::SUPPLY,
+                                                                 0);
+    const Entity supply_path_b = firstPathBetweenRolesInDistrict(registry,
+                                                                 MicroZoneRole::WORKPLACE,
+                                                                 MicroZoneRole::SUPPLY,
+                                                                 1);
+    const Entity signpost_a = firstRouteSignpostForPath(registry, supply_path_a);
+    const Entity signpost_b = firstRouteSignpostForPath(registry, supply_path_b);
+    assert(worker_a != MAX_ENTITIES);
+    assert(worker_b != MAX_ENTITIES);
+    assert(workplace_a != MAX_ENTITIES);
+    assert(workplace_b != MAX_ENTITIES);
+    assert(object != MAX_ENTITIES);
+    assert(signpost_a != MAX_ENTITIES);
+    assert(signpost_b != MAX_ENTITIES);
+
+    registry.get<RouteSignpostComponent>(signpost_a).spoofed = true;
+    assert(toggleDependencyDisruption(registry, kWorkplaceDependsOnSupply, 0));
+    registry.get<FixedActorComponent>(worker_a).wage_record_spoofed = true;
+    recordLocalSuspicion(registry,
+                         worker_a,
+                         LocalSuspicionCause::MISSING_PART,
+                         workplace_a,
+                         object,
+                         supply_path_a);
+    assert(deEscalateLocalSuspicion(registry,
+                                    worker_a,
+                                    LocalSuspicionResolution::LAID_LOW,
+                                    firstBuildingByRoleInDistrict(registry,
+                                                                  MicroZoneRole::HOUSING,
+                                                                  0)));
+
+    assert(pathInspectionReadout(registry, supply_path_a).find("A:ROUTE: SUPPLY ROUTE") !=
+           std::string::npos);
+    assert(pathInspectionReadout(registry, supply_path_a).find("FLOW: BLOCKED") !=
+           std::string::npos);
+    assert(pathInspectionReadout(registry, supply_path_b).find("FLOW: BLOCKED") ==
+           std::string::npos);
+    assert(dependencyScanReadout(registry,
+                                 MicroZoneRole::WORKPLACE,
+                                 kWorkplaceDependsOnSupply,
+                                 0)
+               .find("DISTRICT: A; FLOW: MATERIAL") != std::string::npos);
+    assert(localSuspicionDebuggerReadoutForWorker(registry, worker_a)
+               .find("LOCAL WITNESS: A:WORKER") != std::string::npos);
+    assert(localSuspicionDebuggerReadoutForWorker(registry, worker_a)
+               .find("DE-ESCALATED: LAID LOW MISSING PART") != std::string::npos);
+    assert(workerCarryReadout(registry, worker_b).find("SUSPICION") == std::string::npos);
+
+    registry.get<TransformComponent>(player) = stationExitTransform(registry, stations[1]);
+    assert(playerCurrentDistrictId(registry, player) == 1);
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(serialized.find("DEPENDENCY_DISRUPTIONS 1") != std::string::npos);
+    assert(serialized.find("SPOOFED_SIGNPOSTS 1") != std::string::npos);
+    assert(serialized.find("LAID_LOW") != std::string::npos);
+
+    TinySaveState state;
+    assert(deserializeTinySaveState(serialized, state) == TinySaveStatus::OK);
+
+    Registry loaded;
+    Entity loaded_player = buildTransitWorld(loaded, config);
+    assert(applyTinySaveState(loaded, loaded_player, state) == TinySaveStatus::OK);
+    assert(playerCurrentDistrictId(loaded, loaded_player) == 1);
+
+    const Entity loaded_worker_a = firstWorkerInDistrict(loaded, 0);
+    const Entity loaded_worker_b = firstWorkerInDistrict(loaded, 1);
+    const Entity loaded_supply_path_a = firstPathBetweenRolesInDistrict(loaded,
+                                                                       MicroZoneRole::WORKPLACE,
+                                                                       MicroZoneRole::SUPPLY,
+                                                                       0);
+    const Entity loaded_supply_path_b = firstPathBetweenRolesInDistrict(loaded,
+                                                                       MicroZoneRole::WORKPLACE,
+                                                                       MicroZoneRole::SUPPLY,
+                                                                       1);
+    const Entity loaded_signpost_a = firstRouteSignpostForPath(loaded, loaded_supply_path_a);
+    const Entity loaded_signpost_b = firstRouteSignpostForPath(loaded, loaded_supply_path_b);
+    assert(routeSignpostSpoofed(loaded, loaded_signpost_a));
+    assert(!routeSignpostSpoofed(loaded, loaded_signpost_b));
+    assert(dependencyDisrupted(loaded, kWorkplaceDependsOnSupply, 0));
+    assert(!dependencyDisrupted(loaded, kWorkplaceDependsOnSupply, 1));
+    assert(loaded.get<FixedActorComponent>(loaded_worker_a).wage_record_spoofed);
+    assert(!loaded.get<FixedActorComponent>(loaded_worker_b).wage_record_spoofed);
+    assert(loaded.has<LocalSuspicionComponent>(loaded_worker_a));
+    assert(loaded.get<LocalSuspicionComponent>(loaded_worker_a).resolution ==
+           LocalSuspicionResolution::LAID_LOW);
+    assert(!loaded.has<LocalSuspicionComponent>(loaded_worker_b));
+
+    assert(playerCanBoardTransit(loaded, loaded_player, 18.0f));
+    assert(enterTransitRide(loaded, loaded_player, 18.0f, config.transit_ride_seconds));
+    assert(finishTransitRide(loaded, loaded_player, true));
+    assert(playerCurrentDistrictId(loaded, loaded_player) == 0);
+    assert(routeSignpostSpoofed(loaded, loaded_signpost_a));
+    assert(dependencyDisrupted(loaded, kWorkplaceDependsOnSupply, 0));
 }
 
 int main() {
@@ -6243,5 +6595,11 @@ int main() {
     testTransitRideLookOutWindowCarriesObjectToDestination();
     testTransitRideCanWaitForDoorsThenExit();
     testTinySaveRoundTripRestoresTransitInterior();
+    testPerDistrictWorkersSpawnOnLocalLaborRoutes();
+    testDistrictTagsAppearOnInspectionLabels();
+    testDistrictSuspicionAndWageReadoutsDoNotLeak();
+    testDistrictDependencyDisruptionDoesNotLeak();
+    testTinySaveRoundTripRestoresTwoDistrictWorkersAndRecords();
+    testTinySaveRoundTripRestoresPerDistrictInterferenceBoundary();
     return 0;
 }

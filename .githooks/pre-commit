@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+tools/check_openspec_completed_archives.sh
+
 if [[ "${NEON_SKIP_PLAYTEST_HOOK:-0}" == "1" ]]; then
     echo "Skipping Neon playtest hook because NEON_SKIP_PLAYTEST_HOOK=1."
     exit 0

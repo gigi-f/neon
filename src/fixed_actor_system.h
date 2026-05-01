@@ -69,11 +69,34 @@ inline bool pathConnectsRoles(Registry& registry,
     return (from == a && to == b) || (from == b && to == a);
 }
 
+inline bool fixedActorPointInMacro(const TransformComponent& transform,
+                                   const MacroZoneComponent& macro) {
+    return transform.x >= macro.x0 && transform.x <= macro.x1 &&
+           transform.y >= macro.y0 && transform.y <= macro.y1;
+}
+
+inline uint32_t fixedActorDistrictIdForEntity(Registry& registry, Entity entity) {
+    if (!registry.alive(entity) || !registry.has<TransformComponent>(entity)) {
+        return 0;
+    }
+    const auto& transform = registry.get<TransformComponent>(entity);
+    auto macros = registry.view<MacroZoneComponent>();
+    for (Entity macro : macros) {
+        const auto& component = registry.get<MacroZoneComponent>(macro);
+        if (fixedActorPointInMacro(transform, component)) {
+            return component.macro_id;
+        }
+    }
+    return 0;
+}
+
 inline bool pathHasDisruptedDependency(Registry& registry, Entity path_entity) {
+    const uint32_t path_district_id = fixedActorDistrictIdForEntity(registry, path_entity);
     auto disruptions = registry.view<DependencyDisruptionComponent>();
     for (Entity disruption : disruptions) {
         const auto& component = registry.get<DependencyDisruptionComponent>(disruption);
         if (component.disrupted &&
+            component.district_id == path_district_id &&
             pathConnectsRoles(registry,
                               path_entity,
                               component.dependent_role,
@@ -191,15 +214,39 @@ inline Entity spawnFixedWorker(Registry& registry, Entity path_entity) {
     return actor;
 }
 
+inline bool fixedActorPathTouchesDistrict(Registry& registry, Entity path_entity, uint32_t district_id) {
+    return registry.alive(path_entity) &&
+           registry.has<PathComponent>(path_entity) &&
+           fixedActorDistrictIdForEntity(registry, path_entity) == district_id;
+}
+
 inline std::vector<Entity> fixedWorkerSpawnPaths(Registry& registry) {
     std::vector<Entity> paths;
     auto path_entities = registry.view<PathComponent>();
+    auto macros = registry.view<MacroZoneComponent>();
+    std::sort(macros.begin(), macros.end(), [&](Entity a, Entity b) {
+        return registry.get<MacroZoneComponent>(a).macro_id <
+               registry.get<MacroZoneComponent>(b).macro_id;
+    });
+    for (Entity macro : macros) {
+        const uint32_t district_id = registry.get<MacroZoneComponent>(macro).macro_id;
+        for (Entity path : path_entities) {
+            if (registry.get<PathComponent>(path).kind == PathKind::PEDESTRIAN &&
+                pathConnectsRoles(registry, path, MicroZoneRole::HOUSING, MicroZoneRole::WORKPLACE) &&
+                fixedActorPathTouchesDistrict(registry, path, district_id)) {
+                paths.push_back(path);
+                break;
+            }
+        }
+    }
     for (Entity path : path_entities) {
-        if (registry.get<PathComponent>(path).kind == PathKind::PEDESTRIAN) {
+        if (registry.get<PathComponent>(path).kind != PathKind::PEDESTRIAN) {
+            continue;
+        }
+        if (std::find(paths.begin(), paths.end(), path) == paths.end()) {
             paths.push_back(path);
         }
     }
-    std::sort(paths.begin(), paths.end());
     return paths;
 }
 

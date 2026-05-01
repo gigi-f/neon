@@ -283,6 +283,7 @@ struct DependencyDisruptionComponent {
     MicroZoneRole provider_role = MicroZoneRole::SUPPLY;
     bool disrupted = false;
     bool recovered = false;
+    uint32_t district_id = 0;
 };
 
 struct RouteSignpostComponent {

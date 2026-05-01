@@ -56,19 +56,6 @@ Big Picture: the no-transit limitation has served its purpose (kept the prototyp
 
 Logical next step: with two districts and transit, the next small step is one piece of state that *travels* between districts (an institutional record that follows the player, or a carried object whose provenance changes meaning across districts).
 
-## Phase 91: Per-district worker spawn, routes, and inspection labels.
-
-- [ ] Each district spawns its own configured workers on its own derived paths; workers do not migrate or perceive across districts.
-- [ ] Inspection labels (`PURPOSE`, `ROUTE`, `WAGE IMPACT`, `LOCAL NOTICE`, `LOCAL WITNESS`) include a short district tag (e.g., `A:WORKER`, `B:WORKER`) so AI playtest readouts and HUD remain unambiguous.
-- [ ] Active local suspicion in district A does not affect worker readouts, wage spoofs, or audit state in district B.
-- [ ] Acceptance: tests verify per-district isolation of suspicion, wage spoofing, and dependency disruption; save/load round-trips per-district worker state for both districts.
-
-## Phase 92: Per-district interference state and persistence boundary.
-
-- [ ] Spoofed signposts, dependency disruptions, and `LAID_LOW` traces are scoped to their district and inspected with district tags.
-- [ ] Returning to a district restores all of its current-scope flow, witness, and wage state from save without leaking to the other district.
-- [ ] Acceptance: tests cover (a) spoofing in A while B is clean, (b) save/load while in B with active spoof in A, (c) ride to A restores the original spoof state; AI playtest transcripts demonstrate cross-district navigation with state intact.
-
 ## Still Deferred
 
 These remain intentionally out of scope until a smaller phase above creates a concrete need:

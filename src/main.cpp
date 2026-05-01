@@ -886,7 +886,7 @@ int main(int, char**) {
             } else if (playerCanLayLowInHousing(registry, player)) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  T LAY LOW  %s  [CARRIED: %s]",
                               locationStateName(location_state),
-                              shelterSupplyReadout(registry).c_str(),
+                              shelterSupplyReadoutForPlayer(registry, player).c_str(),
                               player_comp.carried_object != MAX_ENTITIES ?
                                   carryableObjectLabel(registry, player_comp.carried_object) :
                                   "NONE");
@@ -902,7 +902,7 @@ int main(int, char**) {
             } else if (playerCanStoreSupplyAtShelter(registry, player)) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  E STORE SUPPLY  %s  [CARRIED: %s]",
                               locationStateName(location_state),
-                              shelterSupplyReadout(registry).c_str(),
+                              shelterSupplyReadoutForPlayer(registry, player).c_str(),
                               carryableObjectLabel(registry, player_comp.carried_object));
             } else if (playerCanStockWorkplaceBench(registry, player)) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  E STOCK BENCH  %s  [CARRIED: %s]",

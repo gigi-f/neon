@@ -35,7 +35,7 @@ static void testSuspicionFixtureLetsAiLayLowInHousing() {
     AiPlaytestSession session;
     assert(buildAiPlaytestSession(session, AiPlaytestScenario::SUSPICION));
 
-    Entity housing = firstBuildingByRole(session.registry, MicroZoneRole::HOUSING);
+    Entity housing = aiFirstBuildingByRoleInCurrentDistrict(session, MicroZoneRole::HOUSING);
     assert(housing != MAX_ENTITIES);
     session.registry.get<ShelterStockComponent>(housing).current_supply = 1;
 
@@ -159,12 +159,41 @@ static void testTransitWaitChoiceOpensDoorsBeforeExit() {
     assert(playerCurrentDistrictId(session.registry, session.player) == destination_district);
 }
 
+static void testSignpostWarpUsesCurrentDistrictAfterTransit() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "STATION", &result));
+    const uint32_t origin_district = playerCurrentDistrictId(session.registry, session.player);
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(applyAiPlaytestKey(session, "E", &result));
+    const uint32_t destination_district =
+        playerCurrentDistrictId(session.registry, session.player);
+    assert(destination_district != origin_district);
+
+    const Entity local_signpost = aiFirstSignpostInCurrentDistrict(session);
+    assert(local_signpost != MAX_ENTITIES);
+    assert(districtIdForEntity(session.registry, local_signpost) == destination_district);
+    assert(warpAiPlaytestPlayer(session, "SIGNPOST", &result));
+    assert(result == "WARP SIGNPOST OK");
+    const std::string snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("DISTRICT: " + districtLabel(destination_district)) !=
+           std::string::npos);
+    assert(routeSignpostReadout(session.registry, local_signpost)
+               .find(districtLabel(destination_district) + ":ROUTE") !=
+           std::string::npos);
+    assert(routeSignpostReadout(session.registry, local_signpost)
+               .find(districtLabel(origin_district) + ":ROUTE") ==
+           std::string::npos);
+}
+
 static void testSuspicionFixtureLetsAiExerciseWageSpoofLoop() {
     AiPlaytestSession session;
     assert(buildAiPlaytestSession(session, AiPlaytestScenario::SUSPICION));
 
     const std::string before = aiPlaytestSnapshot(session);
-    assert(before.find("LOCAL NOTICE: WORKER SAW MISSING PART") != std::string::npos);
+    assert(before.find("LOCAL NOTICE: A:WORKER SAW MISSING PART") != std::string::npos);
     assert(before.find("G INTERFERENCE TORCH SPOOF WAGE RECORD") != std::string::npos);
     assert(before.find("DOCK RISK: ACTIVE") != std::string::npos);
 
@@ -208,7 +237,7 @@ static void testSuspicionFixtureExposesClinicAccessLedgerLoop() {
     assert(worker_mismatch.find("DOCK RISK: ACTIVE") != std::string::npos);
     assert(worker_mismatch.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") !=
            std::string::npos);
-    assert(worker_mismatch.find("LOCAL WITNESS: WORKER") != std::string::npos);
+    assert(worker_mismatch.find("LOCAL WITNESS: A:WORKER") != std::string::npos);
 
     assert(applyAiPlaytestKey(session, "G", &result));
     assert(result == "KEY G OK");
@@ -218,7 +247,7 @@ static void testSuspicionFixtureExposesClinicAccessLedgerLoop() {
     assert(worker_wage_spoofed.find("DOCK RISK: CLEARED") != std::string::npos);
     assert(worker_wage_spoofed.find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") !=
            std::string::npos);
-    assert(worker_wage_spoofed.find("LOCAL WITNESS: WORKER") != std::string::npos);
+    assert(worker_wage_spoofed.find("LOCAL WITNESS: A:WORKER") != std::string::npos);
 
     assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
     assert(applyAiPlaytestKey(session, "G", &result));
@@ -234,6 +263,12 @@ static void testPlaytestStateFileRoundTrip() {
 
     AiPlaytestSession saved;
     assert(buildAiPlaytestSession(saved));
+    assert(warpAiPlaytestPlayer(saved, "SIGNPOST"));
+    const Entity signpost = aiFirstSignpostInCurrentDistrict(saved);
+    assert(signpost != MAX_ENTITIES);
+    const uint32_t district_id = districtIdForEntity(saved.registry, signpost);
+    saved.registry.get<RouteSignpostComponent>(signpost).spoofed = true;
+    assert(toggleDependencyDisruption(saved.registry, kWorkplaceDependsOnSupply, district_id));
     assert(warpAiPlaytestPlayer(saved, "WORKER"));
     const float saved_x = saved.registry.get<TransformComponent>(saved.player).x;
     const float saved_y = saved.registry.get<TransformComponent>(saved.player).y;
@@ -246,6 +281,8 @@ static void testPlaytestStateFileRoundTrip() {
            0.001f);
     assert(std::fabs(loaded.registry.get<TransformComponent>(loaded.player).y - saved_y) <
            0.001f);
+    assert(dependencyDisrupted(loaded.registry, kWorkplaceDependsOnSupply, district_id));
+    assert(routeSignpostSpoofed(loaded.registry, aiFirstSignpostInCurrentDistrict(loaded)));
 
     std::remove(path.c_str());
 }
@@ -255,6 +292,7 @@ int main() {
     testSyntheticKeysMutateSameGameState();
     testTransitLookOutWindowChoiceMovesToDestination();
     testTransitWaitChoiceOpensDoorsBeforeExit();
+    testSignpostWarpUsesCurrentDistrictAfterTransit();
     testSuspicionFixtureLetsAiExerciseWageSpoofLoop();
     testSuspicionFixtureExposesClinicAccessLedgerLoop();
     testSuspicionFixtureLetsAiLayLowInHousing();

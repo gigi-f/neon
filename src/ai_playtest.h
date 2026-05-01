@@ -189,6 +189,17 @@ inline Entity aiFirstPathBetweenRoles(Registry& registry,
     return MAX_ENTITIES;
 }
 
+inline Entity aiFirstFixedWorkerInDistrict(Registry& registry, uint32_t district_id) {
+    auto workers = registry.view<FixedActorComponent, TransformComponent>();
+    std::sort(workers.begin(), workers.end());
+    for (Entity worker : workers) {
+        if (districtIdForEntity(registry, worker) == district_id) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
 inline bool buildAiPlaytestSession(AiPlaytestSession& session,
                                    AiPlaytestScenario scenario = AiPlaytestScenario::DEFAULT) {
     session = AiPlaytestSession{};
@@ -215,11 +226,14 @@ inline bool buildAiPlaytestSession(AiPlaytestSession& session,
 
     if (scenario == AiPlaytestScenario::SUSPICION) {
         const Entity workplace = firstWorkplaceBenchBuilding(session.registry);
-        const Entity worker = firstFixedWorker(session.registry);
         const Entity object = firstCarryableObject(session.registry);
         const Entity path = aiFirstPathBetweenRoles(session.registry,
                                                    MicroZoneRole::WORKPLACE,
                                                    MicroZoneRole::SUPPLY);
+        const Entity worker = path == MAX_ENTITIES ?
+            firstFixedWorker(session.registry) :
+            aiFirstFixedWorkerInDistrict(session.registry,
+                                         districtIdForEntity(session.registry, path));
         if (workplace == MAX_ENTITIES || worker == MAX_ENTITIES ||
             object == MAX_ENTITIES || path == MAX_ENTITIES) {
             return false;
@@ -506,31 +520,89 @@ inline bool applyAiPlaytestKey(AiPlaytestSession& session,
     return handled;
 }
 
+inline Entity aiFirstBuildingByRoleInCurrentDistrict(AiPlaytestSession& session,
+                                                     MicroZoneRole role) {
+    if (worldHasMultipleDistricts(session.registry)) {
+        const Entity macro = macroForDistrictId(session.registry,
+                                                playerCurrentDistrictId(session.registry,
+                                                                        session.player));
+        const Entity local = firstWorldBuilderBuildingByRoleInMacro(session.registry,
+                                                                    macro,
+                                                                    role);
+        if (local != MAX_ENTITIES) {
+            return local;
+        }
+    }
+    return firstBuildingByRole(session.registry, role);
+}
+
+inline Entity aiFirstWorkerInCurrentDistrict(AiPlaytestSession& session) {
+    auto workers = session.registry.view<FixedActorComponent, TransformComponent>();
+    std::sort(workers.begin(), workers.end());
+    const uint32_t district_id = playerCurrentDistrictId(session.registry, session.player);
+    const Entity suspicious_worker =
+        firstLocalSuspicionRecordWorkerInDistrict(session.registry, district_id);
+    if (suspicious_worker != MAX_ENTITIES) {
+        return suspicious_worker;
+    }
+    for (Entity worker : workers) {
+        if (!worldHasMultipleDistricts(session.registry) ||
+            districtIdForEntity(session.registry, worker) == district_id) {
+            return worker;
+        }
+    }
+    return workers.empty() ? MAX_ENTITIES : workers.front();
+}
+
+inline Entity aiFirstStationInCurrentDistrict(AiPlaytestSession& session) {
+    auto stations = session.registry.view<StationComponent>();
+    std::sort(stations.begin(), stations.end());
+    const uint32_t district_id = playerCurrentDistrictId(session.registry, session.player);
+    for (Entity station : stations) {
+        if (!worldHasMultipleDistricts(session.registry) ||
+            session.registry.get<StationComponent>(station).district_id == district_id) {
+            return station;
+        }
+    }
+    return stations.empty() ? MAX_ENTITIES : stations.front();
+}
+
+inline Entity aiFirstSignpostInCurrentDistrict(AiPlaytestSession& session) {
+    auto signposts = session.registry.view<RouteSignpostComponent, TransformComponent>();
+    std::sort(signposts.begin(), signposts.end());
+    const uint32_t district_id = playerCurrentDistrictId(session.registry, session.player);
+    for (Entity signpost : signposts) {
+        if (!worldHasMultipleDistricts(session.registry) ||
+            districtIdForEntity(session.registry, signpost) == district_id) {
+            return signpost;
+        }
+    }
+    return signposts.empty() ? MAX_ENTITIES : signposts.front();
+}
+
 inline bool warpAiPlaytestPlayer(AiPlaytestSession& session,
                                  const std::string& raw_target,
                                  std::string* result = nullptr) {
     std::string target = normalizeAiPlaytestKey(raw_target);
     Entity entity = MAX_ENTITIES;
     if (target == "HOUSING") {
-        entity = firstBuildingByRole(session.registry, MicroZoneRole::HOUSING);
+        entity = aiFirstBuildingByRoleInCurrentDistrict(session, MicroZoneRole::HOUSING);
     } else if (target == "WORKPLACE") {
-        entity = firstBuildingByRole(session.registry, MicroZoneRole::WORKPLACE);
+        entity = aiFirstBuildingByRoleInCurrentDistrict(session, MicroZoneRole::WORKPLACE);
     } else if (target == "SUPPLY") {
-        entity = firstBuildingByRole(session.registry, MicroZoneRole::SUPPLY);
+        entity = aiFirstBuildingByRoleInCurrentDistrict(session, MicroZoneRole::SUPPLY);
     } else if (target == "MARKET") {
-        entity = firstBuildingByRole(session.registry, MicroZoneRole::MARKET);
+        entity = aiFirstBuildingByRoleInCurrentDistrict(session, MicroZoneRole::MARKET);
     } else if (target == "CLINIC") {
-        entity = firstBuildingByRole(session.registry, MicroZoneRole::CLINIC);
+        entity = aiFirstBuildingByRoleInCurrentDistrict(session, MicroZoneRole::CLINIC);
     } else if (target == "WORKER") {
-        entity = firstFixedWorker(session.registry);
+        entity = aiFirstWorkerInCurrentDistrict(session);
     } else if (target == "CARRYABLE" || target == "OBJECT") {
         entity = firstCarryableObject(session.registry);
     } else if (target == "SIGNPOST") {
-        auto signposts = session.registry.view<RouteSignpostComponent>();
-        if (!signposts.empty()) entity = signposts.front();
+        entity = aiFirstSignpostInCurrentDistrict(session);
     } else if (target == "STATION" || target == "TRANSIT") {
-        auto stations = session.registry.view<StationComponent>();
-        if (!stations.empty()) entity = stations.front();
+        entity = aiFirstStationInCurrentDistrict(session);
     }
 
     if (entity == MAX_ENTITIES || !session.registry.has<TransformComponent>(entity)) {
@@ -886,13 +958,13 @@ inline std::string aiPlaytestActionLine(Registry& registry, Entity player) {
         out << (ride.doors_open ? "E EXIT TRANSIT " : "E LOOK OUT WINDOW ")
             << transitRideReadout(registry, player);
     } else if (playerCanLayLowInHousing(registry, player)) {
-        out << "T LAY LOW " << shelterSupplyReadout(registry);
+        out << "T LAY LOW " << shelterSupplyReadoutForPlayer(registry, player);
     } else if (playerCanHideSuspiciousItemInHousing(registry, player)) {
         out << "E HIDE SUSPECT PART";
     } else if (playerCanImproveBuilding(registry, player)) {
         out << "E IMPROVE BUILDING " << buildingImprovementReadout(registry);
     } else if (playerCanStoreSupplyAtShelter(registry, player)) {
-        out << "E STORE SUPPLY " << shelterSupplyReadout(registry);
+        out << "E STORE SUPPLY " << shelterSupplyReadoutForPlayer(registry, player);
     } else if (playerCanStockWorkplaceBench(registry, player)) {
         out << "E STOCK BENCH " << workplaceBenchReadout(registry);
     } else if (playerCanWorkWorkplaceBench(registry, player)) {
@@ -1005,7 +1077,7 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
     out << "SYSTEMS: " << productionLoopSummaryReadout(registry)
         << " | " << playerDistrictReadout(registry, player)
         << " | " << worldPhaseReadout(registry)
-        << " | " << shelterSupplyReadout(registry)
+        << " | " << shelterSupplyReadoutForPlayer(registry, player)
         << " | " << workplaceBenchReadout(registry)
         << " | " << buildingImprovementReadout(registry);
     if (!local_notice.empty()) {

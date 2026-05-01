@@ -12,3 +12,9 @@
 - Gameplay feature work is not complete until the AI playtest harness is current with the feature. If a feature adds or changes verbs, targets, prompts, readouts, map glyphs, scenarios, persistence state, or anything an AI tester needs to observe, update `src/ai_playtest.h`, `tools/ai_playtest.cpp`, and `tests/ai_playtest_tests.cpp` in the same change.
 - Gameplay feature verification must include an interactive terminal playtest, not only predetermined unit tests or scripted smoke runs. Use `./build/neon_ai_playtest play default --transcript .neon_feature_playtest.txt` and drive the session by reading the snapshot, choosing the next action, and observing the result. Use `reset suspicion` inside play mode when the feature touches local-risk, suspicion, debugger, or wage/debt behavior.
 - Before calling a gameplay feature complete, run `tools/verify_feature_completion.sh --transcript .neon_feature_playtest.txt --check-changed` in addition to the normal build/tests. The configured `.githooks/pre-commit` hook enforces the same gate for staged gameplay/source changes.
+
+## OpenSpec Archive Hygiene
+
+- Completed OpenSpec changes must be archived before the task is considered done. Do not leave `openspec list` entries marked `✓ Complete` for the next session.
+- At the end of any implementation that touched OpenSpec, run `openspec list`. For every completed active change, run `POSTHOG_DISABLED=1 openspec archive <change> --yes`, then rerun `openspec list` and `POSTHOG_DISABLED=1 openspec validate --all --strict`.
+- The configured `.githooks/pre-commit` hook runs `tools/check_openspec_completed_archives.sh` and fails if completed active OpenSpec changes are still present.

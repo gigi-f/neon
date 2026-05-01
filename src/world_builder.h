@@ -252,6 +252,35 @@ inline Entity macroForEntity(Registry& registry, Entity entity) {
     return macroForPoint(registry, transform.x, transform.y);
 }
 
+inline Entity macroForDistrictId(Registry& registry, uint32_t district_id) {
+    auto macros = registry.view<MacroZoneComponent>();
+    for (Entity macro : macros) {
+        if (registry.get<MacroZoneComponent>(macro).macro_id == district_id) {
+            return macro;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline uint32_t districtIdForEntity(Registry& registry, Entity entity) {
+    const Entity macro = macroForEntity(registry, entity);
+    if (macro != MAX_ENTITIES && registry.has<MacroZoneComponent>(macro)) {
+        return registry.get<MacroZoneComponent>(macro).macro_id;
+    }
+    return 0;
+}
+
+inline bool worldHasMultipleDistricts(Registry& registry) {
+    return registry.view<MacroZoneComponent>().size() > 1;
+}
+
+inline std::string districtEntityLabel(Registry& registry, Entity entity, const char* label) {
+    if (!worldHasMultipleDistricts(registry)) {
+        return label;
+    }
+    return districtLabel(districtIdForEntity(registry, entity)) + ":" + label;
+}
+
 inline Entity firstWorldBuilderBuildingByRoleInMacro(Registry& registry,
                                                      Entity macro,
                                                      MicroZoneRole role) {
@@ -995,6 +1024,15 @@ inline int shelterSupplyCapacity(Registry& registry) {
     return registry.get<ShelterStockComponent>(shelter).capacity;
 }
 
+inline std::string buildingSupplyReadoutForShelter(Registry& registry, Entity shelter) {
+    if (!registry.alive(shelter) || !registry.has<ShelterStockComponent>(shelter)) {
+        return "BUILDING SUPPLY: 0/0";
+    }
+    const auto& stock = registry.get<ShelterStockComponent>(shelter);
+    return "BUILDING SUPPLY: " + std::to_string(stock.current_supply) + "/" +
+           std::to_string(stock.capacity);
+}
+
 inline std::string buildingSupplyReadout(Registry& registry) {
     return "BUILDING SUPPLY: " + std::to_string(shelterSupplyCount(registry)) + "/" +
            std::to_string(shelterSupplyCapacity(registry));
@@ -1002,6 +1040,16 @@ inline std::string buildingSupplyReadout(Registry& registry) {
 
 inline std::string shelterSupplyReadout(Registry& registry) {
     return buildingSupplyReadout(registry);
+}
+
+inline std::string shelterSupplyReadoutForPlayer(Registry& registry, Entity player) {
+    if (playerInsideHousingInterior(registry, player) &&
+        registry.has<BuildingInteractionComponent>(player)) {
+        return buildingSupplyReadoutForShelter(
+            registry,
+            registry.get<BuildingInteractionComponent>(player).building_entity);
+    }
+    return shelterSupplyReadout(registry);
 }
 
 inline bool shelterHasStoredSupply(Registry& registry) {
@@ -1178,27 +1226,37 @@ inline bool roleInDependencyEdge(MicroZoneRole role,
 
 inline Entity dependencyEndpointForRole(Registry& registry,
                                         MicroZoneRole role,
-                                        const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+                                        const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                        uint32_t district_id = UINT32_MAX) {
     if (!roleInDependencyEdge(role, dependency)) {
         return MAX_ENTITIES;
+    }
+    if (district_id != UINT32_MAX) {
+        const Entity macro = macroForDistrictId(registry, district_id);
+        return macro == MAX_ENTITIES ?
+            MAX_ENTITIES :
+            firstWorldBuilderBuildingByRoleInMacro(registry, macro, role);
     }
     return firstWorldBuilderBuildingByRole(registry, role);
 }
 
 inline bool dependencyEdgeResolved(Registry& registry,
-                                   const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
-    return dependencyEndpointForRole(registry, dependency.dependent_role, dependency) != MAX_ENTITIES &&
-           dependencyEndpointForRole(registry, dependency.provider_role, dependency) != MAX_ENTITIES;
+                                   const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                   uint32_t district_id = UINT32_MAX) {
+    return dependencyEndpointForRole(registry, dependency.dependent_role, dependency, district_id) != MAX_ENTITIES &&
+           dependencyEndpointForRole(registry, dependency.provider_role, dependency, district_id) != MAX_ENTITIES;
 }
 
 inline Entity dependencyDisruptionStateEntity(Registry& registry,
                                               const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                              uint32_t district_id = UINT32_MAX,
                                               bool create_if_missing = false) {
     auto disruptions = registry.view<DependencyDisruptionComponent>();
     for (Entity state : disruptions) {
         const auto& component = registry.get<DependencyDisruptionComponent>(state);
         if (component.dependent_role == dependency.dependent_role &&
-            component.provider_role == dependency.provider_role) {
+            component.provider_role == dependency.provider_role &&
+            (district_id == UINT32_MAX || component.district_id == district_id)) {
             return state;
         }
     }
@@ -1212,31 +1270,35 @@ inline Entity dependencyDisruptionStateEntity(Registry& registry,
         dependency.dependent_role,
         dependency.provider_role,
         false,
-        false);
+        false,
+        district_id == UINT32_MAX ? 0u : district_id);
     return state;
 }
 
 inline bool dependencyDisrupted(Registry& registry,
-                                const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
-    const Entity state = dependencyDisruptionStateEntity(registry, dependency);
+                                const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                uint32_t district_id = UINT32_MAX) {
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency, district_id);
     return state != MAX_ENTITIES &&
            registry.get<DependencyDisruptionComponent>(state).disrupted;
 }
 
 inline bool dependencyRecovered(Registry& registry,
-                                const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
-    const Entity state = dependencyDisruptionStateEntity(registry, dependency);
+                                const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                uint32_t district_id = UINT32_MAX) {
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency, district_id);
     return state != MAX_ENTITIES &&
            registry.get<DependencyDisruptionComponent>(state).recovered;
 }
 
 inline bool toggleDependencyDisruption(Registry& registry,
-                                       const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
-    if (!dependencyEdgeResolved(registry, dependency)) {
+                                       const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                       uint32_t district_id = UINT32_MAX) {
+    if (!dependencyEdgeResolved(registry, dependency, district_id)) {
         return false;
     }
 
-    const Entity state = dependencyDisruptionStateEntity(registry, dependency, true);
+    const Entity state = dependencyDisruptionStateEntity(registry, dependency, district_id, true);
     auto& component = registry.get<DependencyDisruptionComponent>(state);
     component.disrupted = !component.disrupted;
     component.recovered = !component.disrupted;
@@ -1245,22 +1307,23 @@ inline bool toggleDependencyDisruption(Registry& registry,
 
 inline std::string dependencyInspectionReadout(Registry& registry,
                                                MicroZoneRole role,
-                                               const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
-    const bool disrupted = dependencyDisrupted(registry, dependency);
-    const bool recovered = dependencyRecovered(registry, dependency);
+                                               const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                               uint32_t district_id = UINT32_MAX) {
+    const bool disrupted = dependencyDisrupted(registry, dependency, district_id);
+    const bool recovered = dependencyRecovered(registry, dependency, district_id);
     const std::string status = disrupted ? "; DEPENDENCY: DISRUPTED" :
         (recovered ? "; DEPENDENCY: RESTORED" : "");
 
     if (roleIsDependencyDependent(role, dependency)) {
         return std::string("DEPENDS ON: ") +
-               (dependencyEndpointForRole(registry, dependency.provider_role, dependency) != MAX_ENTITIES
+               (dependencyEndpointForRole(registry, dependency.provider_role, dependency, district_id) != MAX_ENTITIES
                     ? roleDisplayName(dependency.provider_role)
                     : std::string("MISSING ") + roleDisplayName(dependency.provider_role)) +
                status;
     }
     if (roleIsDependencyProvider(role, dependency)) {
         return std::string("SUPPORTS: ") +
-               (dependencyEndpointForRole(registry, dependency.dependent_role, dependency) != MAX_ENTITIES
+               (dependencyEndpointForRole(registry, dependency.dependent_role, dependency, district_id) != MAX_ENTITIES
                     ? roleDisplayName(dependency.dependent_role)
                     : std::string("NO ") + roleDisplayName(dependency.dependent_role)) +
                status;
@@ -1270,18 +1333,23 @@ inline std::string dependencyInspectionReadout(Registry& registry,
 
 inline std::string dependencyScanReadout(Registry& registry,
                                          MicroZoneRole role,
-                                         const DependencySpec& dependency = kWorkplaceDependsOnSupply) {
+                                         const DependencySpec& dependency = kWorkplaceDependsOnSupply,
+                                         uint32_t district_id = UINT32_MAX) {
     if (!roleInDependencyEdge(role, dependency)) {
         return "";
     }
 
-    std::string readout = std::string("FLOW: ") + dependency.flow_label +
+    std::string readout;
+    if (worldHasMultipleDistricts(registry) && district_id != UINT32_MAX) {
+        readout += "DISTRICT: " + districtLabel(district_id) + "; ";
+    }
+    readout += std::string("FLOW: ") + dependency.flow_label +
         "; REQUIRED FOR: " + dependency.required_for;
-    if (!dependencyEdgeResolved(registry, dependency)) {
+    if (!dependencyEdgeResolved(registry, dependency, district_id)) {
         readout += "; TARGET: MISSING";
-    } else if (dependencyDisrupted(registry, dependency)) {
+    } else if (dependencyDisrupted(registry, dependency, district_id)) {
         readout += "; DEPENDENCY: DISRUPTED; FLOW STATUS: CONFUSED";
-    } else if (dependencyRecovered(registry, dependency)) {
+    } else if (dependencyRecovered(registry, dependency, district_id)) {
         readout += "; DEPENDENCY: RESTORED; FLOW STATUS: CLEAR";
     } else if (roleIsDependencyProvider(role, dependency)) {
         readout += std::string("; SUPPORTS: ") + roleDisplayName(dependency.dependent_role);
@@ -1383,7 +1451,8 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
     }
 
     const MicroZoneRole role = registry.get<BuildingUseComponent>(building).role;
-    std::string readout = std::string(roleDisplayName(role)) + "; " +
+    const uint32_t district_id = districtIdForEntity(registry, building);
+    std::string readout = districtEntityLabel(registry, building, roleDisplayName(role)) + "; " +
         buildingPurposeReadoutForRole(role);
     switch (role) {
         case MicroZoneRole::HOUSING:
@@ -1418,7 +1487,10 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
             break;
     }
     if (roleInDependencyEdge(role)) {
-        readout += "; " + dependencyInspectionReadout(registry, role);
+        readout += "; " + dependencyInspectionReadout(registry,
+                                                       role,
+                                                       kWorkplaceDependsOnSupply,
+                                                       district_id);
     }
     const std::string suspicion = localSuspicionInspectionReadoutForBuilding(registry, building);
     if (!suspicion.empty()) {
@@ -1509,7 +1581,11 @@ inline std::string pathInspectionReadout(Registry& registry, Entity path_entity)
     }
 
     const RoutePurposeInfo purpose = routePurposeForPath(registry, path_entity);
-    readout += std::string(" ROUTE: ") + purpose.purpose +
+    readout += " ";
+    if (worldHasMultipleDistricts(registry)) {
+        readout += districtLabel(districtIdForEntity(registry, path_entity)) + ":";
+    }
+    readout += std::string("ROUTE: ") + purpose.purpose +
         "; CARRIES: " + purpose.carries;
     if (routeFlowBlockedBySpoofedSignpost(registry, path_entity)) {
         readout += "; FLOW: BLOCKED";
@@ -1523,9 +1599,13 @@ inline std::string routePurposeDebugReadout(Registry& registry,
                                             Entity path_entity,
                                             const char* prefix) {
     const RoutePurposeInfo purpose = routePurposeForPath(registry, path_entity);
-    return std::string(prefix) + " ROUTE: " + purpose.purpose +
+    std::string readout = std::string(prefix) + " ROUTE: " + purpose.purpose +
         "; EXPECTED CARGO: " + purpose.expected_cargo +
         "; ACCESS: " + purpose.access;
+    if (worldHasMultipleDistricts(registry)) {
+        readout += "; DISTRICT: " + districtLabel(districtIdForEntity(registry, path_entity));
+    }
+    return readout;
 }
 
 inline bool routeSignpostSpoofed(Registry& registry, Entity marker) {
@@ -1552,7 +1632,11 @@ inline std::string routeSignpostReadout(Registry& registry, Entity marker) {
     const RoutePurposeInfo purpose = routePurposeForPath(registry, signpost.path_entity);
     std::string readout = std::string("TO ") +
         roleDisplayName(signpost.target_role) +
-        "; ROUTE: " +
+        "; ";
+    if (worldHasMultipleDistricts(registry)) {
+        readout += districtLabel(districtIdForEntity(registry, marker)) + ":";
+    }
+    readout += std::string("ROUTE: ") +
         purpose.purpose +
         "; CARRIES: " +
         (signpost.spoofed ? "???" : purpose.carries);
@@ -1743,7 +1827,11 @@ inline std::string workerRouteConsequenceReadout(Registry& registry, Entity work
 }
 
 inline std::string workerCarryReadout(Registry& registry, Entity worker) {
-    std::string readout = std::string("WORKER ROUTINE: ") +
+    std::string readout;
+    if (worldHasMultipleDistricts(registry)) {
+        readout += districtEntityLabel(registry, worker, "WORKER") + "; ";
+    }
+    readout += std::string("WORKER ROUTINE: ") +
         workerRoutineState(registry, worker) +
         "; REASON: " +
         workerLaborReasonTag(registry, worker) +
@@ -1895,6 +1983,26 @@ inline bool clinicAccessHasWorkerRecord(Registry& registry) {
     return firstLocalSuspicionRecordWorker(registry) != MAX_ENTITIES;
 }
 
+inline Entity firstLocalSuspicionRecordWorkerInDistrict(Registry& registry, uint32_t district_id) {
+    auto suspicions = registry.view<LocalSuspicionComponent>();
+    for (Entity worker : suspicions) {
+        if (districtIdForEntity(registry, worker) == district_id &&
+            localSuspicionRecordExists(registry.get<LocalSuspicionComponent>(worker))) {
+            return worker;
+        }
+    }
+    return MAX_ENTITIES;
+}
+
+inline bool clinicAccessHasWorkerRecord(Registry& registry, Entity clinic) {
+    if (!worldHasMultipleDistricts(registry)) {
+        return clinicAccessHasWorkerRecord(registry);
+    }
+    return firstLocalSuspicionRecordWorkerInDistrict(registry,
+                                                    districtIdForEntity(registry, clinic)) !=
+           MAX_ENTITIES;
+}
+
 inline bool clinicAccessSpoofed(Registry& registry, Entity clinic) {
     return registry.alive(clinic) &&
            registry.has<ClinicAccessLedgerComponent>(clinic) &&
@@ -1911,13 +2019,24 @@ inline bool anyClinicAccessSpoofed(Registry& registry) {
     return false;
 }
 
+inline bool clinicAccessSpoofedInDistrict(Registry& registry, uint32_t district_id) {
+    auto ledgers = registry.view<ClinicAccessLedgerComponent>();
+    for (Entity clinic : ledgers) {
+        if (districtIdForEntity(registry, clinic) == district_id &&
+            registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed) {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic) {
     if (!registry.alive(clinic) ||
         !registry.has<ClinicAccessLedgerComponent>(clinic)) {
         return "";
     }
 
-    const bool has_record = clinicAccessHasWorkerRecord(registry);
+    const bool has_record = clinicAccessHasWorkerRecord(registry, clinic);
     const bool spoofed = registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed;
     if (!has_record && !spoofed) {
         return "";
@@ -1937,7 +2056,7 @@ inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic) 
 inline bool clinicAccessCanSpoof(Registry& registry, Entity clinic) {
     return registry.alive(clinic) &&
            registry.has<ClinicAccessLedgerComponent>(clinic) &&
-           clinicAccessHasWorkerRecord(registry);
+           clinicAccessHasWorkerRecord(registry, clinic);
 }
 
 inline std::string localSuspicionHudReadout(Registry& registry) {
@@ -1946,7 +2065,9 @@ inline std::string localSuspicionHudReadout(Registry& registry) {
         return "";
     }
     const auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
-    return std::string("LOCAL NOTICE: WORKER SAW ") +
+    return std::string("LOCAL NOTICE: ") +
+           districtEntityLabel(registry, worker, "WORKER") +
+           " SAW " +
            localSuspicionCauseLabel(suspicion.cause);
 }
 
@@ -2076,7 +2197,8 @@ inline std::string localSuspicionDebuggerReadoutForWorker(Registry& registry,
     if (!localSuspicionRecordExists(suspicion)) {
         return "";
     }
-    std::string readout = "LOCAL WITNESS: WORKER; ";
+    std::string readout = "LOCAL WITNESS: " +
+        districtEntityLabel(registry, suspicion_worker, "WORKER") + "; ";
     if (localSuspicionImmediateActive(suspicion)) {
         readout += std::string("SUSPICION: ") + localSuspicionCauseLabel(suspicion.cause);
     } else {
@@ -2162,8 +2284,13 @@ inline Entity workerWitnessingWorkplaceOutputTake(Registry& registry,
         effectiveLocalWitnessRange(registry, player_transform, range_wu);
     const float workplace_range =
         effectiveLocalWitnessRange(registry, workplace_transform, range_wu);
+    const uint32_t workplace_district = districtIdForEntity(registry, workplace);
     auto workers = registry.view<FixedActorComponent>();
     for (Entity worker : workers) {
+        if (worldHasMultipleDistricts(registry) &&
+            districtIdForEntity(registry, worker) != workplace_district) {
+            continue;
+        }
         if (workerNearTransform(registry, worker, player_transform, player_range) ||
             workerNearTransform(registry, worker, workplace_transform, workplace_range)) {
             return worker;
@@ -3691,16 +3818,25 @@ inline std::string inheritedGadgetWorkerScan(Registry& registry, Entity worker) 
         return "NO SIGNAL";
     }
 
-    std::string readout = "WORKER SIGNAL: DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1";
+    std::string readout = worldHasMultipleDistricts(registry) ?
+        districtEntityLabel(registry, worker, "WORKER SIGNAL") :
+        "WORKER SIGNAL";
+    readout += ": DEBT WORK; PAY DOCKED IF STALLED; ROUTE QUOTA: 1";
     if (registry.has<LocalSuspicionComponent>(worker)) {
         const auto& suspicion_comp = registry.get<LocalSuspicionComponent>(worker);
         if (localSuspicionRecordExists(suspicion_comp)) {
+            const std::string wage_label = worldHasMultipleDistricts(registry) ?
+                districtLabel(districtIdForEntity(registry, worker)) + ":WAGE IMPACT" :
+                "WAGE IMPACT";
             if (registry.get<FixedActorComponent>(worker).wage_record_spoofed) {
-                readout += "; WAGE IMPACT: RECORD ALTERED; DOCK RISK: CLEARED";
+                readout += "; " + wage_label + ": RECORD ALTERED; DOCK RISK: CLEARED";
             } else {
-                readout += "; WAGE IMPACT: INCIDENT LOGGED; DOCK RISK: ACTIVE";
+                readout += "; " + wage_label + ": INCIDENT LOGGED; DOCK RISK: ACTIVE";
             }
-            if (anyClinicAccessSpoofed(registry)) {
+            const bool clinic_spoofed = worldHasMultipleDistricts(registry) ?
+                clinicAccessSpoofedInDistrict(registry, districtIdForEntity(registry, worker)) :
+                anyClinicAccessSpoofed(registry);
+            if (clinic_spoofed) {
                 readout += "; CLINIC ACCESS: GHOST CLEARANCE MISMATCH";
             }
         }
@@ -3729,8 +3865,16 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
     };
 
     auto building_scan = [&](MicroZoneRole role, Entity building) {
-        std::string readout = buildingPurposeScanReadoutForRole(role);
-        const std::string dependency = dependencyScanReadout(registry, role);
+        std::string readout;
+        if (worldHasMultipleDistricts(registry)) {
+            readout += districtEntityLabel(registry, building, roleDisplayName(role)) + "; ";
+        }
+        readout += buildingPurposeScanReadoutForRole(role);
+        const uint32_t district_id = districtIdForEntity(registry, building);
+        const std::string dependency = dependencyScanReadout(registry,
+                                                             role,
+                                                             kWorkplaceDependsOnSupply,
+                                                             district_id);
         if (!dependency.empty()) {
             readout += "; " + dependency;
         }
@@ -3838,6 +3982,10 @@ inline bool inheritedGadgetCanSpoofTarget(Registry& registry,
     return false;
 }
 
+inline uint32_t dependencyTargetDistrictId(Registry& registry, const InspectionTarget& target) {
+    return target.entity == MAX_ENTITIES ? 0u : districtIdForEntity(registry, target.entity);
+}
+
 inline bool playerCanUseInheritedGadget(Registry& registry, Entity player) {
     return playerHasInheritedGadget(registry, player);
 }
@@ -3873,7 +4021,9 @@ inline std::string inheritedGadgetSpoofPromptReadout(Registry& registry,
             "G INTERFERENCE TORCH SPOOF CLINIC ACCESS";
     }
     if (inspectionTargetIsDependencyTarget(target)) {
-        return dependencyDisrupted(registry) ?
+        return dependencyDisrupted(registry,
+                                   kWorkplaceDependsOnSupply,
+                                   dependencyTargetDistrictId(registry, target)) ?
             "G INTERFERENCE TORCH RESTORE DEPENDENCY" :
             "G INTERFERENCE TORCH DISRUPT DEPENDENCY";
     }
@@ -3956,11 +4106,14 @@ inline bool useInheritedGadgetSpoof(Registry& registry, Entity player, float ran
     }
 
     if (inspectionTargetIsDependencyTarget(target)) {
-        if (!toggleDependencyDisruption(registry)) {
+        const uint32_t district_id = dependencyTargetDistrictId(registry, target);
+        if (!toggleDependencyDisruption(registry, kWorkplaceDependsOnSupply, district_id)) {
             gadget.last_result = "FAILED: DEPENDENCY UNRESOLVED";
             return false;
         }
-        gadget.last_result = dependencyDisrupted(registry) ?
+        gadget.last_result = dependencyDisrupted(registry,
+                                                 kWorkplaceDependsOnSupply,
+                                                 district_id) ?
             "DISRUPTED DEPENDENCY: SUPPLY FLOW CONFUSED" :
             "RESTORED DEPENDENCY: SUPPLY FLOW CLEAR";
         return true;

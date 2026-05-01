@@ -32,6 +32,13 @@ struct SavedSpoofedSignpost {
     uint64_t endpoint_stable_id = 0;
 };
 
+struct SavedDependencyDisruption {
+    MicroZoneRole dependent_role = MicroZoneRole::WORKPLACE;
+    MicroZoneRole provider_role = MicroZoneRole::SUPPLY;
+    uint32_t district_id = 0;
+    bool disrupted = false;
+};
+
 struct SavedLocalSuspicion {
     bool present = false;
     bool active = false;
@@ -93,6 +100,7 @@ struct TinySaveState {
     std::vector<SavedWorker> workers;
 
     std::vector<SavedSpoofedSignpost> spoofed_signposts;
+    std::vector<SavedDependencyDisruption> dependency_disruptions;
     SavedLocalSuspicion local_suspicion{};
     std::vector<SavedWorkerSuspicion> local_suspicions;
 
@@ -452,6 +460,19 @@ inline TinySaveState captureTinySaveState(Registry& registry, Entity player) {
             stableIdForEntity(registry, signpost.endpoint_entity)});
     }
 
+    auto disruptions = registry.view<DependencyDisruptionComponent>();
+    for (Entity disruption : disruptions) {
+        const auto& component = registry.get<DependencyDisruptionComponent>(disruption);
+        if (!component.disrupted) {
+            continue;
+        }
+        state.dependency_disruptions.push_back(SavedDependencyDisruption{
+            component.dependent_role,
+            component.provider_role,
+            component.district_id,
+            component.disrupted});
+    }
+
     for (size_t worker_index = 0; worker_index < workers.size(); ++worker_index) {
         const Entity suspicion_worker = workers[worker_index];
         if (!registry.has<LocalSuspicionComponent>(suspicion_worker)) {
@@ -523,7 +544,7 @@ inline bool readSavedTransform(std::istream& in, SavedTransform& transform) {
 
 inline std::string serializeTinySaveState(const TinySaveState& state) {
     std::ostringstream out;
-    out << "NEON_TINY_SAVE_V11\n";
+    out << "NEON_TINY_SAVE_V12\n";
     out << "PLAYER ";
     writeSavedTransform(out, state.player);
     out << ' ' << (state.player_carrying ? 1 : 0) << "\n";
@@ -593,6 +614,14 @@ inline std::string serializeTinySaveState(const TinySaveState& state) {
             << signpost.path_to_stable_id << ' '
             << signpost.endpoint_stable_id << "\n";
     }
+    out << "DEPENDENCY_DISRUPTIONS " << state.dependency_disruptions.size() << "\n";
+    for (const auto& disruption : state.dependency_disruptions) {
+        out << "DEPENDENCY_DISRUPTION "
+            << roleSaveName(disruption.dependent_role) << ' '
+            << roleSaveName(disruption.provider_role) << ' '
+            << disruption.district_id << ' '
+            << (disruption.disrupted ? 1 : 0) << "\n";
+    }
     const std::vector<SavedWorkerSuspicion> suspicions = !state.local_suspicions.empty()
         ? state.local_suspicions
         : (state.local_suspicion.present
@@ -629,19 +658,23 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
     if (!(in >> tag) ||
         (tag != "NEON_TINY_SAVE_V7" && tag != "NEON_TINY_SAVE_V8" &&
          tag != "NEON_TINY_SAVE_V9" && tag != "NEON_TINY_SAVE_V10" &&
-         tag != "NEON_TINY_SAVE_V11")) {
+         tag != "NEON_TINY_SAVE_V11" && tag != "NEON_TINY_SAVE_V12")) {
         return TinySaveStatus::INVALID_FORMAT;
     }
     const bool has_local_suspicion_record =
         tag == "NEON_TINY_SAVE_V8" || tag == "NEON_TINY_SAVE_V9" ||
-        tag == "NEON_TINY_SAVE_V10" || tag == "NEON_TINY_SAVE_V11";
+        tag == "NEON_TINY_SAVE_V10" || tag == "NEON_TINY_SAVE_V11" ||
+        tag == "NEON_TINY_SAVE_V12";
     const bool has_wage_record_field = tag == "NEON_TINY_SAVE_V9" ||
-        tag == "NEON_TINY_SAVE_V10" || tag == "NEON_TINY_SAVE_V11";
+        tag == "NEON_TINY_SAVE_V10" || tag == "NEON_TINY_SAVE_V11" ||
+        tag == "NEON_TINY_SAVE_V12";
     const bool has_world_phase_field = tag == "NEON_TINY_SAVE_V10" ||
-        tag == "NEON_TINY_SAVE_V11";
+        tag == "NEON_TINY_SAVE_V11" || tag == "NEON_TINY_SAVE_V12";
     const bool has_multi_worker_field = tag == "NEON_TINY_SAVE_V10" ||
-        tag == "NEON_TINY_SAVE_V11";
-    const bool has_transit_field = tag == "NEON_TINY_SAVE_V11";
+        tag == "NEON_TINY_SAVE_V11" || tag == "NEON_TINY_SAVE_V12";
+    const bool has_transit_field = tag == "NEON_TINY_SAVE_V11" ||
+        tag == "NEON_TINY_SAVE_V12";
+    const bool has_dependency_disruption_field = tag == "NEON_TINY_SAVE_V12";
 
     int flag = 0;
     if (!(in >> tag) || tag != "PLAYER") return TinySaveStatus::INVALID_FORMAT;
@@ -802,6 +835,39 @@ inline TinySaveStatus deserializeTinySaveState(const std::string& text, TinySave
             return TinySaveStatus::INVALID_FORMAT;
         }
         parsed.spoofed_signposts.push_back(signpost);
+    }
+
+    if (has_dependency_disruption_field) {
+        size_t disruption_count = 0;
+        if (!(in >> tag) || tag != "DEPENDENCY_DISRUPTIONS") {
+            return TinySaveStatus::INVALID_FORMAT;
+        }
+        if (!(in >> disruption_count)) return TinySaveStatus::INVALID_FORMAT;
+        parsed.dependency_disruptions.clear();
+        parsed.dependency_disruptions.reserve(disruption_count);
+        for (size_t i = 0; i < disruption_count; ++i) {
+            SavedDependencyDisruption disruption;
+            std::string dependent_name;
+            std::string provider_name;
+            int disrupted_flag = 0;
+            if (!(in >> tag) || tag != "DEPENDENCY_DISRUPTION") {
+                return TinySaveStatus::INVALID_FORMAT;
+            }
+            if (!(in >> dependent_name >>
+                  provider_name >>
+                  disruption.district_id >>
+                  disrupted_flag)) {
+                return TinySaveStatus::INVALID_FORMAT;
+            }
+            if (!roleFromSaveName(dependent_name, disruption.dependent_role) ||
+                !roleFromSaveName(provider_name, disruption.provider_role)) {
+                return TinySaveStatus::INVALID_FORMAT;
+            }
+            disruption.disrupted = disrupted_flag != 0;
+            if (disruption.disrupted) {
+                parsed.dependency_disruptions.push_back(disruption);
+            }
+        }
     }
 
     if (has_local_suspicion_record && has_multi_worker_field) {
@@ -1063,6 +1129,35 @@ inline TinySaveStatus applyTinySaveState(Registry& registry, Entity player, cons
                                                        saved_signpost.endpoint_stable_id);
         if (marker != MAX_ENTITIES) {
             registry.get<RouteSignpostComponent>(marker).spoofed = true;
+        }
+    }
+
+    auto disruptions = registry.view<DependencyDisruptionComponent>();
+    for (Entity disruption : disruptions) {
+        auto& component = registry.get<DependencyDisruptionComponent>(disruption);
+        component.disrupted = false;
+        component.recovered = false;
+    }
+    for (const auto& saved_disruption : state.dependency_disruptions) {
+        if (!saved_disruption.disrupted) {
+            continue;
+        }
+        DependencySpec dependency{
+            saved_disruption.dependent_role,
+            saved_disruption.provider_role,
+            kWorkplaceDependsOnSupply.flow_label,
+            kWorkplaceDependsOnSupply.required_for};
+        if (!dependencyEdgeResolved(registry, dependency, saved_disruption.district_id)) {
+            continue;
+        }
+        const Entity state_entity = dependencyDisruptionStateEntity(registry,
+                                                                    dependency,
+                                                                    saved_disruption.district_id,
+                                                                    true);
+        if (state_entity != MAX_ENTITIES) {
+            auto& component = registry.get<DependencyDisruptionComponent>(state_entity);
+            component.disrupted = true;
+            component.recovered = false;
         }
     }
 

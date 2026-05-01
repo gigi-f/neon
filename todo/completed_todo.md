@@ -1428,3 +1428,16 @@ Logical next step: per-district worker labels, routes, and suspicion scope can n
 - [x] `E` while doors are closed looks out the window and jumps to the destination platform; waiting until arrival opens the doors and lets `E` exit normally.
 - [x] Tiny save/load preserves the player's current district and in-progress transit ride state; save version bumped beyond `V10`.
 - [x] Acceptance: 2-district and 1-district configs both build cleanly; ride from A->B and B->A round-trip with and without a carried object; AI playtest map renders both clusters and reports the player's current district.
+
+## Phase 91: Per-district worker spawn, routes, and inspection labels.
+
+- [x] Each district spawns its own configured workers on its own derived paths; workers do not migrate or perceive across districts.
+- [x] Inspection labels (`PURPOSE`, `ROUTE`, `WAGE IMPACT`, `LOCAL NOTICE`, `LOCAL WITNESS`) include a short district tag (e.g., `A:WORKER`, `B:WORKER`) so AI playtest readouts and HUD remain unambiguous.
+- [x] Active local suspicion in district A does not affect worker readouts, wage spoofs, clinic ledger flags, or audit state in district B.
+- [x] Acceptance: tests verify per-district isolation of suspicion, wage spoofing, and dependency disruption; save/load round-trips per-district worker state for both districts.
+
+## Phase 92: Per-district interference state and persistence boundary.
+
+- [x] Spoofed signposts, dependency disruptions, and `LAID_LOW` traces are scoped to their district and inspected with district tags.
+- [x] Returning to a district restores all of its current-scope flow, witness, and wage state from save without leaking to the other district.
+- [x] Acceptance: tests cover (a) spoofing in A while B is clean, (b) save/load while in B with active spoof in A, (c) ride to A restores the original spoof state; AI playtest transcripts demonstrate cross-district navigation with state intact.
