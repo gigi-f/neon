@@ -15,23 +15,17 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - No ambient runtime spawning. Actor/entity counts come from explicit configuration or authored placement.
 - Keep the build small. Do not keep compatibility stubs for deleted systems.
 - If a feature needs an OpenSpec change, write only the current focused change. Do not restore archived/spec-dump folders under `todo/`.
-- Fold readouts and boundaries into mechanic phases. Readability, inspection text, and boundary tests are acceptance criteria of the phase that introduces the mechanic, not separate phases.
-- No observation-only sessions. Every session must end with at least one new player verb or interference opportunity, not just inspectable labels.
-- No decision-only phases. Design decisions (e.g. "decide whether X needs Y") belong in the prior phase's acceptance criteria or a TODO note, not a standalone phase.
 - Gameplay feature completion includes updating the AI playtest harness and running an adaptive terminal playtest for the new behavior.
 
 ## Session Rules
 
 - Phases are grouped into cohesive sessions with one focused gameplay outcome.
 - Session headings are ordered top-to-bottom; phase numbers remain the long-running implementation sequence.
-- Each session must include `Gameplay outcome`, `Big Picture`, and `Logical next step` notes.
-- Each session must name the logical next step that will become the focus of the following session.
+- Each session must include `Gameplay outcome` notes.
 - Prefer sessions of 2-4 small phases; a session may be shorter only if it delivers a complete player-facing outcome.
-- If a proposed phase does not advance the current session outcome or prepare the named logical next step, defer it instead of circling on minutiae.
+- If a proposed phase does not advance the current session outcome, defer it instead of circling on minutiae.
 - If the big-picture connection is unclear, reframe or defer the phase before implementing it.
 - When all phases in a session are complete, archive the completed phases and keep the next session outcome visible at the top of the active TODO.
-- Prefer vertical slices over horizontal layers. A session that adds a site, its context, its dependency, and one interaction is better than separate sessions for sites, tags, edges, and labels.
-- Every 3 sessions of observation/context work must be followed by 1 session that adds a player verb or NPC behavior. If the current plan violates this, restructure before implementing.
 
 ## Current Runtime Shape
 
@@ -43,35 +37,9 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 - Interference loop: spoofed signposts and disrupted dependencies are inspectable, pause affected worker/supply flow, show local `FLOW: BLOCKED` or `SUPPLY FLOW: DISRUPTED` readouts, and persist active blockage state through tiny save/load; restored routes show local `FLOW: CLEAR`, with recovery acknowledgement intentionally volatile.
 - Local risk loop: a worker can witness expected `PART` theft or nearby `G` Interference Torch route tampering, producing a current-scope `LOCAL NOTICE` HUD line; day/night phase and nearby worker crowding shrink witness range, while active, returned, corrected, hidden, laid-low, and audit-traced suspicion states are inspectable and persist through tiny save/load without adding surveillance, wanted level, factions, or pursuit.
 - Wage clue loop: debugger scan of the worker reveals `WAGE IMPACT: INCIDENT LOGGED; DOCK RISK: ACTIVE` when a suspicion record exists; `G` on the worker with a record toggles `wage_record_spoofed`, changing the scan to `DOCK RISK: CLEARED`; spoofed state persists through save/load (V10).
-- Clinic access loop: when a local worker record exists, clinic inspection and Debugger scan show `CLINIC LEDGER: WORK RECORD FLAGGED`; `G` on the clinic toggles volatile `CLINIC ACCESS: GHOST CLEARANCE`, and worker Debugger scan shows a distinct `CLINIC ACCESS: GHOST CLEARANCE MISMATCH` without making the clinic enterable or adding health/public-works systems.
+- Clinic access loop: when a local worker record exists, clinic inspection and Debugger scan show `CLINIC LEDGER: WORK RECORD FLAGGED`; `G` on the clinic toggles volatile `CLINIC ACCESS: GHOST CLEARANCE`, and worker Debugger scan shows a distinct `CLINIC ACCESS: GHOST CLEARANCE MISMATCH`.
 - AI playtest surface: `neon_ai_playtest` exposes adaptive terminal snapshots with commands, target details, action prompts, Debugger results, system state, a centered text map, and interactive transcripts. Gameplay feature completion must keep this surface current and include a live terminal playtest.
 
-## Active Sessions
+## Active Sessions:
 
-## Session: Transit — Cracking Open The World
 
-Gameplay outcome: the world is no longer one site cluster. A transit station carries the player between two parallel districts, each with its own worker, sites, and per-district suspicion state.
-
-Big Picture: the no-transit limitation has served its purpose (kept the prototype small while the verb vocabulary stabilized). Lifting it now mirrors the existing loop in a second authored district without adding routes, schedules, vehicles, or city-scale infrastructure. Transit is one stop, one direction, a small ride interior, and a real-time arrival choice. Per-district state proves the underlying mechanics survive scale.
-
-Logical next step: with two districts and transit, the next small step is one piece of state that *travels* between districts (an institutional record that follows the player, or a carried object whose provenance changes meaning across districts).
-
-## Still Deferred
-
-These remain intentionally out of scope until a smaller phase above creates a concrete need:
-
-- Full building doors, multi-room interiors, furniture components, and pathfinding.
-- Multi-slot inventory, equipment, scanner tools, item provenance, market barter, and survival counters.
-- Biology, injury, pathogens, cognitive state, relationships, schedules, conversations, rumors, and eavesdropping.
-- Roads, traffic, vehicles, power grid simulation, conduits, and city-scale infrastructure. (Transit and stations are now in scope as one-stop manual ride links between authored districts only — not routes, schedules, vehicles, or networks.)
-- Factions, wanted level, directive markets, law enforcement, crises, xenos, AGI cores, death cascade, sanctuary systems, and broad narrative simulation.
-- Sparse-set ECS replacement unless profiling proves the current registry is blocking active work.
-
-## Creative North Star
-
-Keep the identity of Neon Oubliette, but do not let it drive premature implementation breadth:
-
-- The city is a neon-lit oubliette: surveillance, abandonment, and artificial hope.
-- The player is a ghost in the machine, rebuilding agency from minimal tools and fragile shelter.
-- The five-layer simulation remains a long-term narrative framework, not a reason to rebuild 76 systems at once.
-- Visible symptom first, player verb second, systemic depth third.
