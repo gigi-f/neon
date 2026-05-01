@@ -683,19 +683,40 @@ static void renderDebuggerTerminal(SDL_Renderer* renderer, SDL_Texture* font, Re
                                    const CameraComponent& camera) {
     if (!font || !registry.has<DebuggerTerminalComponent>(player)) return;
 
-    const auto& terminal = registry.get<DebuggerTerminalComponent>(player);
+    auto& terminal = registry.get<DebuggerTerminalComponent>(player);
     if (!terminal.open) return;
 
     const int screen_w = static_cast<int>(camera.screenWidth);
     const int screen_h = static_cast<int>(camera.screenHeight);
+    constrainDebuggerTerminalToViewport(terminal, screen_w, screen_h);
+
+    if (terminal.minimized) {
+        const DebuggerTerminalRect icon_rect =
+            debuggerTerminalRestoreIconRect(screen_w, screen_h);
+        SDL_Rect icon{icon_rect.x, icon_rect.y, icon_rect.w, icon_rect.h};
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 4, 10, 12, 232);
+        SDL_RenderFillRect(renderer, &icon);
+        SDL_SetRenderDrawColor(renderer, 95, 245, 170, 235);
+        SDL_RenderDrawRect(renderer, &icon);
+        drawTextCentered(renderer,
+                         font,
+                         "D",
+                         icon.x + icon.w / 2,
+                         icon.y + icon.h / 2,
+                         SDL_Color{115, 255, 195, 245},
+                         0.75f);
+        return;
+    }
+
+    const DebuggerTerminalRect terminal_rect =
+        debuggerTerminalWindowRect(terminal, screen_w, screen_h);
     SDL_Rect rect{
-        std::clamp(terminal.x, 0, std::max(0, screen_w - terminal.width)),
-        std::clamp(terminal.y, 0, std::max(0, screen_h - terminal.height)),
-        std::min(terminal.width, std::max(1, screen_w)),
-        std::min(terminal.height, std::max(1, screen_h))
+        terminal_rect.x,
+        terminal_rect.y,
+        terminal_rect.w,
+        terminal_rect.h
     };
-    if (rect.x + rect.w > screen_w) rect.x = std::max(0, screen_w - rect.w);
-    if (rect.y + rect.h > screen_h) rect.y = std::max(0, screen_h - rect.h);
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 4, 10, 12, 232);
@@ -709,6 +730,34 @@ static void renderDebuggerTerminal(SDL_Renderer* renderer, SDL_Texture* font, Re
     SDL_SetRenderDrawColor(renderer, 95, 245, 170, 235);
     SDL_RenderDrawLine(renderer, rect.x, rect.y + title_bar.h,
                        rect.x + rect.w, rect.y + title_bar.h);
+
+    const DebuggerTerminalRect min_rect =
+        debuggerTerminalMinimizeButtonRect(terminal, screen_w, screen_h);
+    const DebuggerTerminalRect close_rect =
+        debuggerTerminalCloseButtonRect(terminal, screen_w, screen_h);
+    SDL_Rect minimize_button{min_rect.x, min_rect.y, min_rect.w, min_rect.h};
+    SDL_Rect close_button{close_rect.x, close_rect.y, close_rect.w, close_rect.h};
+    SDL_SetRenderDrawColor(renderer, 18, 58, 48, 245);
+    SDL_RenderFillRect(renderer, &minimize_button);
+    SDL_RenderFillRect(renderer, &close_button);
+    SDL_SetRenderDrawColor(renderer, 95, 245, 170, 235);
+    SDL_RenderDrawRect(renderer, &minimize_button);
+    SDL_RenderDrawRect(renderer, &close_button);
+    SDL_RenderDrawLine(renderer,
+                       minimize_button.x + 3,
+                       minimize_button.y + minimize_button.h - 4,
+                       minimize_button.x + minimize_button.w - 3,
+                       minimize_button.y + minimize_button.h - 4);
+    SDL_RenderDrawLine(renderer,
+                       close_button.x + 3,
+                       close_button.y + 3,
+                       close_button.x + close_button.w - 3,
+                       close_button.y + close_button.h - 3);
+    SDL_RenderDrawLine(renderer,
+                       close_button.x + close_button.w - 3,
+                       close_button.y + 3,
+                       close_button.x + 3,
+                       close_button.y + close_button.h - 3);
 
     const DebuggerTerminalContent content =
         debuggerTerminalContent(registry, player, range_wu);
@@ -825,6 +874,49 @@ int main(int, char**) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) running = false;
+            if (event.type == SDL_MOUSEBUTTONDOWN &&
+                event.button.button == SDL_BUTTON_LEFT &&
+                registry.has<DebuggerTerminalComponent>(player)) {
+                int screen_w = 0;
+                int screen_h = 0;
+                SDL_GetRendererOutputSize(renderer, &screen_w, &screen_h);
+                auto& terminal = registry.get<DebuggerTerminalComponent>(player);
+                const DebuggerTerminalHitRegion hit =
+                    debuggerTerminalHitRegion(terminal,
+                                              screen_w,
+                                              screen_h,
+                                              event.button.x,
+                                              event.button.y);
+                if (hit == DebuggerTerminalHitRegion::CLOSE) {
+                    closeDebuggerTerminal(terminal);
+                } else if (hit == DebuggerTerminalHitRegion::MINIMIZE) {
+                    minimizeDebuggerTerminal(terminal);
+                } else if (hit == DebuggerTerminalHitRegion::RESTORE_ICON) {
+                    restoreDebuggerTerminal(terminal);
+                } else if (hit == DebuggerTerminalHitRegion::TITLE_BAR) {
+                    beginDebuggerTerminalDrag(terminal,
+                                              screen_w,
+                                              screen_h,
+                                              event.button.x,
+                                              event.button.y);
+                }
+            }
+            if (event.type == SDL_MOUSEBUTTONUP &&
+                event.button.button == SDL_BUTTON_LEFT &&
+                registry.has<DebuggerTerminalComponent>(player)) {
+                endDebuggerTerminalDrag(registry.get<DebuggerTerminalComponent>(player));
+            }
+            if (event.type == SDL_MOUSEMOTION &&
+                registry.has<DebuggerTerminalComponent>(player)) {
+                int screen_w = 0;
+                int screen_h = 0;
+                SDL_GetRendererOutputSize(renderer, &screen_w, &screen_h);
+                dragDebuggerTerminalTo(registry.get<DebuggerTerminalComponent>(player),
+                                       screen_w,
+                                       screen_h,
+                                       event.motion.x,
+                                       event.motion.y);
+            }
             if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F) {
                 auto& player_comp = registry.get<PlayerComponent>(player);
                 bool inside =
@@ -1069,7 +1161,6 @@ int main(int, char**) {
             }
             drawText(renderer, font, productionLoopSummaryReadout(registry).c_str(), 6, 132, SDL_Color{235, 170, 210, 220}, 0.65f);
             drawText(renderer, font, worldPhaseReadout(registry).c_str(), 6, 146, SDL_Color{190, 225, 245, 220}, 0.65f);
-            drawText(renderer, font, inheritedGadgetResultReadout(registry, player).c_str(), 6, 160, SDL_Color{205, 215, 255, 220}, 0.65f);
             if (playerInsideTransitInterior(registry, player)) {
                 drawText(renderer, font, transitRideReadout(registry, player).c_str(), 6, 174, SDL_Color{130, 230, 255, 230}, 0.65f);
             } else {

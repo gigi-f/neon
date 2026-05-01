@@ -48,6 +48,62 @@ static void testDebuggerTerminalOpensInAiSnapshotAfterScan() {
     assert(snapshot.find("CLINIC LAYOUT") != std::string::npos);
 }
 
+static void testDebuggerResultStaysReadableAcrossTerminalWindowStates() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
+    assert(applyAiPlaytestKey(session, "SPACE", &result));
+    const std::string open_snapshot = aiPlaytestSnapshot(session);
+    assert(open_snapshot.find("DEBUGGER_TERMINAL: OPEN") != std::string::npos);
+    assert(open_snapshot.find("DEBUGGER_RESULT: DEBUGGER RESULT: ON CLINIC") !=
+           std::string::npos);
+    assert(open_snapshot.find("TARGET_DEBUGGER_SCAN: B:CLINIC; CLINIC PURPOSE: PUBLIC HEALTH") !=
+           std::string::npos);
+
+    auto& terminal = session.registry.get<DebuggerTerminalComponent>(session.player);
+    minimizeDebuggerTerminal(terminal);
+    const std::string minimized_snapshot = aiPlaytestSnapshot(session);
+    assert(minimized_snapshot.find("DEBUGGER_TERMINAL: OPEN MINIMIZED") !=
+           std::string::npos);
+    assert(minimized_snapshot.find("DEBUGGER_RESULT: DEBUGGER RESULT: ON CLINIC") !=
+           std::string::npos);
+    assert(minimized_snapshot.find("CLINIC LAYOUT") != std::string::npos);
+
+    closeDebuggerTerminal(terminal);
+    const std::string closed_snapshot = aiPlaytestSnapshot(session);
+    assert(closed_snapshot.find("DEBUGGER_TERMINAL: CLOSED") != std::string::npos);
+    assert(closed_snapshot.find("DEBUGGER_RESULT: DEBUGGER RESULT: ON CLINIC") !=
+           std::string::npos);
+    assert(closed_snapshot.find("TARGET_DEBUGGER_SCAN: B:CLINIC; CLINIC PURPOSE: PUBLIC HEALTH") !=
+           std::string::npos);
+}
+
+static void testKeyboardInterferenceWorksWhileDebuggerTerminalIsOpen() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session, AiPlaytestScenario::SUSPICION));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
+    assert(applyAiPlaytestKey(session, "SPACE", &result));
+    const std::string scanned = aiPlaytestSnapshot(session);
+    assert(scanned.find("DEBUGGER_TERMINAL: OPEN") != std::string::npos);
+    assert(scanned.find("CLINIC LEDGER: WORK RECORD FLAGGED") != std::string::npos);
+    assert(scanned.find("G INTERFERENCE TORCH SPOOF CLINIC ACCESS") !=
+           std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "G", &result));
+    assert(result == "KEY G OK");
+    const std::string spoofed = aiPlaytestSnapshot(session);
+    assert(spoofed.find("DEBUGGER_TERMINAL: OPEN") != std::string::npos);
+    assert(spoofed.find("INTERFERENCE TORCH RESULT: ON CLINIC") !=
+           std::string::npos);
+    assert(spoofed.find("CLINIC ACCESS: GHOST CLEARANCE") != std::string::npos);
+    assert(spoofed.find("G INTERFERENCE TORCH RESTORE CLINIC ACCESS") !=
+           std::string::npos);
+}
+
 static void testDefaultClinicTargetExposesLayout() {
     AiPlaytestSession session;
     assert(buildAiPlaytestSession(session));
@@ -360,6 +416,8 @@ static void testPlaytestStateFileRoundTrip() {
 int main() {
     testDefaultSnapshotExposesAiReadableState();
     testDebuggerTerminalOpensInAiSnapshotAfterScan();
+    testDebuggerResultStaysReadableAcrossTerminalWindowStates();
+    testKeyboardInterferenceWorksWhileDebuggerTerminalIsOpen();
     testDefaultClinicTargetExposesLayout();
     testSyntheticKeysMutateSameGameState();
     testTransitLookOutWindowChoiceMovesToDestination();

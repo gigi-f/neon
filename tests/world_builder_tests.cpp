@@ -4063,6 +4063,80 @@ static void testDebuggerTerminalContentForBuildingWorkerSignpostAndClinicScans()
                                   "CLINIC LAYOUT");
 }
 
+static void testDebuggerTerminalWindowCloseDragMinimizeAndRefresh() {
+    Registry registry;
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<DebuggerTerminalComponent>(player);
+
+    openDebuggerTerminal(registry, player);
+    auto& terminal = registry.get<DebuggerTerminalComponent>(player);
+    terminal.width = 100;
+    terminal.height = 60;
+    terminal.x = 120;
+    terminal.y = 90;
+
+    constrainDebuggerTerminalToViewport(terminal, 160, 120);
+    assert(terminal.x == 60);
+    assert(terminal.y == 60);
+
+    terminal.x = 20;
+    terminal.y = 20;
+    assert(debuggerTerminalHitRegion(terminal, 160, 120, 30, 26) ==
+           DebuggerTerminalHitRegion::TITLE_BAR);
+    assert(beginDebuggerTerminalDrag(terminal, 160, 120, 30, 26));
+    assert(terminal.dragging);
+    dragDebuggerTerminalTo(terminal, 160, 120, 400, 400);
+    assert(terminal.x == 60);
+    assert(terminal.y == 60);
+    endDebuggerTerminalDrag(terminal);
+    assert(!terminal.dragging);
+
+    const DebuggerTerminalRect minimize =
+        debuggerTerminalMinimizeButtonRect(terminal, 160, 120);
+    assert(debuggerTerminalHitRegion(terminal,
+                                     160,
+                                     120,
+                                     minimize.x + 1,
+                                     minimize.y + 1) ==
+           DebuggerTerminalHitRegion::MINIMIZE);
+    minimizeDebuggerTerminal(terminal);
+    assert(terminal.open);
+    assert(terminal.minimized);
+    assert(debuggerTerminalHitRegion(terminal, 160, 120, 30, 26) ==
+           DebuggerTerminalHitRegion::NONE);
+
+    const DebuggerTerminalRect restore = debuggerTerminalRestoreIconRect(160, 120);
+    assert(debuggerTerminalHitRegion(terminal,
+                                     160,
+                                     120,
+                                     restore.x + 1,
+                                     restore.y + 1) ==
+           DebuggerTerminalHitRegion::RESTORE_ICON);
+    restoreDebuggerTerminal(terminal);
+    assert(terminal.open);
+    assert(!terminal.minimized);
+
+    const DebuggerTerminalRect close =
+        debuggerTerminalCloseButtonRect(terminal, 160, 120);
+    assert(debuggerTerminalHitRegion(terminal,
+                                     160,
+                                     120,
+                                     close.x + 1,
+                                     close.y + 1) ==
+           DebuggerTerminalHitRegion::CLOSE);
+    closeDebuggerTerminal(terminal);
+    assert(!debuggerTerminalContent(registry, player, 22.0f).open);
+
+    openDebuggerTerminal(registry, player);
+    const DebuggerTerminalContent reopened =
+        debuggerTerminalContent(registry, player, 22.0f);
+    assert(reopened.open);
+    assert(!registry.get<DebuggerTerminalComponent>(player).minimized);
+    assert(reopened.title == "MOTHER'S DEBUGGER // TERMINAL");
+}
+
 static void testInheritedGadgetSiteMetadataScan() {
     Registry registry;
     WorldConfig config = makeSandboxConfig();
@@ -6771,6 +6845,7 @@ int main() {
     testInheritedGadgetTargetResultReplacesPreviousResult();
     testInheritedGadgetWorkerScanRevealsHiddenLaborDetail();
     testDebuggerTerminalContentForBuildingWorkerSignpostAndClinicScans();
+    testDebuggerTerminalWindowCloseDragMinimizeAndRefresh();
     testInheritedGadgetSiteMetadataScan();
     testInheritedGadgetInvalidTargetDoesNotAlterWorkerInspection();
     testInheritedGadgetSpoofCandidateSelection();

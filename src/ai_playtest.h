@@ -1092,7 +1092,15 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
     out << "DEBUGGER_RESULT: " << aiPlaytestGadgetResultReadout(registry, player) << "\n";
     const DebuggerTerminalContent terminal =
         debuggerTerminalContent(registry, player, kAiPlaytestInspectionRangeWu);
-    out << "DEBUGGER_TERMINAL: " << (terminal.open ? "OPEN" : "CLOSED");
+    const bool terminal_minimized =
+        registry.has<DebuggerTerminalComponent>(player) &&
+        registry.get<DebuggerTerminalComponent>(player).minimized;
+    out << "DEBUGGER_TERMINAL: ";
+    if (terminal.open) {
+        out << (terminal_minimized ? "OPEN MINIMIZED" : "OPEN");
+    } else {
+        out << "CLOSED";
+    }
     if (terminal.open) {
         out << " title=\"" << terminal.title << "\"";
         for (const std::string& line : terminal.lines) {

@@ -25,6 +25,21 @@ Scope guard honored so far: presentation and interaction only. No new scanner mo
 - [x] Existing HUD feedback remains as a short summary while the terminal carries the detail.
 - [x] Acceptance: focused snapshots cover a non-empty terminal window for building, worker, signpost, and clinic scans.
 
+## Phase 97: Add close and drag interactions.
+
+- [x] Add a close control, minimize control, and a draggable top bar for the Debugger terminal using mouse input.
+- [x] Store the window position for the current runtime session without requiring save/load persistence.
+- [x] Keep the window constrained to the visible game viewport so text and controls cannot drift off-screen.
+- [x] Minimized window shrinks to a D icon at the bottom of the gameplay window; clicking on the icon pulls the screen back up.
+- [x] Remove redundant debugger logging in the old HUD.
+- [x] Acceptance: `world_builder_tests` covers open, drag, minimize, close, restore icon, viewport clamp, and refresh-after-close behavior; `.neon_feature_playtest.txt` records an interactive clinic Debugger scan after the UI change.
+
+## Phase 98: Keep AI playtest and keyboard-only behavior usable.
+
+- [x] Ensure the terminal UI does not hide information from `neon_ai_playtest`; text snapshots still expose Debugger results without needing mouse interaction.
+- [x] Keep keyboard-driven scan/interference flows intact when the window is open.
+- [x] Acceptance: `ai_playtest_tests` covers closed, minimized, and open terminal snapshots plus keyboard `G` while the terminal is open; `.neon_feature_playtest.txt` includes the same clinic scan content before and after opening the terminal, then exercises keyboard interference.
+
 ## Session: Municipal Access — Clinic Layout And Clearance Boundary
 
 Gameplay outcome: the clinic stops being a single exterior label and becomes a small public/private access surface. The player can see public intake/treatment rooms, records/staff-only labels, and use the inherited tool to cross exactly one local clearance boundary without adding a health system.

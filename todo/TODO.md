@@ -42,29 +42,6 @@ For longer-range direction, read `todo/EPOCHS.md` before adding new sessions. `t
 
 ## Active Sessions:
 
-## Session: Tool UI — Windowed Debugger Terminal
-
-Gameplay outcome: Debugger results move out of the single HUD line and into a small Unix-terminal-inspired window that can be opened, closed, and moved while preserving the current scan/interference information.
-
-Epoch source: `Tool UI system` in `todo/EPOCHS.md`.
-
-Scope guard: this session is presentation and interaction only. Do not add new scanner modes, inventory, command parsing, hacking minigames, or a desktop/window manager.
-
-## Phase 97: Add close and drag interactions.
-
-- [ ] Add a close control, minimize control, and a draggable top bar for the Debugger terminal using mouse input.
-- [ ] Store the window position for the current runtime session without requiring save/load persistence.
-- [ ] Keep the window constrained to the visible game viewport so text and controls cannot drift off-screen.
-- [ ] Minimized window shrinks to a D icon at the bottom of the gameplay window- clicking on the icon pulls the screen back up.
-- [ ] Remove redundant debugger logging in the old HUD
-- [ ] Acceptance: tests or a manual playtest note cover open, drag, minimize, close, and refresh-after-close behavior.
-
-## Phase 98: Keep AI playtest and keyboard-only behavior usable.
-
-- [ ] Ensure the terminal UI does not hide information from `neon_ai_playtest`; text snapshots still expose Debugger results without needing mouse interaction.
-- [ ] Keep keyboard-driven scan/interference flows intact when the window is open.
-- [ ] Acceptance: AI playtest transcript includes the same scan result content before and after the UI change.
-
 ## Session: Commerce — First Market Variety And Trade Hook
 
 Gameplay outcome: markets start to differ by district or neighborhood pressure, and the player gets one small exchange action that makes commerce visible without introducing money or a full economy.

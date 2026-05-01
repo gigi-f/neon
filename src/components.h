@@ -193,10 +193,14 @@ struct InspectionComponent {
 
 struct DebuggerTerminalComponent {
     bool open = false;
+    bool minimized = false;
+    bool dragging = false;
     int x = 18;
     int y = 206;
     int width = 540;
     int height = 150;
+    int drag_offset_x = 0;
+    int drag_offset_y = 0;
 };
 
 struct FixedActorComponent {
