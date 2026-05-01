@@ -543,20 +543,52 @@ static void renderInterior(SDL_Renderer* renderer, SDL_Texture* font, Registry& 
 
     const bool housing = interaction.building_role == MicroZoneRole::HOUSING;
     const bool workplace = interaction.building_role == MicroZoneRole::WORKPLACE;
+    const bool clinic = interaction.building_role == MicroZoneRole::CLINIC;
+
+    if (clinic) {
+        for (const ClinicLayoutRoom& room : kClinicLayoutRooms) {
+            SDL_Rect room_label_rect = interiorLocalRect(room.local_bounds,
+                                                        room_cx,
+                                                        room_cy,
+                                                        room_scale);
+            const bool staff = std::string(room.access) == "STAFF";
+            SDL_SetRenderDrawColor(renderer,
+                                   staff ? 96 : 48,
+                                   staff ? 64 : 116,
+                                   staff ? 116 : 104,
+                                   210);
+            SDL_RenderFillRect(renderer, &room_label_rect);
+            SDL_SetRenderDrawColor(renderer, role_r, role_g, role_b, 230);
+            SDL_RenderDrawRect(renderer, &room_label_rect);
+            if (font) {
+                const float label_fit = static_cast<float>(room_label_rect.w) /
+                    (std::strlen(room.label) * FONT_GLYPH_W);
+                const float label_scale = std::clamp(label_fit * 0.78f, 0.55f, 0.95f);
+                drawTextCentered(renderer, font, room.label,
+                                 room_label_rect.x + room_label_rect.w / 2,
+                                 room_label_rect.y + room_label_rect.h / 2,
+                                 SDL_Color{245, 245, 210, 220},
+                                 label_scale);
+            }
+        }
+    }
+
     const TransformComponent fixture = housing
         ? TransformComponent{-24.0f, -16.0f, 34.0f, 14.0f}
         : workplace
             ? TransformComponent{0.0f, -20.0f, 56.0f, 18.0f}
             : TransformComponent{0.0f, -18.0f, 48.0f, 16.0f};
     SDL_Rect fixture_rect = interiorLocalRect(fixture, room_cx, room_cy, room_scale);
-    SDL_SetRenderDrawColor(renderer,
-                           housing ? 64 : workplace ? 130 : 42,
-                           housing ? 112 : workplace ? 94 : 120,
-                           housing ? 180 : workplace ? 42 : 72,
-                           210);
-    SDL_RenderFillRect(renderer, &fixture_rect);
-    SDL_SetRenderDrawColor(renderer, role_r, role_g, role_b, 230);
-    SDL_RenderDrawRect(renderer, &fixture_rect);
+    if (!clinic) {
+        SDL_SetRenderDrawColor(renderer,
+                               housing ? 64 : workplace ? 130 : 42,
+                               housing ? 112 : workplace ? 94 : 120,
+                               housing ? 180 : workplace ? 42 : 72,
+                               210);
+        SDL_RenderFillRect(renderer, &fixture_rect);
+        SDL_SetRenderDrawColor(renderer, role_r, role_g, role_b, 230);
+        SDL_RenderDrawRect(renderer, &fixture_rect);
+    }
 
     const SDL_Rect player_rect = interiorLocalRect(interaction.interior_position,
                                                    room_cx,
@@ -565,20 +597,22 @@ static void renderInterior(SDL_Renderer* renderer, SDL_Texture* font, Registry& 
     if (font) {
         drawGlyphToRect(renderer, font, '@', player_rect,
                         SDL_Color{245, 245, 210, 255});
-        const char* fixture_label = housing ? "MAT" : workplace ? "BENCH" : "STOCK";
+        const char* fixture_label = housing ? "MAT" : workplace ? "BENCH" : clinic ? "" : "STOCK";
         if (workplace && workplaceBenchOutputReady(registry)) {
             fixture_label = "READY";
         } else if (housing && buildingImproved(registry)) {
             fixture_label = "FIXED";
         }
-        const float label_fit = static_cast<float>(fixture_rect.w) /
-            (std::strlen(fixture_label) * FONT_GLYPH_W);
-        const float label_scale = std::clamp(label_fit * 0.82f, 0.75f, 1.15f);
-        drawTextCentered(renderer, font, fixture_label,
-                         fixture_rect.x + fixture_rect.w / 2,
-                         fixture_rect.y + fixture_rect.h / 2,
-                         SDL_Color{245, 245, 210, 220},
-                         label_scale);
+        if (!clinic && fixture_label[0] != '\0') {
+            const float label_fit = static_cast<float>(fixture_rect.w) /
+                (std::strlen(fixture_label) * FONT_GLYPH_W);
+            const float label_scale = std::clamp(label_fit * 0.82f, 0.75f, 1.15f);
+            drawTextCentered(renderer, font, fixture_label,
+                             fixture_rect.x + fixture_rect.w / 2,
+                             fixture_rect.y + fixture_rect.h / 2,
+                             SDL_Color{245, 245, 210, 220},
+                             label_scale);
+        }
     } else {
         SDL_SetRenderDrawColor(renderer, 245, 245, 210, 255);
         SDL_RenderFillRect(renderer, &player_rect);
@@ -769,6 +803,8 @@ int main(int, char**) {
                     workWorkplaceBench(registry, player);
                 } else if (playerCanBoardTransit(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
                     enterTransitRide(registry, player, BUILDING_INTERACTION_RANGE_WU, world_config.transit_ride_seconds);
+                } else if (playerCanAttemptClinicRestrictedBoundary(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
+                    useClinicRestrictedBoundary(registry, player, BUILDING_INTERACTION_RANGE_WU);
                 } else {
                     toggleBuildingInteraction(registry, player, BUILDING_INTERACTION_RANGE_WU);
                 }

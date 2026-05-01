@@ -5,6 +5,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include "clinic_layout.h"
 #include "components.h"
 #include "ecs.h"
 #include "fixed_actor_system.h"
@@ -15,6 +16,7 @@ inline std::string localSuspicionInspectionReadoutForWorker(Registry& registry, 
 inline std::string localSuspicionInspectionReadoutForBuilding(Registry& registry, Entity building);
 inline Entity firstLocalSuspicionRecordWorker(Registry& registry);
 inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic);
+inline std::string clinicRestrictedBoundaryReadout(Registry& registry, Entity clinic);
 inline bool clinicAccessCanSpoof(Registry& registry, Entity clinic);
 
 inline int floorsForRole(MicroZoneRole role) {
@@ -1478,6 +1480,8 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
             break;
         case MicroZoneRole::CLINIC:
             readout += "; SITE STATUS: OBSERVATION ONLY";
+            readout += "; " + clinicLayoutReadout();
+            readout += "; " + clinicRestrictedBoundaryReadout(registry, building);
             {
                 const std::string ledger = clinicAccessLedgerReadout(registry, building);
                 if (!ledger.empty()) {
@@ -2030,6 +2034,14 @@ inline bool clinicAccessSpoofedInDistrict(Registry& registry, uint32_t district_
     return false;
 }
 
+inline std::string clinicRestrictedBoundaryReadout(Registry& registry, Entity clinic) {
+    std::string readout = clinicRestrictedBoundaryBaseReadout();
+    readout += clinicAccessSpoofed(registry, clinic) ?
+        "; ACCESS: GHOST CLEARANCE (VOLATILE)" :
+        "; ACCESS: DENIED";
+    return readout;
+}
+
 inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic) {
     if (!registry.alive(clinic) ||
         !registry.has<ClinicAccessLedgerComponent>(clinic)) {
@@ -2048,7 +2060,7 @@ inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic) 
 
     std::string readout = "CLINIC LEDGER: WORK RECORD FLAGGED";
     if (spoofed) {
-        readout += "; CLINIC ACCESS: GHOST CLEARANCE";
+        readout += "; CLINIC ACCESS: GHOST CLEARANCE (VOLATILE)";
     }
     return readout;
 }
@@ -3879,6 +3891,8 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
             readout += "; " + dependency;
         }
         if (role == MicroZoneRole::CLINIC) {
+            readout += "; " + clinicLayoutReadout();
+            readout += "; " + clinicRestrictedBoundaryReadout(registry, building);
             const std::string ledger = clinicAccessLedgerReadout(registry, building);
             if (!ledger.empty()) {
                 readout += "; " + ledger;

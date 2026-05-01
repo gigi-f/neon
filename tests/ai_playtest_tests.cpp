@@ -31,6 +31,23 @@ static void testDefaultSnapshotExposesAiReadableState() {
     assert(view[8][16] == '@');
 }
 
+static void testDefaultClinicTargetExposesLayout() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
+    const std::string snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("TARGET: CLINIC") != std::string::npos);
+    assert(snapshot.find("CLINIC LAYOUT: INTAKE PUBLIC; TREATMENT PUBLIC; RECORDS STAFF; SERVICE STAFF") !=
+           std::string::npos);
+    assert(snapshot.find("CLINIC BOUNDARY: RECORDS STAFF ONLY; ACCESS: DENIED") !=
+           std::string::npos);
+    assert(snapshot.find("ACTION: LOCATION:OUTSIDE E CLINIC RECORDS BOUNDARY DENIED") !=
+           std::string::npos);
+    assert(snapshot.find("CLINIC LEDGER") == std::string::npos);
+}
+
 static void testSuspicionFixtureLetsAiLayLowInHousing() {
     AiPlaytestSession session;
     assert(buildAiPlaytestSession(session, AiPlaytestScenario::SUSPICION));
@@ -218,6 +235,8 @@ static void testSuspicionFixtureExposesClinicAccessLedgerLoop() {
     assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
     const std::string flagged = aiPlaytestSnapshot(session);
     assert(flagged.find("TARGET: CLINIC") != std::string::npos);
+    assert(flagged.find("CLINIC LAYOUT: INTAKE PUBLIC; TREATMENT PUBLIC; RECORDS STAFF; SERVICE STAFF") !=
+           std::string::npos);
     assert(flagged.find("CLINIC LEDGER: WORK RECORD FLAGGED") != std::string::npos);
     assert(flagged.find("G INTERFERENCE TORCH SPOOF CLINIC ACCESS") != std::string::npos);
     assert(flagged.find("GHOST CLEARANCE") == std::string::npos);
@@ -257,6 +276,40 @@ static void testSuspicionFixtureExposesClinicAccessLedgerLoop() {
     assert(restored.find("GHOST CLEARANCE") == std::string::npos);
 }
 
+static void testSuspicionFixtureExposesClinicRestrictedBoundary() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session, AiPlaytestScenario::SUSPICION));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
+    assert(applyAiPlaytestKey(session, "E", &result));
+    std::string snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("ACTION RESULT: ON CLINIC") != std::string::npos);
+    assert(snapshot.find("CLINIC ACCESS DENIED: RECORDS STAFF ONLY") != std::string::npos);
+    assert(snapshot.find("inside=0") != std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "G", &result));
+    assert(applyAiPlaytestKey(session, "E", &result));
+    snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("ACTION RESULT: ON CLINIC") != std::string::npos);
+    assert(snapshot.find("CLINIC RECORDS BOUNDARY OPEN: GHOST CLEARANCE ACCEPTED") !=
+           std::string::npos);
+    assert(snapshot.find("INTERIOR: role=CLINIC") != std::string::npos);
+    assert(snapshot.find("inside=1") != std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "G", &result));
+    snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("RESTORED CLINIC ACCESS: WORK RECORD FLAGGED") != std::string::npos);
+    assert(snapshot.find("CLINIC BOUNDARY: RECORDS STAFF ONLY; ACCESS: DENIED") !=
+           std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(applyAiPlaytestKey(session, "E", &result));
+    snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("CLINIC ACCESS DENIED: RECORDS STAFF ONLY") != std::string::npos);
+    assert(snapshot.find("inside=0") != std::string::npos);
+}
+
 static void testPlaytestStateFileRoundTrip() {
     const std::string path = "/tmp/neon_ai_playtest_state_test.txt";
     std::remove(path.c_str());
@@ -289,12 +342,14 @@ static void testPlaytestStateFileRoundTrip() {
 
 int main() {
     testDefaultSnapshotExposesAiReadableState();
+    testDefaultClinicTargetExposesLayout();
     testSyntheticKeysMutateSameGameState();
     testTransitLookOutWindowChoiceMovesToDestination();
     testTransitWaitChoiceOpensDoorsBeforeExit();
     testSignpostWarpUsesCurrentDistrictAfterTransit();
     testSuspicionFixtureLetsAiExerciseWageSpoofLoop();
     testSuspicionFixtureExposesClinicAccessLedgerLoop();
+    testSuspicionFixtureExposesClinicRestrictedBoundary();
     testSuspicionFixtureLetsAiLayLowInHousing();
     testPlaytestStateFileRoundTrip();
     return 0;

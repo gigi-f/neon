@@ -178,6 +178,13 @@ bool runTerminalPlaytest(const std::string& raw_scenario,
         {"SPOOF WAGE RECORD", "key", "G"},
         {"WARP TO WORKER", "warp", "WORKER"},
         {"RESTORE WAGE RECORD", "key", "G"},
+        {"WARP TO CLINIC", "warp", "CLINIC"},
+        {"TRY RECORDS BOUNDARY WITHOUT CLEARANCE", "key", "E"},
+        {"SPOOF CLINIC CLEARANCE", "key", "G"},
+        {"CROSS RECORDS BOUNDARY WITH CLEARANCE", "key", "E"},
+        {"RESTORE CLINIC CLEARANCE", "key", "G"},
+        {"EXIT CLINIC", "key", "E"},
+        {"TRY RESTORED RECORDS BOUNDARY", "key", "E"},
     };
 
     bool ok = true;

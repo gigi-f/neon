@@ -162,13 +162,17 @@ inline bool enterBuildingInterior(Registry& registry, Entity player, Entity buil
         !registry.has<TransformComponent>(player) ||
         !registry.has<BuildingInteractionComponent>(player) ||
         !registry.has<BuildingComponent>(building) ||
-        !registry.has<BuildingUseComponent>(building) ||
-        !registry.get<BuildingComponent>(building).is_enterable) {
+        !registry.has<BuildingUseComponent>(building)) {
         return false;
     }
 
     auto& interaction = registry.get<BuildingInteractionComponent>(player);
     const auto& use = registry.get<BuildingUseComponent>(building);
+    const bool clinic_boundary_open =
+        use.role == MicroZoneRole::CLINIC && clinicAccessSpoofed(registry, building);
+    if (!registry.get<BuildingComponent>(building).is_enterable && !clinic_boundary_open) {
+        return false;
+    }
     const auto layout = interiorLayoutForRole(use.role);
 
     interaction.building_entity = building;
@@ -176,6 +180,69 @@ inline bool enterBuildingInterior(Registry& registry, Entity player, Entity buil
     interaction.exterior_position = registry.get<TransformComponent>(player);
     interaction.interior_position = layout.spawn;
     interaction.inside_building = true;
+    return true;
+}
+
+inline Entity nearestClinicRestrictedBoundaryInRange(Registry& registry,
+                                                     const TransformComponent& player_transform,
+                                                     float range_wu) {
+    return nearestBuildingInRange(registry, player_transform, range_wu, MicroZoneRole::CLINIC);
+}
+
+inline bool playerCanAttemptClinicRestrictedBoundary(Registry& registry,
+                                                     Entity player,
+                                                     float range_wu) {
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player) ||
+        playerInsideTransitInterior(registry, player)) {
+        return false;
+    }
+    if (registry.has<BuildingInteractionComponent>(player) &&
+        registry.get<BuildingInteractionComponent>(player).inside_building) {
+        return false;
+    }
+    if (nearestInteractableBuildingInRange(registry,
+                                           registry.get<TransformComponent>(player),
+                                           range_wu) != MAX_ENTITIES) {
+        return false;
+    }
+    return nearestClinicRestrictedBoundaryInRange(registry,
+                                                 registry.get<TransformComponent>(player),
+                                                 range_wu) != MAX_ENTITIES;
+}
+
+inline std::string clinicRestrictedBoundaryActionReadout(Registry& registry, Entity clinic) {
+    return clinicAccessSpoofed(registry, clinic) ?
+        "CLINIC RECORDS BOUNDARY OPEN: GHOST CLEARANCE ACCEPTED" :
+        "CLINIC ACCESS DENIED: RECORDS STAFF ONLY";
+}
+
+inline bool useClinicRestrictedBoundary(Registry& registry,
+                                        Entity player,
+                                        float range_wu) {
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player)) {
+        return false;
+    }
+
+    const Entity clinic = nearestClinicRestrictedBoundaryInRange(
+        registry,
+        registry.get<TransformComponent>(player),
+        range_wu);
+    if (clinic == MAX_ENTITIES) {
+        return false;
+    }
+
+    if (registry.has<InheritedGadgetComponent>(player)) {
+        auto& gadget = registry.get<InheritedGadgetComponent>(player);
+        gadget.last_result_kind = InheritedGadgetResultKind::ACTION;
+        gadget.last_result_target_entity = clinic;
+        gadget.last_result_target_type = InspectionTargetType::CLINIC;
+        gadget.last_result = clinicRestrictedBoundaryActionReadout(registry, clinic);
+    }
+
+    if (!clinicAccessSpoofed(registry, clinic)) {
+        return true;
+    }
+    enterBuildingInterior(registry, player, clinic);
     return true;
 }
 

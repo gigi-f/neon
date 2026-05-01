@@ -482,6 +482,12 @@ inline bool applyAiPlaytestKey(AiPlaytestSession& session,
                              session.player,
                              kAiPlaytestInteractionRangeWu,
                              session.config.transit_ride_seconds);
+        } else if (playerCanAttemptClinicRestrictedBoundary(session.registry,
+                                                            session.player,
+                                                            kAiPlaytestInteractionRangeWu)) {
+            useClinicRestrictedBoundary(session.registry,
+                                        session.player,
+                                        kAiPlaytestInteractionRangeWu);
         } else {
             toggleAiPlaytestBuildingInteraction(session.registry, session.player);
         }
@@ -971,6 +977,15 @@ inline std::string aiPlaytestActionLine(Registry& registry, Entity player) {
         out << "E WORK BENCH " << workplaceBenchReadout(registry);
     } else if (playerCanBoardTransit(registry, player, kAiPlaytestInteractionRangeWu)) {
         out << "E BOARD TRANSIT";
+    } else if (playerCanAttemptClinicRestrictedBoundary(registry,
+                                                        player,
+                                                        kAiPlaytestInteractionRangeWu)) {
+        const Entity clinic = nearestClinicRestrictedBoundaryInRange(
+            registry,
+            registry.get<TransformComponent>(player),
+            kAiPlaytestInteractionRangeWu);
+        out << "E CLINIC RECORDS BOUNDARY "
+            << (clinicAccessSpoofed(registry, clinic) ? "GHOST CLEARANCE" : "DENIED");
     } else if (player_component.carried_object != MAX_ENTITIES) {
         out << aiLocationPrompt(location) << " F DROP "
             << carryableObjectLabel(registry, player_component.carried_object);

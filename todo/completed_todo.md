@@ -10,6 +10,35 @@ This file archives completed implementation slices moved out of `todo/TODO.md`.
 - [x] World rendering has a clean glyph-or-fallback path: fitted glyphs when the font loads, rectangle fallback only when it does not.
 - [x] Validation is green: CMake configure/build, `rtk test ctest --test-dir build --output-on-failure`, and cclsp diagnostics on remaining edited C++ files.
 
+## Session: Municipal Access — Clinic Layout And Clearance Boundary
+
+Gameplay outcome: the clinic stops being a single exterior label and becomes a small public/private access surface. The player can see public intake/treatment rooms, records/staff-only labels, and use the inherited tool to cross exactly one local clearance boundary without adding a health system.
+
+Epoch source: `Municipal Access And Public Control` in `todo/EPOCHS.md`.
+
+Scope guard honored: authored clinic rooms, one restricted access marker, and one reversible clearance consequence only. No doctors, nurses, injuries, appointments, births, ambulance simulation, hospital supply logistics, profit systems, or citywide healthcare were added.
+
+## Phase 93: Author the first clinic layout surface.
+
+- [x] Give the existing clinic an inspectable local layout with public intake, treatment, records, and staff-only/service labels.
+- [x] Render or report the layout through the existing site/interior/readout surfaces without requiring full pathfinding or multi-floor navigation.
+- [x] Keep all rooms inert except for inspection and access labeling.
+- [x] Acceptance: clinic inspection and AI playtest target details expose the layout labels; the clinic remains deterministic in one-district and two-district configs.
+
+## Phase 94: Add one restricted clinic access boundary.
+
+- [x] Add exactly one staff-only/records boundary that blocks ordinary `E` entry or interaction with a clear denial message.
+- [x] Existing clinic `G` ghost clearance allows crossing or inspecting past that one boundary while active; restoring clearance re-locks the boundary.
+- [x] The consequence is local to the clinic and does not clear suspicion, wage/dock risk, route blockage, or audit traces.
+- [x] Acceptance: tests cover denied access, ghost-clearance access, restored denial, and district-local isolation.
+
+## Phase 95: Wire clinic clearance into save/load and AI playtest.
+
+- [x] Persist any new mechanical clinic boundary state only if it outlives the immediate interaction; otherwise document it as volatile in the readout.
+- [x] Update `src/ai_playtest.h`, `tools/ai_playtest.cpp`, and `tests/ai_playtest_tests.cpp` so the terminal harness can find the boundary, attempt the verb, and report the result.
+- [x] Run an adaptive terminal playtest that demonstrates denied access, spoofed access, and restored denial.
+- [x] Acceptance: `tools/verify_feature_completion.sh --transcript .neon_feature_playtest.txt --check-changed` passes after the normal build/tests.
+
 ## Phase 1: Count-Driven World Builder
 
 Goal: make the one-building sandbox tunable without restoring the old procedural city.

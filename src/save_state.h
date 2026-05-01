@@ -1161,6 +1161,11 @@ inline TinySaveStatus applyTinySaveState(Registry& registry, Entity player, cons
         }
     }
 
+    auto clinic_ledgers = registry.view<ClinicAccessLedgerComponent>();
+    for (Entity clinic : clinic_ledgers) {
+        registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed = false;
+    }
+
     auto suspicion_workers = registry.view<LocalSuspicionComponent>();
     for (Entity suspicion_worker : suspicion_workers) {
         registry.remove<LocalSuspicionComponent>(suspicion_worker);

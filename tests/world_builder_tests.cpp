@@ -1047,13 +1047,21 @@ static void testInsideWorkplaceInspectionTarget() {
 static void testInteriorLayoutsAreRoleSpecific() {
     const InteriorLayout housing = interiorLayoutForRole(MicroZoneRole::HOUSING);
     const InteriorLayout workplace = interiorLayoutForRole(MicroZoneRole::WORKPLACE);
+    const InteriorLayout clinic = interiorLayoutForRole(MicroZoneRole::CLINIC);
 
     assert(housing.role == MicroZoneRole::HOUSING);
     assert(workplace.role == MicroZoneRole::WORKPLACE);
+    assert(clinic.role == MicroZoneRole::CLINIC);
     assert(housing.width != workplace.width);
     assert(housing.height != workplace.height);
     assert(interiorPositionWithinLayout(housing, housing.spawn));
     assert(interiorPositionWithinLayout(workplace, workplace.spawn));
+    assert(kClinicLayoutRooms.size() == 4);
+    for (const ClinicLayoutRoom& room : kClinicLayoutRooms) {
+        assert(interiorPositionWithinLayout(clinic, room.local_bounds));
+    }
+    assert(clinicLayoutReadout().find("INTAKE PUBLIC") != std::string::npos);
+    assert(clinicLayoutReadout().find("RECORDS STAFF") != std::string::npos);
 }
 
 static void testEnterBuildingInitializesInteriorState() {
@@ -1777,16 +1785,20 @@ static void testBuildingInspectionReadoutsIncludePurposeForCurrentRoles() {
     config.supply_building_count = 1;
     config.market_micro_zone_count = 1;
     config.market_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
     buildWorld(registry, config);
 
     Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
     Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
     Entity supply = firstBuildingByRole(registry, MicroZoneRole::SUPPLY);
     Entity market = firstBuildingByRole(registry, MicroZoneRole::MARKET);
+    Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
     assert(housing != MAX_ENTITIES);
     assert(workplace != MAX_ENTITIES);
     assert(supply != MAX_ENTITIES);
     assert(market != MAX_ENTITIES);
+    assert(clinic != MAX_ENTITIES);
 
     std::string readout = buildingInspectionReadout(registry, housing);
     assert(readout.find("HOUSING; PURPOSE: DWELLING") != std::string::npos);
@@ -1808,6 +1820,11 @@ static void testBuildingInspectionReadoutsIncludePurposeForCurrentRoles() {
     assert(readout.find("FUNCTION: EXCHANGE SITE") != std::string::npos);
     assert(readout.find("SITE STATUS: OBSERVATION ONLY") != std::string::npos);
 
+    readout = buildingInspectionReadout(registry, clinic);
+    assert(readout.find("CLINIC; PURPOSE: PUBLIC HEALTH") != std::string::npos);
+    assert(readout.find("CLINIC LAYOUT: INTAKE PUBLIC; TREATMENT PUBLIC; RECORDS STAFF; SERVICE STAFF") !=
+           std::string::npos);
+
     assert(buildingPurposeScanReadoutForRole(MicroZoneRole::HOUSING) ==
            "HOUSING PURPOSE: DWELLING; FUNCTION: BUILDING RECOVERY");
     assert(inheritedGadgetSiteMetadataScan(
@@ -1822,6 +1839,10 @@ static void testBuildingInspectionReadoutsIncludePurposeForCurrentRoles() {
         registry,
         InspectionTarget{market, InspectionTargetType::MARKET}) ==
            "MARKET PURPOSE: EXCHANGE; ACCESS: RESTRICTED");
+    assert(inheritedGadgetSiteMetadataScan(
+        registry,
+        InspectionTarget{clinic, InspectionTargetType::CLINIC}) ==
+           "CLINIC PURPOSE: PUBLIC HEALTH; SERVICE: RATIONED; AUTHORITY: MUNICIPAL; CLINIC LAYOUT: INTAKE PUBLIC; TREATMENT PUBLIC; RECORDS STAFF; SERVICE STAFF; CLINIC BOUNDARY: RECORDS STAFF ONLY; ACCESS: DENIED");
 }
 
 static void testCommercialSiteDebuggerScanMetadataAndNoTarget() {
@@ -1974,6 +1995,8 @@ static void testPublicSitePlacementAndInspection() {
     assert(readout.find("CLINIC; PURPOSE: PUBLIC HEALTH") != std::string::npos);
     assert(readout.find("FUNCTION: MEDICAL SERVICE") != std::string::npos);
     assert(readout.find("SITE STATUS: OBSERVATION ONLY") != std::string::npos);
+    assert(readout.find("CLINIC LAYOUT: INTAKE PUBLIC; TREATMENT PUBLIC; RECORDS STAFF; SERVICE STAFF") !=
+           std::string::npos);
     assert(readout.find("CONTEXT: MUNICIPAL") != std::string::npos);
 }
 
@@ -2030,7 +2053,7 @@ static void testPublicSiteDebuggerScanMetadata() {
            "SPACE DEBUGGER ON CLINIC");
     assert(useInheritedGadget(registry, player, 22.0f));
     assert(inheritedGadgetResultReadout(registry, player) ==
-           "DEBUGGER RESULT: CLINIC PURPOSE: PUBLIC HEALTH; SERVICE: RATIONED; AUTHORITY: MUNICIPAL");
+           "DEBUGGER RESULT: CLINIC PURPOSE: PUBLIC HEALTH; SERVICE: RATIONED; AUTHORITY: MUNICIPAL; CLINIC LAYOUT: INTAKE PUBLIC; TREATMENT PUBLIC; RECORDS STAFF; SERVICE STAFF; CLINIC BOUNDARY: RECORDS STAFF ONLY; ACCESS: DENIED");
 }
 
 static void testPublicSiteBoundaryDoesNotBreakLoop() {
@@ -5678,6 +5701,90 @@ static void testClinicAccessSpoofPreservesWorkerSuspicionAndWageState() {
     assert(dependencyDisrupted(registry) == dependency_before);
 }
 
+static void testClinicRestrictedBoundaryRequiresGhostClearance() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity clinic = MAX_ENTITIES;
+    setupClinicAccessLedgerSuspicion(registry, player, worker, clinic);
+
+    auto& interaction = registry.get<BuildingInteractionComponent>(player);
+    assert(playerCanAttemptClinicRestrictedBoundary(registry, player, 22.0f));
+    assert(useClinicRestrictedBoundary(registry, player, 22.0f));
+    assert(!interaction.inside_building);
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "ACTION RESULT: CLINIC ACCESS DENIED: RECORDS STAFF ONLY");
+    assert(buildingInspectionReadout(registry, clinic).find(
+               "CLINIC BOUNDARY: RECORDS STAFF ONLY; ACCESS: DENIED") != std::string::npos);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(useClinicRestrictedBoundary(registry, player, 22.0f));
+    assert(interaction.inside_building);
+    assert(interaction.building_entity == clinic);
+    assert(interaction.building_role == MicroZoneRole::CLINIC);
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "ACTION RESULT: CLINIC RECORDS BOUNDARY OPEN: GHOST CLEARANCE ACCEPTED");
+    assert(playerInspectionTarget(registry, player, 22.0f).type == InspectionTargetType::CLINIC);
+
+    assert(exitBuildingInterior(registry, player));
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(useClinicRestrictedBoundary(registry, player, 22.0f));
+    assert(!interaction.inside_building);
+    assert(inheritedGadgetResultReadout(registry, player) ==
+           "ACTION RESULT: CLINIC ACCESS DENIED: RECORDS STAFF ONLY");
+}
+
+static void testClinicRestrictedBoundaryDoesNotMutateOtherLocalRiskState() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity clinic = MAX_ENTITIES;
+    setupClinicAccessLedgerSuspicion(registry, player, worker, clinic);
+
+    registry.get<FixedActorComponent>(worker).wage_record_spoofed = true;
+    auto& suspicion = registry.get<LocalSuspicionComponent>(worker);
+    suspicion.institutional_log_recovered = true;
+    const LocalSuspicionCause cause_before = suspicion.cause;
+    const LocalSuspicionResolution resolution_before = suspicion.resolution;
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(useClinicRestrictedBoundary(registry, player, 22.0f));
+    assert(registry.get<BuildingInteractionComponent>(player).inside_building);
+
+    const auto& suspicion_after = registry.get<LocalSuspicionComponent>(worker);
+    assert(localSuspicionRecordExists(suspicion_after));
+    assert(suspicion_after.cause == cause_before);
+    assert(suspicion_after.resolution == resolution_before);
+    assert(suspicion_after.institutional_log_recovered);
+    assert(registry.get<FixedActorComponent>(worker).wage_record_spoofed);
+    assert(!dependencyDisrupted(registry));
+}
+
+static void testTinySaveRoundTripClearsVolatileClinicGhostClearance() {
+    Registry registry;
+    Entity player = MAX_ENTITIES;
+    Entity worker = MAX_ENTITIES;
+    Entity clinic = MAX_ENTITIES;
+    setupClinicAccessLedgerSuspicion(registry, player, worker, clinic);
+
+    assert(useInheritedGadgetSpoof(registry, player, 22.0f));
+    assert(registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed);
+    assert(clinicRestrictedBoundaryReadout(registry, clinic).find("VOLATILE") !=
+           std::string::npos);
+
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    TinySaveState state;
+    assert(deserializeTinySaveState(serialized, state) == TinySaveStatus::OK);
+    assert(applyTinySaveState(registry, player, state) == TinySaveStatus::OK);
+
+    assert(!registry.get<ClinicAccessLedgerComponent>(clinic).access_spoofed);
+    assert(clinicAccessLedgerReadout(registry, clinic).find("CLINIC LEDGER: WORK RECORD FLAGGED") !=
+           std::string::npos);
+    assert(clinicRestrictedBoundaryReadout(registry, clinic).find("ACCESS: DENIED") !=
+           std::string::npos);
+    assert(localSuspicionRecordExists(registry.get<LocalSuspicionComponent>(worker)));
+}
+
 static void setWorldPhaseForTest(Registry& registry,
                                  WorldPhase phase,
                                  float elapsed_seconds = 0.0f) {
@@ -6260,6 +6367,10 @@ static void testDistrictSuspicionAndWageReadoutsDoNotLeak() {
                .find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") != std::string::npos);
     assert(inheritedGadgetWorkerScan(registry, worker_b)
                .find("CLINIC ACCESS: GHOST CLEARANCE MISMATCH") == std::string::npos);
+    assert(clinicRestrictedBoundaryReadout(registry, clinic_a).find("ACCESS: GHOST CLEARANCE") !=
+           std::string::npos);
+    assert(clinicRestrictedBoundaryReadout(registry, clinic_b).find("ACCESS: DENIED") !=
+           std::string::npos);
 
     registry.get<FixedActorComponent>(worker_a).wage_record_spoofed = true;
     assert(inheritedGadgetWorkerScan(registry, worker_a)
@@ -6585,6 +6696,9 @@ int main() {
     testClinicAccessLedgerSpoofTogglesReadouts();
     testWorkerScanShowsClinicAccessMismatchWhenClinicSpoofed();
     testClinicAccessSpoofPreservesWorkerSuspicionAndWageState();
+    testClinicRestrictedBoundaryRequiresGhostClearance();
+    testClinicRestrictedBoundaryDoesNotMutateOtherLocalRiskState();
+    testTinySaveRoundTripClearsVolatileClinicGhostClearance();
     testWorldPhaseModulatesOutputTheftWitnessRange();
     testWorldPhaseUsesElapsedTimeNotFrames();
     testTwoWorkersCreateCrowdCamouflageAndDistinctRoutes();
