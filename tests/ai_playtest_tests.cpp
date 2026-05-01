@@ -15,6 +15,7 @@ static void testDefaultSnapshotExposesAiReadableState() {
     assert(snapshot.find("COMMANDS: snapshot | key W/A/S/D/E/F/T/SPACE/G") != std::string::npos);
     assert(snapshot.find("PLAYER:") != std::string::npos);
     assert(snapshot.find("GADGET:") != std::string::npos);
+    assert(snapshot.find("DEBUGGER_TERMINAL: CLOSED") != std::string::npos);
     assert(snapshot.find("-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ PHASE: DAY") != std::string::npos);
     assert(snapshot.find("TARGET_DETAIL: PHASE: DAY") != std::string::npos);
     assert(snapshot.find("LEGEND: @ player ^v<> facing") != std::string::npos);
@@ -29,6 +30,22 @@ static void testDefaultSnapshotExposesAiReadableState() {
     assert(view.size() == 17);
     assert(view[0].size() == 33);
     assert(view[8][16] == '@');
+}
+
+static void testDebuggerTerminalOpensInAiSnapshotAfterScan() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "CLINIC", &result));
+    assert(applyAiPlaytestKey(session, "SPACE", &result));
+    assert(result == "KEY SPACE OK");
+
+    const std::string snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("DEBUGGER_TERMINAL: OPEN") != std::string::npos);
+    assert(snapshot.find("MOTHER'S DEBUGGER // TERMINAL") != std::string::npos);
+    assert(snapshot.find("TARGET: CLINIC") != std::string::npos);
+    assert(snapshot.find("CLINIC LAYOUT") != std::string::npos);
 }
 
 static void testDefaultClinicTargetExposesLayout() {
@@ -342,6 +359,7 @@ static void testPlaytestStateFileRoundTrip() {
 
 int main() {
     testDefaultSnapshotExposesAiReadableState();
+    testDebuggerTerminalOpensInAiSnapshotAfterScan();
     testDefaultClinicTargetExposesLayout();
     testSyntheticKeysMutateSameGameState();
     testTransitLookOutWindowChoiceMovesToDestination();

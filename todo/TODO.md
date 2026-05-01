@@ -50,19 +50,14 @@ Epoch source: `Tool UI system` in `todo/EPOCHS.md`.
 
 Scope guard: this session is presentation and interaction only. Do not add new scanner modes, inventory, command parsing, hacking minigames, or a desktop/window manager.
 
-## Phase 96: Open a terminal-style Debugger window.
-
-- [ ] When `SPACE` produces a Debugger result, open or refresh a compact terminal window over the gameplay view.
-- [ ] The window shows the latest scan target, result lines, and relevant local state using existing Debugger strings instead of duplicating scan logic.
-- [ ] Existing HUD feedback may remain as a short summary while the terminal carries the detail.
-- [ ] Acceptance: renderer/UI tests or focused snapshots cover a non-empty terminal window for building, worker, signpost, and clinic scans.
-
 ## Phase 97: Add close and drag interactions.
 
-- [ ] Add a close control and a draggable top bar for the Debugger terminal using mouse input.
+- [ ] Add a close control, minimize control, and a draggable top bar for the Debugger terminal using mouse input.
 - [ ] Store the window position for the current runtime session without requiring save/load persistence.
 - [ ] Keep the window constrained to the visible game viewport so text and controls cannot drift off-screen.
-- [ ] Acceptance: tests or a manual playtest note cover open, drag, close, and refresh-after-close behavior.
+- [ ] Minimized window shrinks to a D icon at the bottom of the gameplay window- clicking on the icon pulls the screen back up.
+- [ ] Remove redundant debugger logging in the old HUD
+- [ ] Acceptance: tests or a manual playtest note cover open, drag, minimize, close, and refresh-after-close behavior.
 
 ## Phase 98: Keep AI playtest and keyboard-only behavior usable.
 

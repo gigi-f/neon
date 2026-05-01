@@ -10,6 +10,21 @@ This file archives completed implementation slices moved out of `todo/TODO.md`.
 - [x] World rendering has a clean glyph-or-fallback path: fitted glyphs when the font loads, rectangle fallback only when it does not.
 - [x] Validation is green: CMake configure/build, `rtk test ctest --test-dir build --output-on-failure`, and cclsp diagnostics on remaining edited C++ files.
 
+## Session: Tool UI — Windowed Debugger Terminal
+
+Gameplay outcome: Debugger results started moving out of the single HUD line and into a compact Unix-terminal-inspired overlay that opens when the player scans.
+
+Epoch source: `Tool UI system` in `todo/EPOCHS.md`.
+
+Scope guard honored so far: presentation and interaction only. No new scanner modes, inventory, command parsing, hacking minigames, or desktop/window-manager behavior were added.
+
+## Phase 96: Open a terminal-style Debugger window.
+
+- [x] When `SPACE` produces a Debugger result, open or refresh a compact terminal window over the gameplay view.
+- [x] The window shows the latest scan target, result lines, and relevant local state using existing Debugger strings instead of duplicating scan logic.
+- [x] Existing HUD feedback remains as a short summary while the terminal carries the detail.
+- [x] Acceptance: focused snapshots cover a non-empty terminal window for building, worker, signpost, and clinic scans.
+
 ## Session: Municipal Access — Clinic Layout And Clearance Boundary
 
 Gameplay outcome: the clinic stops being a single exterior label and becomes a small public/private access surface. The player can see public intake/treatment rooms, records/staff-only labels, and use the inherited tool to cross exactly one local clearance boundary without adding a health system.

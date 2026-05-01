@@ -191,6 +191,14 @@ struct InspectionComponent {
     bool has_result = false;
 };
 
+struct DebuggerTerminalComponent {
+    bool open = false;
+    int x = 18;
+    int y = 206;
+    int width = 540;
+    int height = 150;
+};
+
 struct FixedActorComponent {
     FixedActorKind kind = FixedActorKind::WORKER;
     Entity path_entity = MAX_ENTITIES;

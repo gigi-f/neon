@@ -7,6 +7,7 @@
 #include <iostream>
 #include <string>
 #include "components.h"
+#include "debugger_terminal.h"
 #include "ecs.h"
 #include "fixed_actor_system.h"
 #include "infrastructure_solver.h"
@@ -226,6 +227,7 @@ static void performInspection(Registry& registry, Entity player, float range_wu)
 static void performDebuggerInspection(Registry& registry, Entity player, float range_wu) {
     performInspection(registry, player, range_wu);
     useInheritedGadget(registry, player, range_wu);
+    openDebuggerTerminal(registry, player);
 }
 
 static const char* locationStateName(PlayerLocationState state) {
@@ -676,6 +678,63 @@ static void renderTransitInterior(SDL_Renderer* renderer, SDL_Texture* font, Reg
     }
 }
 
+static void renderDebuggerTerminal(SDL_Renderer* renderer, SDL_Texture* font, Registry& registry,
+                                   Entity player, float range_wu,
+                                   const CameraComponent& camera) {
+    if (!font || !registry.has<DebuggerTerminalComponent>(player)) return;
+
+    const auto& terminal = registry.get<DebuggerTerminalComponent>(player);
+    if (!terminal.open) return;
+
+    const int screen_w = static_cast<int>(camera.screenWidth);
+    const int screen_h = static_cast<int>(camera.screenHeight);
+    SDL_Rect rect{
+        std::clamp(terminal.x, 0, std::max(0, screen_w - terminal.width)),
+        std::clamp(terminal.y, 0, std::max(0, screen_h - terminal.height)),
+        std::min(terminal.width, std::max(1, screen_w)),
+        std::min(terminal.height, std::max(1, screen_h))
+    };
+    if (rect.x + rect.w > screen_w) rect.x = std::max(0, screen_w - rect.w);
+    if (rect.y + rect.h > screen_h) rect.y = std::max(0, screen_h - rect.h);
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 4, 10, 12, 232);
+    SDL_RenderFillRect(renderer, &rect);
+    SDL_SetRenderDrawColor(renderer, 95, 245, 170, 235);
+    SDL_RenderDrawRect(renderer, &rect);
+
+    SDL_Rect title_bar{rect.x, rect.y, rect.w, 22};
+    SDL_SetRenderDrawColor(renderer, 12, 34, 32, 242);
+    SDL_RenderFillRect(renderer, &title_bar);
+    SDL_SetRenderDrawColor(renderer, 95, 245, 170, 235);
+    SDL_RenderDrawLine(renderer, rect.x, rect.y + title_bar.h,
+                       rect.x + rect.w, rect.y + title_bar.h);
+
+    const DebuggerTerminalContent content =
+        debuggerTerminalContent(registry, player, range_wu);
+    drawText(renderer, font, content.title.c_str(), rect.x + 8, rect.y + 5,
+             SDL_Color{115, 255, 195, 245}, 0.58f);
+
+    const int char_w = std::max(1, static_cast<int>(FONT_GLYPH_W * 0.55f));
+    const int line_h = 12;
+    const size_t max_chars =
+        static_cast<size_t>(std::max(8, (rect.w - 18) / char_w));
+    const int max_lines = std::max(1, (rect.h - title_bar.h - 10) / line_h);
+    int rendered = 0;
+    int y = rect.y + title_bar.h + 7;
+    for (const std::string& line : content.lines) {
+        for (const std::string& wrapped : wrapDebuggerTerminalLine(line, max_chars)) {
+            if (rendered >= max_lines) return;
+            drawText(renderer, font, wrapped.c_str(), rect.x + 8, y,
+                     rendered < 3 ? SDL_Color{135, 210, 255, 230}
+                                  : SDL_Color{200, 255, 210, 238},
+                     0.55f);
+            y += line_h;
+            ++rendered;
+        }
+    }
+}
+
 int main(int, char**) {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
@@ -735,6 +794,7 @@ int main(int, char**) {
     registry.assign<InheritedGadgetComponent>(player);
     registry.assign<BuildingInteractionComponent>(player);
     registry.assign<InspectionComponent>(player);
+    registry.assign<DebuggerTerminalComponent>(player);
     registry.assign<GlyphComponent>(player, std::string("@"),
         static_cast<uint8_t>(245), static_cast<uint8_t>(245), static_cast<uint8_t>(210),
         static_cast<uint8_t>(255), 1.0f, true, false);
@@ -1019,6 +1079,8 @@ int main(int, char**) {
             if (!local_notice.empty()) {
                 drawText(renderer, font, local_notice.c_str(), 6, 188, SDL_Color{255, 155, 120, 230}, 0.65f);
             }
+            renderDebuggerTerminal(renderer, font, registry, player, INSPECTION_RANGE_WU,
+                                   active_camera);
         }
 
         SDL_RenderPresent(renderer);

@@ -8,6 +8,7 @@
 #include "interior.h"
 #include "save_state.h"
 #include "world_builder.h"
+#include "debugger_terminal.h"
 
 static bool closeTo(float a, float b) {
     return std::fabs(a - b) < 0.001f;
@@ -3951,6 +3952,117 @@ static void testInheritedGadgetWorkerScanRevealsHiddenLaborDetail() {
     assert(workerCarryReadout(registry, worker) == ordinary_readout);
 }
 
+static void assertDebuggerTerminalHasLine(const DebuggerTerminalContent& content,
+                                          const std::string& expected) {
+    assert(content.open);
+    assert(!content.title.empty());
+    assert(!content.lines.empty());
+    bool found = false;
+    for (const std::string& line : content.lines) {
+        if (line.find(expected) != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    assert(found);
+}
+
+static Entity makeDebuggerTerminalTestPlayer(Registry& registry, const TransformComponent& t) {
+    Entity player = registry.create();
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<InspectionComponent>(player);
+    registry.assign<DebuggerTerminalComponent>(player);
+    registry.assign<TransformComponent>(player, t);
+    return player;
+}
+
+static void scanTargetForDebuggerTerminalContent(Registry& registry,
+                                                 Entity player,
+                                                 const InspectionTarget& target) {
+    auto& inspection = registry.get<InspectionComponent>(player);
+    inspection.target_entity = target.entity;
+    inspection.target_type = target.type;
+    inspection.has_result = true;
+    auto& gadget = registry.get<InheritedGadgetComponent>(player);
+    gadget.last_result_kind = InheritedGadgetResultKind::DEBUGGER;
+    gadget.last_result_target_entity = target.entity;
+    gadget.last_result_target_type = target.type;
+    recoverInstitutionalLogFragmentForTarget(registry, target);
+    gadget.last_result = inheritedGadgetScanResult(registry, target);
+    openDebuggerTerminal(registry, player);
+}
+
+static void testDebuggerTerminalContentForBuildingWorkerSignpostAndClinicScans() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.housing_micro_zone_count = 1;
+    config.workplace_micro_zone_count = 1;
+    config.workplace_building_count = 1;
+    config.supply_micro_zone_count = 1;
+    config.supply_building_count = 1;
+    config.clinic_micro_zone_count = 1;
+    config.clinic_building_count = 1;
+    config.fixed_worker_count = 1;
+    buildWorld(registry, config);
+    deriveInfrastructure(registry, config);
+    spawnFixedActors(registry, config);
+
+    const Entity workplace = firstBuildingByRole(registry, MicroZoneRole::WORKPLACE);
+    const Entity worker = firstFixedWorker(registry);
+    const Entity path = firstPathBetweenRoles(registry,
+                                              MicroZoneRole::HOUSING,
+                                              MicroZoneRole::WORKPLACE);
+    const Entity signpost = firstRouteSignpostForPath(registry, path);
+    const Entity clinic = firstBuildingByRole(registry, MicroZoneRole::CLINIC);
+    assert(workplace != MAX_ENTITIES);
+    assert(worker != MAX_ENTITIES);
+    assert(signpost != MAX_ENTITIES);
+    assert(clinic != MAX_ENTITIES);
+
+    Entity player = makeDebuggerTerminalTestPlayer(
+        registry,
+        registry.get<TransformComponent>(workplace));
+    scanTargetForDebuggerTerminalContent(
+        registry,
+        player,
+        InspectionTarget{workplace, InspectionTargetType::WORKPLACE});
+    assertDebuggerTerminalHasLine(debuggerTerminalContent(registry, player, 22.0f),
+                                  "TARGET: WORKPLACE");
+    assertDebuggerTerminalHasLine(debuggerTerminalContent(registry, player, 22.0f),
+                                  "WORKPLACE PURPOSE");
+
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(worker);
+    scanTargetForDebuggerTerminalContent(
+        registry,
+        player,
+        InspectionTarget{worker, InspectionTargetType::WORKER});
+    assertDebuggerTerminalHasLine(debuggerTerminalContent(registry, player, 22.0f),
+                                  "TARGET: WORKER");
+    assertDebuggerTerminalHasLine(debuggerTerminalContent(registry, player, 22.0f),
+                                  "WORKER SIGNAL");
+
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(signpost);
+    scanTargetForDebuggerTerminalContent(
+        registry,
+        player,
+        InspectionTarget{signpost, InspectionTargetType::ROUTE_SIGNPOST});
+    assertDebuggerTerminalHasLine(debuggerTerminalContent(registry, player, 22.0f),
+                                  "TARGET: SIGNPOST");
+    assertDebuggerTerminalHasLine(debuggerTerminalContent(registry, player, 22.0f),
+                                  "SIGNPOST ROUTE");
+
+    registry.get<TransformComponent>(player) = registry.get<TransformComponent>(clinic);
+    scanTargetForDebuggerTerminalContent(
+        registry,
+        player,
+        InspectionTarget{clinic, InspectionTargetType::CLINIC});
+    assertDebuggerTerminalHasLine(debuggerTerminalContent(registry, player, 22.0f),
+                                  "TARGET: CLINIC");
+    assertDebuggerTerminalHasLine(debuggerTerminalContent(registry, player, 22.0f),
+                                  "CLINIC LAYOUT");
+}
+
 static void testInheritedGadgetSiteMetadataScan() {
     Registry registry;
     WorldConfig config = makeSandboxConfig();
@@ -6658,6 +6770,7 @@ int main() {
     testInheritedGadgetPromptAndNoSignalBehavior();
     testInheritedGadgetTargetResultReplacesPreviousResult();
     testInheritedGadgetWorkerScanRevealsHiddenLaborDetail();
+    testDebuggerTerminalContentForBuildingWorkerSignpostAndClinicScans();
     testInheritedGadgetSiteMetadataScan();
     testInheritedGadgetInvalidTargetDoesNotAlterWorkerInspection();
     testInheritedGadgetSpoofCandidateSelection();

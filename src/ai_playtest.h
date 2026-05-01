@@ -13,6 +13,7 @@
 #include "interior.h"
 #include "save_state.h"
 #include "world_builder.h"
+#include "debugger_terminal.h"
 
 inline constexpr float kAiPlaytestInteractionRangeWu = 18.0f;
 inline constexpr float kAiPlaytestInspectionRangeWu = 22.0f;
@@ -217,6 +218,7 @@ inline bool buildAiPlaytestSession(AiPlaytestSession& session,
     session.registry.assign<InheritedGadgetComponent>(session.player);
     session.registry.assign<BuildingInteractionComponent>(session.player);
     session.registry.assign<InspectionComponent>(session.player);
+    session.registry.assign<DebuggerTerminalComponent>(session.player);
     session.registry.assign<GlyphComponent>(session.player, std::string("@"),
         static_cast<uint8_t>(245), static_cast<uint8_t>(245), static_cast<uint8_t>(210),
         static_cast<uint8_t>(255), 1.0f, true, false);
@@ -407,6 +409,7 @@ inline void performAiPlaytestInspection(Registry& registry, Entity player) {
         inspection.has_result = true;
     }
     useInheritedGadget(registry, player, kAiPlaytestInspectionRangeWu);
+    openDebuggerTerminal(registry, player);
 }
 
 inline std::string normalizeAiPlaytestKey(std::string key) {
@@ -1087,6 +1090,16 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
         << aiInspectionDetail(registry, target) << "\n";
     out << "TARGET_DEBUGGER_SCAN: " << inheritedGadgetScanResult(registry, target) << "\n";
     out << "DEBUGGER_RESULT: " << aiPlaytestGadgetResultReadout(registry, player) << "\n";
+    const DebuggerTerminalContent terminal =
+        debuggerTerminalContent(registry, player, kAiPlaytestInspectionRangeWu);
+    out << "DEBUGGER_TERMINAL: " << (terminal.open ? "OPEN" : "CLOSED");
+    if (terminal.open) {
+        out << " title=\"" << terminal.title << "\"";
+        for (const std::string& line : terminal.lines) {
+            out << " | " << line;
+        }
+    }
+    out << "\n";
 
     const std::string local_notice = localSuspicionHudReadout(registry);
     out << "SYSTEMS: " << productionLoopSummaryReadout(registry)
