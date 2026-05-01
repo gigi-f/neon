@@ -18,12 +18,12 @@ void printUsage() {
     std::cout
         << "Usage:\n"
         << "  neon_ai_playtest snapshot [--state PATH]\n"
-        << "  neon_ai_playtest reset [default|suspicion] [--state PATH]\n"
+        << "  neon_ai_playtest reset [default|suspicion|market] [--state PATH]\n"
         << "  neon_ai_playtest key W|A|S|D|E|F|T|SPACE|G [--state PATH]\n"
         << "  neon_ai_playtest step [N] [--state PATH]\n"
         << "  neon_ai_playtest warp TARGET [--state PATH]\n"
-        << "  neon_ai_playtest play [default|suspicion] [--state PATH] [--transcript PATH]\n"
-        << "  neon_ai_playtest run [default|suspicion|all] [--state PATH] [--pause-ms N]\n";
+        << "  neon_ai_playtest play [default|suspicion|market] [--state PATH] [--transcript PATH]\n"
+        << "  neon_ai_playtest run [default|suspicion|market|all] [--state PATH] [--pause-ms N]\n";
 }
 
 std::string statePathFromArgs(int argc, char** argv) {
@@ -186,6 +186,13 @@ bool runTerminalPlaytest(const std::string& raw_scenario,
         {"EXIT CLINIC", "key", "E"},
         {"TRY RESTORED RECORDS BOUNDARY", "key", "E"},
     };
+    const std::vector<TerminalPlaytestStep> market_steps = {
+        {"WARP TO MARKET", "warp", "MARKET"},
+        {"INSPECT MARKET", "key", "SPACE"},
+        {"EXCHANGE AT MARKET EMPTY HANDS", "key", "E"},
+        {"INSPECT MARKET LEDGER AFTER EXCHANGE", "key", "SPACE"},
+        {"STEP SIMULATION", "step", "2"},
+    };
 
     bool ok = true;
     if (scenario == "DEFAULT" || scenario == "ALL") {
@@ -202,7 +209,14 @@ bool runTerminalPlaytest(const std::string& raw_scenario,
                                          state_path,
                                          pause_ms) && ok;
     }
-    if (scenario != "DEFAULT" && scenario != "SUSPICION" && scenario != "ALL") {
+    if (scenario == "MARKET" || scenario == "ALL") {
+        ok = runTerminalPlaytestScenario("MARKET",
+                                         AiPlaytestScenario::MARKET,
+                                         market_steps,
+                                         state_path,
+                                         pause_ms) && ok;
+    }
+    if (scenario != "DEFAULT" && scenario != "SUSPICION" && scenario != "MARKET" && scenario != "ALL") {
         std::cerr << "Unknown run scenario: " << raw_scenario << "\n";
         return false;
     }

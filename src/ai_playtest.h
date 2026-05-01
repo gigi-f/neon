@@ -22,7 +22,8 @@ inline constexpr float kAiPlaytestStepDt = 0.10f;
 
 enum class AiPlaytestScenario {
     DEFAULT,
-    SUSPICION
+    SUSPICION,
+    MARKET
 };
 
 struct AiPlaytestSession {
@@ -273,6 +274,16 @@ inline bool buildAiPlaytestSession(AiPlaytestSession& session,
             session.registry.get<TransformComponent>(worker);
     }
 
+    if (scenario == AiPlaytestScenario::MARKET) {
+        const Entity market = firstWorldBuilderBuildingByRole(session.registry,
+                                                              MicroZoneRole::MARKET);
+        if (market == MAX_ENTITIES || !session.registry.has<MarketLedgerComponent>(market)) {
+            return false;
+        }
+        session.registry.get<TransformComponent>(session.player) =
+            session.registry.get<TransformComponent>(market);
+    }
+
     return true;
 }
 
@@ -485,6 +496,12 @@ inline bool applyAiPlaytestKey(AiPlaytestSession& session,
                              session.player,
                              kAiPlaytestInteractionRangeWu,
                              session.config.transit_ride_seconds);
+        } else if (playerCanExchangeAtMarket(session.registry,
+                                             session.player,
+                                             kAiPlaytestInteractionRangeWu)) {
+            exchangeAtMarket(session.registry,
+                             session.player,
+                             kAiPlaytestInteractionRangeWu);
         } else if (playerCanAttemptClinicRestrictedBoundary(session.registry,
                                                             session.player,
                                                             kAiPlaytestInteractionRangeWu)) {
@@ -980,6 +997,14 @@ inline std::string aiPlaytestActionLine(Registry& registry, Entity player) {
         out << "E WORK BENCH " << workplaceBenchReadout(registry);
     } else if (playerCanBoardTransit(registry, player, kAiPlaytestInteractionRangeWu)) {
         out << "E BOARD TRANSIT";
+    } else if (playerCanExchangeAtMarket(registry, player, kAiPlaytestInteractionRangeWu)) {
+        const Entity market = nearestMarketBuildingInRange(registry,
+                                                           registry.get<TransformComponent>(player),
+                                                           kAiPlaytestInteractionRangeWu);
+        const char* category = (market != MAX_ENTITIES && registry.has<MarketLedgerComponent>(market))
+            ? registry.get<MarketLedgerComponent>(market).category
+            : "MARKET";
+        out << "E EXCHANGE AT MARKET: " << category;
     } else if (playerCanAttemptClinicRestrictedBoundary(registry,
                                                         player,
                                                         kAiPlaytestInteractionRangeWu)) {
@@ -1175,6 +1200,10 @@ inline bool parseAiPlaytestScenario(const std::string& raw, AiPlaytestScenario& 
     }
     if (value == "SUSPICION") {
         scenario = AiPlaytestScenario::SUSPICION;
+        return true;
+    }
+    if (value == "MARKET") {
+        scenario = AiPlaytestScenario::MARKET;
         return true;
     }
     return false;

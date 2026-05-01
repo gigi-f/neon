@@ -281,7 +281,8 @@ static void testCommercialSiteRolePlacementAndInspection() {
     const std::string readout = buildingInspectionReadout(registry, market);
     assert(readout.find("MARKET; PURPOSE: EXCHANGE") != std::string::npos);
     assert(readout.find("FUNCTION: EXCHANGE SITE") != std::string::npos);
-    assert(readout.find("SITE STATUS: OBSERVATION ONLY") != std::string::npos);
+    assert(readout.find("CATEGORY:") != std::string::npos);
+    assert(readout.find("ACCESS PRESSURE: LOCAL ONLY") != std::string::npos);
 }
 
 static void testFiveRoleLayoutKeepsWorkerPathsConnectedAndMarketClear() {
@@ -1819,7 +1820,8 @@ static void testBuildingInspectionReadoutsIncludePurposeForCurrentRoles() {
     readout = buildingInspectionReadout(registry, market);
     assert(readout.find("MARKET; PURPOSE: EXCHANGE") != std::string::npos);
     assert(readout.find("FUNCTION: EXCHANGE SITE") != std::string::npos);
-    assert(readout.find("SITE STATUS: OBSERVATION ONLY") != std::string::npos);
+    assert(readout.find("CATEGORY:") != std::string::npos);
+    assert(readout.find("ACCESS PRESSURE: LOCAL ONLY") != std::string::npos);
 
     readout = buildingInspectionReadout(registry, clinic);
     assert(readout.find("CLINIC; PURPOSE: PUBLIC HEALTH") != std::string::npos);

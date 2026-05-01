@@ -246,6 +246,83 @@ inline bool useClinicRestrictedBoundary(Registry& registry,
     return true;
 }
 
+inline Entity nearestMarketBuildingInRange(Registry& registry,
+                                           const TransformComponent& player_transform,
+                                           float range_wu) {
+    return nearestBuildingInRange(registry, player_transform, range_wu, MicroZoneRole::MARKET);
+}
+
+inline bool playerCanExchangeAtMarket(Registry& registry,
+                                      Entity player,
+                                      float range_wu) {
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player) ||
+        playerInsideTransitInterior(registry, player)) {
+        return false;
+    }
+    if (registry.has<BuildingInteractionComponent>(player) &&
+        registry.get<BuildingInteractionComponent>(player).inside_building) {
+        return false;
+    }
+    if (nearestInteractableBuildingInRange(registry,
+                                           registry.get<TransformComponent>(player),
+                                           range_wu) != MAX_ENTITIES) {
+        return false;
+    }
+    return nearestMarketBuildingInRange(registry,
+                                        registry.get<TransformComponent>(player),
+                                        range_wu) != MAX_ENTITIES;
+}
+
+inline bool exchangeAtMarket(Registry& registry,
+                             Entity player,
+                             float range_wu) {
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player)) {
+        return false;
+    }
+
+    const Entity market = nearestMarketBuildingInRange(registry,
+                                                       registry.get<TransformComponent>(player),
+                                                       range_wu);
+    if (market == MAX_ENTITIES) {
+        return false;
+    }
+
+    if (!registry.has<MarketLedgerComponent>(market)) {
+        return false;
+    }
+
+    auto& ledger = registry.get<MarketLedgerComponent>(market);
+    std::string result_label;
+
+    const Entity carried = registry.alive(player) && registry.has<PlayerComponent>(player)
+        ? registry.get<PlayerComponent>(player).carried_object
+        : MAX_ENTITIES;
+
+    if (carried == MAX_ENTITIES) {
+        result_label = "NO ITEM: CLAIM DEFERRED";
+    } else if (carryableObjectIsKind(registry, carried, ItemKind::PART)) {
+        registry.get<CarryableComponent>(carried).kind = ItemKind::SUPPLY;
+        result_label = "PART -> SUPPLY";
+    } else if (carryableObjectIsKind(registry, carried, ItemKind::SUPPLY)) {
+        ledger.exchange_claimed = true;
+        result_label = "SUPPLY: RATION CLAIMED";
+    } else {
+        result_label = "WRONG ITEM";
+    }
+
+    ledger.last_exchange_result = result_label;
+
+    if (registry.has<InheritedGadgetComponent>(player)) {
+        auto& gadget = registry.get<InheritedGadgetComponent>(player);
+        gadget.last_result_kind = InheritedGadgetResultKind::ACTION;
+        gadget.last_result_target_entity = market;
+        gadget.last_result_target_type = InspectionTargetType::MARKET;
+        gadget.last_result = std::string("MARKET EXCHANGE: ") + result_label;
+    }
+
+    return true;
+}
+
 inline bool exitBuildingInterior(Registry& registry, Entity player) {
     if (!registry.alive(player) ||
         !registry.has<TransformComponent>(player) ||

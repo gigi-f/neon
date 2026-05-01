@@ -18,6 +18,16 @@ inline Entity firstLocalSuspicionRecordWorker(Registry& registry);
 inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic);
 inline std::string clinicRestrictedBoundaryReadout(Registry& registry, Entity clinic);
 inline bool clinicAccessCanSpoof(Registry& registry, Entity clinic);
+inline std::string marketExchangeLedgerReadout(Registry& registry, Entity market);
+
+inline const char* marketCategoryForDistrict(uint32_t district_id) {
+    switch (district_id % 3) {
+        case 0: return "RATION DEPOT";
+        case 1: return "LOCAL GOODS";
+        case 2: return "LUXURY PREVIEW";
+    }
+    return "RATION DEPOT";
+}
 
 inline int floorsForRole(MicroZoneRole role) {
     switch (role) {
@@ -190,6 +200,8 @@ inline Entity buildBuildingUnit(Registry& registry,
         registry.assign<BuildingImprovementComponent>(building);
     } else if (role == MicroZoneRole::WORKPLACE) {
         registry.assign<WorkplaceBenchComponent>(building);
+    } else if (role == MicroZoneRole::MARKET) {
+        registry.assign<MarketLedgerComponent>(building);
     } else if (role == MicroZoneRole::CLINIC) {
         registry.assign<ClinicAccessLedgerComponent>(building);
     }
@@ -525,6 +537,14 @@ inline std::vector<Entity> buildWorld(Registry& registry, const WorldConfig& con
             registry.assign<GlyphComponent>(item, std::string("*"),
                 static_cast<uint8_t>(200), static_cast<uint8_t>(200), static_cast<uint8_t>(200),
                 static_cast<uint8_t>(255), 0.8f, true, false);
+        }
+    }
+
+    {
+        auto market_buildings = registry.view<MarketLedgerComponent, BuildingUseComponent, TransformComponent>();
+        for (Entity building : market_buildings) {
+            const uint32_t district_id = districtIdForEntity(registry, building);
+            registry.get<MarketLedgerComponent>(building).category = marketCategoryForDistrict(district_id);
         }
     }
 
@@ -1476,7 +1496,18 @@ inline std::string buildingInspectionReadout(Registry& registry, Entity building
             readout += "; SITE STATUS: STOCK POINT";
             break;
         case MicroZoneRole::MARKET:
-            readout += "; SITE STATUS: OBSERVATION ONLY";
+            if (registry.has<MarketLedgerComponent>(building)) {
+                const auto& ledger = registry.get<MarketLedgerComponent>(building);
+                readout += std::string("; CATEGORY: ") + ledger.category;
+                readout += "; ACCESS PRESSURE: LOCAL ONLY";
+                readout += "; CUSTOMERS: DISTRICT RESIDENTS";
+                const std::string exchange = marketExchangeLedgerReadout(registry, building);
+                if (!exchange.empty()) {
+                    readout += "; " + exchange;
+                }
+            } else {
+                readout += "; SITE STATUS: OBSERVATION ONLY";
+            }
             break;
         case MicroZoneRole::CLINIC:
             readout += "; SITE STATUS: OBSERVATION ONLY";
@@ -2069,6 +2100,15 @@ inline bool clinicAccessCanSpoof(Registry& registry, Entity clinic) {
     return registry.alive(clinic) &&
            registry.has<ClinicAccessLedgerComponent>(clinic) &&
            clinicAccessHasWorkerRecord(registry, clinic);
+}
+
+inline std::string marketExchangeLedgerReadout(Registry& registry, Entity market) {
+    if (!registry.alive(market) ||
+        !registry.has<MarketLedgerComponent>(market) ||
+        registry.get<MarketLedgerComponent>(market).last_exchange_result.empty()) {
+        return "";
+    }
+    return "LAST EXCHANGE: " + registry.get<MarketLedgerComponent>(market).last_exchange_result;
 }
 
 inline std::string localSuspicionHudReadout(Registry& registry) {

@@ -955,6 +955,8 @@ int main(int, char**) {
                     workWorkplaceBench(registry, player);
                 } else if (playerCanBoardTransit(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
                     enterTransitRide(registry, player, BUILDING_INTERACTION_RANGE_WU, world_config.transit_ride_seconds);
+                } else if (playerCanExchangeAtMarket(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
+                    exchangeAtMarket(registry, player, BUILDING_INTERACTION_RANGE_WU);
                 } else if (playerCanAttemptClinicRestrictedBoundary(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
                     useClinicRestrictedBoundary(registry, player, BUILDING_INTERACTION_RANGE_WU);
                 } else {

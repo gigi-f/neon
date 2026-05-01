@@ -40,6 +40,12 @@ add_executable(ai_playtest_tests
 target_include_directories(ai_playtest_tests PRIVATE src)
 add_test(NAME ai_playtest_tests COMMAND ai_playtest_tests)
 
+add_executable(market_trade_tests
+    tests/market_trade_tests.cpp
+)
+target_include_directories(market_trade_tests PRIVATE src)
+add_test(NAME market_trade_tests COMMAND market_trade_tests)
+
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/assets

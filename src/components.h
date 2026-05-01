@@ -280,6 +280,12 @@ struct ClinicAccessLedgerComponent {
     bool access_spoofed = false;
 };
 
+struct MarketLedgerComponent {
+    const char* category = "RATION DEPOT";
+    std::string last_exchange_result;
+    bool exchange_claimed = false;
+};
+
 struct PathComponent {
     PathKind kind = PathKind::PEDESTRIAN;
     Entity from = MAX_ENTITIES;
