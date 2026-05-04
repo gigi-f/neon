@@ -6,6 +6,25 @@
 
 #include "ai_playtest.h"
 
+static void advanceAiStationToBoarding(Registry& registry, Entity station) {
+    assert(station != MAX_ENTITIES);
+    for (int i = 0; i < 120; ++i) {
+        if (transitSignalBoardingNow(registry.get<StationComponent>(station))) {
+            return;
+        }
+        advanceAiPlaytestSimulation(registry, kAiPlaytestStepDt);
+    }
+    assert(false && "AI station signal should reach boarding state");
+}
+
+static void setAllAiStationsBoarding(Registry& registry) {
+    auto stations = registry.view<StationComponent>();
+    for (Entity station : stations) {
+        auto& signal = registry.get<StationComponent>(station);
+        signal.signal_elapsed_seconds = transitSignalArrivingEnd(signal) + 0.01f;
+    }
+}
+
 static void testDefaultSnapshotExposesAiReadableState() {
     AiPlaytestSession session;
     assert(buildAiPlaytestSession(session));
@@ -19,7 +38,7 @@ static void testDefaultSnapshotExposesAiReadableState() {
     assert(snapshot.find("-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ PHASE: DAY") != std::string::npos);
     assert(snapshot.find("TARGET_DETAIL: PHASE: DAY") != std::string::npos);
     assert(snapshot.find("LEGEND: @ player ^v<> facing") != std::string::npos);
-    assert(snapshot.find("TARGETS: HOUSING WORKPLACE SUPPLY MARKET CLINIC STATION") !=
+    assert(snapshot.find("TARGETS: HOUSING WORKPLACE SUPPLY MARKET CLINIC LISTING STATION") !=
            std::string::npos);
     assert(snapshot.find("DISTRICT:") != std::string::npos);
     assert(snapshot.find("T transit") != std::string::npos);
@@ -121,6 +140,42 @@ static void testDefaultClinicTargetExposesLayout() {
     assert(snapshot.find("CLINIC LEDGER") == std::string::npos);
 }
 
+static void testShelterFixtureExposesListingInterestLoop() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session, AiPlaytestScenario::SHELTER));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "LISTING", &result));
+    std::string snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("TARGET: SHELTER LISTING") != std::string::npos);
+    assert(snapshot.find("SHELTER LISTING:") != std::string::npos);
+    assert(snapshot.find("HOME BASE: UNCHANGED") != std::string::npos);
+    assert(snapshot.find("INTEREST: UNMARKED") != std::string::npos);
+    assert(snapshot.find("E MARK SHELTER INTEREST") !=
+           std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "SPACE", &result));
+    snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("TARGET_DEBUGGER_SCAN:") != std::string::npos);
+    assert(snapshot.find("SHELTER LISTING; TYPE:") != std::string::npos);
+    assert(snapshot.find("TRANSFER: LOCKED") != std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "E", &result));
+    snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("ACTION RESULT: ON SHELTER LISTING") != std::string::npos);
+    assert(snapshot.find("SHELTER INTEREST MARKED: RECORD INQUIRY OPENED") !=
+           std::string::npos);
+    assert(snapshot.find("INTEREST: MARKED (VOLATILE)") != std::string::npos);
+    assert(snapshot.find("E CLEAR SHELTER INTEREST") !=
+           std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "E", &result));
+    snapshot = aiPlaytestSnapshot(session);
+    assert(snapshot.find("SHELTER INTEREST CLEARED: RECORD INQUIRY REMOVED") !=
+           std::string::npos);
+    assert(snapshot.find("INTEREST: UNMARKED") != std::string::npos);
+}
+
 static void testSuspicionFixtureLetsAiLayLowInHousing() {
     AiPlaytestSession session;
     assert(buildAiPlaytestSession(session, AiPlaytestScenario::SUSPICION));
@@ -188,6 +243,7 @@ static void testTransitLookOutWindowChoiceMovesToDestination() {
 
     std::string result;
     assert(warpAiPlaytestPlayer(session, "STATION", &result));
+    setAllAiStationsBoarding(session.registry);
     const uint32_t origin_district = playerCurrentDistrictId(session.registry, session.player);
     assert(aiPlaytestActionLine(session.registry, session.player).find("E BOARD TRANSIT") !=
            std::string::npos);
@@ -216,7 +272,42 @@ static void testTransitLookOutWindowChoiceMovesToDestination() {
            ride.destination_district_id);
     const std::string arrived = aiPlaytestSnapshot(session);
     assert(arrived.find("location=\"NEAR TRANSIT\"") != std::string::npos);
-    assert(arrived.find("E BOARD TRANSIT") != std::string::npos);
+    assert(arrived.find("TRANSIT STATION") != std::string::npos);
+}
+
+static void testTransitStationSignalWaitThenBoard() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session));
+
+    std::string result;
+    assert(warpAiPlaytestPlayer(session, "STATION", &result));
+    const Entity station = nearestStationInRange(session.registry,
+                                                 session.registry.get<TransformComponent>(session.player),
+                                                 kAiPlaytestInteractionRangeWu);
+    assert(station != MAX_ENTITIES);
+    auto& signal = session.registry.get<StationComponent>(station);
+    signal.signal_elapsed_seconds = transitSignalBoardingEnd(signal);
+    assert(!transitSignalBoardingNow(signal));
+
+    const std::string wait_line = aiPlaytestActionLine(session.registry, session.player);
+    assert(wait_line.find("E WAIT TRANSIT") != std::string::npos);
+    assert(wait_line.find("TRAIN: DOORS CLOSING") != std::string::npos);
+
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(!session.registry.has<TransitRideComponent>(session.player));
+    assert(inheritedGadgetResultReadout(session.registry, session.player).find("WAIT") !=
+           std::string::npos);
+
+    for (int i = 0; i < 90 && !transitSignalBoardingNow(signal); ++i) {
+        assert(applyAiPlaytestKey(session, "WAIT", &result));
+    }
+    assert(transitSignalBoardingNow(signal));
+    const std::string board_line = aiPlaytestActionLine(session.registry, session.player);
+    assert(board_line.find("E BOARD TRANSIT") != std::string::npos);
+    assert(applyAiPlaytestKey(session, "E", &result));
+    assert(session.registry.has<TransitRideComponent>(session.player));
+    assert(inheritedGadgetResultReadout(session.registry, session.player).find("BOARDING NOW") !=
+           std::string::npos);
 }
 
 static void testTransitWaitChoiceOpensDoorsBeforeExit() {
@@ -225,6 +316,7 @@ static void testTransitWaitChoiceOpensDoorsBeforeExit() {
 
     std::string result;
     assert(warpAiPlaytestPlayer(session, "STATION", &result));
+    setAllAiStationsBoarding(session.registry);
     const uint32_t origin_district = playerCurrentDistrictId(session.registry, session.player);
     assert(applyAiPlaytestKey(session, "E", &result));
     assert(session.registry.has<TransitRideComponent>(session.player));
@@ -255,6 +347,7 @@ static void testSignpostWarpUsesCurrentDistrictAfterTransit() {
 
     std::string result;
     assert(warpAiPlaytestPlayer(session, "STATION", &result));
+    setAllAiStationsBoarding(session.registry);
     const uint32_t origin_district = playerCurrentDistrictId(session.registry, session.player);
     assert(applyAiPlaytestKey(session, "E", &result));
     assert(applyAiPlaytestKey(session, "E", &result));
@@ -419,8 +512,10 @@ int main() {
     testDebuggerResultStaysReadableAcrossTerminalWindowStates();
     testKeyboardInterferenceWorksWhileDebuggerTerminalIsOpen();
     testDefaultClinicTargetExposesLayout();
+    testShelterFixtureExposesListingInterestLoop();
     testSyntheticKeysMutateSameGameState();
     testTransitLookOutWindowChoiceMovesToDestination();
+    testTransitStationSignalWaitThenBoard();
     testTransitWaitChoiceOpensDoorsBeforeExit();
     testSignpostWarpUsesCurrentDistrictAfterTransit();
     testSuspicionFixtureLetsAiExerciseWageSpoofLoop();

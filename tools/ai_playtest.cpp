@@ -18,12 +18,12 @@ void printUsage() {
     std::cout
         << "Usage:\n"
         << "  neon_ai_playtest snapshot [--state PATH]\n"
-        << "  neon_ai_playtest reset [default|suspicion|market] [--state PATH]\n"
+        << "  neon_ai_playtest reset [default|suspicion|market|shelter] [--state PATH]\n"
         << "  neon_ai_playtest key W|A|S|D|E|F|T|SPACE|G [--state PATH]\n"
         << "  neon_ai_playtest step [N] [--state PATH]\n"
         << "  neon_ai_playtest warp TARGET [--state PATH]\n"
-        << "  neon_ai_playtest play [default|suspicion|market] [--state PATH] [--transcript PATH]\n"
-        << "  neon_ai_playtest run [default|suspicion|market|all] [--state PATH] [--pause-ms N]\n";
+        << "  neon_ai_playtest play [default|suspicion|market|shelter] [--state PATH] [--transcript PATH]\n"
+        << "  neon_ai_playtest run [default|suspicion|market|shelter|all] [--state PATH] [--pause-ms N]\n";
 }
 
 std::string statePathFromArgs(int argc, char** argv) {
@@ -193,6 +193,14 @@ bool runTerminalPlaytest(const std::string& raw_scenario,
         {"INSPECT MARKET LEDGER AFTER EXCHANGE", "key", "SPACE"},
         {"STEP SIMULATION", "step", "2"},
     };
+    const std::vector<TerminalPlaytestStep> shelter_steps = {
+        {"WARP TO SHELTER LISTING", "warp", "LISTING"},
+        {"INSPECT SHELTER LISTING", "key", "SPACE"},
+        {"MARK SHELTER INTEREST", "key", "E"},
+        {"INSPECT MARKED LISTING", "key", "SPACE"},
+        {"CLEAR SHELTER INTEREST", "key", "E"},
+        {"INSPECT CLEARED LISTING", "key", "SPACE"},
+    };
 
     bool ok = true;
     if (scenario == "DEFAULT" || scenario == "ALL") {
@@ -216,7 +224,15 @@ bool runTerminalPlaytest(const std::string& raw_scenario,
                                          state_path,
                                          pause_ms) && ok;
     }
-    if (scenario != "DEFAULT" && scenario != "SUSPICION" && scenario != "MARKET" && scenario != "ALL") {
+    if (scenario == "SHELTER" || scenario == "ALL") {
+        ok = runTerminalPlaytestScenario("SHELTER",
+                                         AiPlaytestScenario::SHELTER,
+                                         shelter_steps,
+                                         state_path,
+                                         pause_ms) && ok;
+    }
+    if (scenario != "DEFAULT" && scenario != "SUSPICION" && scenario != "MARKET" &&
+        scenario != "SHELTER" && scenario != "ALL") {
         std::cerr << "Unknown run scenario: " << raw_scenario << "\n";
         return false;
     }
@@ -233,7 +249,7 @@ bool isDirectPlaytestKey(const std::string& command) {
 
 void printInteractiveHelp(std::ostream& out) {
     out << "Commands: W A S D E F T G SPACE WAIT | key KEY | step [N] | warp TARGET | "
-        << "reset [default|suspicion] | snapshot | help | quit\n";
+        << "reset [default|suspicion|market|shelter] | snapshot | help | quit\n";
 }
 
 bool runInteractivePlaytest(const std::string& raw_scenario,

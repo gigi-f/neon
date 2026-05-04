@@ -31,6 +31,7 @@ enum class InspectionTargetType {
     SUPPLY,
     MARKET,
     CLINIC,
+    SHELTER_LISTING,
     TRANSIT_STATION,
     PEDESTRIAN_PATH,
     ROUTE_SIGNPOST,
@@ -286,6 +287,14 @@ struct MarketLedgerComponent {
     bool exchange_claimed = false;
 };
 
+struct ShelterListingComponent {
+    uint32_t district_id = 0;
+    const char* shelter_type = "STACK ROOM";
+    const char* neighborhood_pressure = "WAITLISTED";
+    const char* risk_reason = "CLEARANCE REQUIRED";
+    bool interest_marked = false;
+};
+
 struct PathComponent {
     PathKind kind = PathKind::PEDESTRIAN;
     Entity from = MAX_ENTITIES;
@@ -312,11 +321,20 @@ struct RouteSignpostComponent {
     bool signal_recovered = false;
 };
 
+enum class TransitSignalStatus {
+    ARRIVING,
+    BOARDING,
+    DOORS_CLOSING,
+    DEPARTED
+};
+
 struct StationComponent {
     uint64_t stable_id = 0;
     uint32_t district_id = 0;
     uint32_t transit_link_id = 0;
     Entity linked_station = MAX_ENTITIES;
+    float signal_elapsed_seconds = 0.0f;
+    float signal_cycle_seconds = 8.0f;
 };
 
 struct TransitRideComponent {

@@ -10,6 +10,89 @@ This file archives completed implementation slices moved out of `todo/TODO.md`.
 - [x] World rendering has a clean glyph-or-fallback path: fitted glyphs when the font loads, rectangle fallback only when it does not.
 - [x] Validation is green: CMake configure/build, `rtk test ctest --test-dir build --output-on-failure`, and cclsp diagnostics on remaining edited C++ files.
 
+## Session: Commerce — First Market Variety And Trade Hook
+
+Gameplay outcome: markets start to differ by district or neighborhood pressure, and the player gets one small exchange action that makes commerce visible without introducing money or a full economy.
+
+Epoch source: `Commerce, Rations, And Exchange Pressure` in `todo/EPOCHS.md`.
+
+Scope guard honored: market category labels and one local exchange flag only. No wallets, prices, vendors, multi-slot inventory, broad supply chains, factories/refineries, truck logistics, or NPC shopping routines were added.
+
+## Phase 99: Add authored market category labels.
+
+- [x] Give each authored market a compact category such as ration, local goods, or luxury preview, derived from district/site config.
+- [x] Show category, access pressure, and intended customer hint through existing inspection and Debugger readouts.
+- [x] Keep market category data deterministic and current-scope.
+- [x] Acceptance: one-district and two-district configs expose stable market category labels in tests and AI playtest target details.
+
+## Phase 100: Add one market exchange verb.
+
+- [x] Let the player use one carried current-scope item at a market for a deterministic local result, such as exchanging a `PART` for one `SUPPLY` or marking a ration claim.
+- [x] The result must be visible on market inspection and not require a wallet, price table, vendor AI, or inventory expansion.
+- [x] Failed exchange attempts report exactly why they failed.
+- [x] Acceptance: tests cover valid exchange, invalid carried item, empty-handed attempt, and post-exchange readout.
+
+## Phase 101: Add market playtest coverage and persistence boundary.
+
+- [x] Persist the exchange result only if it should survive save/load; otherwise keep it as volatile local feedback and state that clearly in the readout.
+- [x] Update the AI playtest harness so it can identify market type, attempt the exchange, and report the result.
+- [x] Acceptance: interactive terminal playtest demonstrates a market readout, one exchange, and the resulting changed local state.
+
+## Session: Shelter — First Real Estate Listing Hook
+
+Gameplay outcome: shelter now points toward city-scale housing pressure through one visible listing/agent surface, while the player's current home remains the only actual base.
+
+Epoch source: `Shelter` in `todo/EPOCHS.md`.
+
+Scope guard honored: listing labels, one inspection surface, and one reversible volatile interest flag only. No money, moving services, multiple owned homes, storage transfer, rent simulation, furniture, or property markets were added.
+
+## Phase 105: Add one real estate listing surface.
+
+- [x] Place or derive one local listing/agent sign tied to the current district's housing tier.
+- [x] Inspection shows a compact shelter type, neighborhood pressure, and a reason the listing is currently unreachable or risky.
+- [x] The listing should point toward future housing variety without changing the player's home base yet.
+- [x] Acceptance: tests and AI playtest target details expose the listing in the current district.
+
+## Phase 106: Add one player mark-interest verb.
+
+- [x] Let the player use a current input on the listing to mark or clear interest in the shelter.
+- [x] The mark changes the listing readout and may add one Debugger line about records, clearance, or price pressure.
+- [x] The mark does not move the player, transfer belongings, charge money, or unlock a new home.
+- [x] Acceptance: tests cover mark, clear, and district-local readouts.
+
+## Phase 107: Add shelter listing playtest coverage.
+
+- [x] Update the AI playtest harness to discover the listing, inspect it, toggle the mark, and report the changed readout.
+- [x] Keep the current shelter storage and lay-low mechanics unchanged.
+- [x] Acceptance: interactive terminal playtest demonstrates the listing loop without broad housing simulation.
+
+## Session: Transit — First Scheduled Train Signal
+
+Gameplay outcome: the existing paired stations gained a readable real-time train signal, so transit starts to feel like city motion without adding traffic, route planning, or independent vehicles.
+
+Epoch source: `Complex transit` in `todo/EPOCHS.md`.
+
+Scope guard honored: station countdown/status and one wait/board consequence only. No road networks, traffic jams, autonomous cars, vehicle ownership, repair, freight logistics, or train networks were added.
+
+## Phase 102: Add station arrival status.
+
+- [x] Give each station an inspectable train status such as arriving, boarding, doors closing, or departed using elapsed runtime rather than frame count.
+- [x] Show the status in station inspection, map/header details, and AI playtest target details.
+- [x] The first implementation may keep the existing direct ride path; the new value is readable timing.
+- [x] Acceptance: tests cover deterministic status advancement under controlled elapsed time.
+
+## Phase 103: Make waiting at the station matter once.
+
+- [x] Add one player-facing consequence for waiting until the favorable station state, such as immediate open-door boarding or a clearer destination readout.
+- [x] Attempting to board at the wrong state produces a short readable result and does not strand the player.
+- [x] Acceptance: tests cover board-now, wait-then-board, and cross-district return behavior.
+
+## Phase 104: Preserve transit readability in save/load and playtest.
+
+- [x] Save/load preserves any new train timing state that affects player choices.
+- [x] Update the AI playtest harness to report station status and choose a wait/board action.
+- [x] Acceptance: interactive terminal playtest demonstrates reading station status, waiting or boarding, and reaching the paired district.
+
 ## Session: Tool UI — Windowed Debugger Terminal
 
 Gameplay outcome: Debugger results started moving out of the single HUD line and into a compact Unix-terminal-inspired overlay that opens when the player scans.

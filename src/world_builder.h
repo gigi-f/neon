@@ -19,6 +19,7 @@ inline std::string clinicAccessLedgerReadout(Registry& registry, Entity clinic);
 inline std::string clinicRestrictedBoundaryReadout(Registry& registry, Entity clinic);
 inline bool clinicAccessCanSpoof(Registry& registry, Entity clinic);
 inline std::string marketExchangeLedgerReadout(Registry& registry, Entity market);
+inline std::string shelterListingReadout(Registry& registry, Entity listing);
 
 inline const char* marketCategoryForDistrict(uint32_t district_id) {
     switch (district_id % 3) {
@@ -27,6 +28,33 @@ inline const char* marketCategoryForDistrict(uint32_t district_id) {
         case 2: return "LUXURY PREVIEW";
     }
     return "RATION DEPOT";
+}
+
+inline const char* shelterListingTypeForDistrict(uint32_t district_id) {
+    switch (district_id % 3) {
+        case 0: return "STACK ROOM";
+        case 1: return "SERVICE CUBICLE";
+        case 2: return "TOWER MICRO-SUITE";
+    }
+    return "STACK ROOM";
+}
+
+inline const char* shelterPressureForDistrict(uint32_t district_id) {
+    switch (district_id % 3) {
+        case 0: return "WAITLISTED";
+        case 1: return "SHIFT-TIED";
+        case 2: return "PRICE SURGE";
+    }
+    return "WAITLISTED";
+}
+
+inline const char* shelterRiskForDistrict(uint32_t district_id) {
+    switch (district_id % 3) {
+        case 0: return "CLEARANCE REQUIRED";
+        case 1: return "EMPLOYER RECORD CHECK";
+        case 2: return "DEPOSIT TRACE RISK";
+    }
+    return "CLEARANCE REQUIRED";
 }
 
 inline int floorsForRole(MicroZoneRole role) {
@@ -220,6 +248,7 @@ inline Entity buildStationUnit(Registry& registry,
                                const MacroZoneComponent& macro,
                                uint32_t district_id,
                                uint32_t transit_link_id,
+                               float signal_cycle_seconds,
                                float x,
                                float y) {
     Entity station = registry.create();
@@ -228,6 +257,10 @@ inline Entity buildStationUnit(Registry& registry,
     component.stable_id = stableIdForStation(district_id, transit_link_id);
     component.district_id = district_id;
     component.transit_link_id = transit_link_id;
+    component.signal_cycle_seconds = std::max(4.0f, signal_cycle_seconds);
+    component.signal_elapsed_seconds =
+        std::fmod(component.signal_cycle_seconds * (0.25f + 0.5f * static_cast<float>(district_id)),
+                  component.signal_cycle_seconds);
     registry.assign<StationComponent>(station, component);
     registry.assign<GlyphComponent>(station, std::string("T"),
         static_cast<uint8_t>(120), static_cast<uint8_t>(220), static_cast<uint8_t>(255),
@@ -306,6 +339,37 @@ inline Entity firstWorldBuilderBuildingByRoleInMacro(Registry& registry,
         }
     }
     return MAX_ENTITIES;
+}
+
+inline Entity buildShelterListingSign(Registry& registry, Entity housing) {
+    if (!registry.alive(housing) || !registry.has<TransformComponent>(housing)) {
+        return MAX_ENTITIES;
+    }
+
+    const uint32_t district_id = districtIdForEntity(registry, housing);
+    const auto& shelter = registry.get<TransformComponent>(housing);
+    Entity listing = registry.create();
+    registry.assign<TransformComponent>(listing,
+                                        shelter.x + shelter.width * 0.5f + 28.0f,
+                                        shelter.y - shelter.height * 0.5f - 14.0f,
+                                        8.0f,
+                                        8.0f);
+    ShelterListingComponent component;
+    component.district_id = district_id;
+    component.shelter_type = shelterListingTypeForDistrict(district_id);
+    component.neighborhood_pressure = shelterPressureForDistrict(district_id);
+    component.risk_reason = shelterRiskForDistrict(district_id);
+    registry.assign<ShelterListingComponent>(listing, component);
+    registry.assign<GlyphComponent>(listing,
+                                    std::string("L"),
+                                    static_cast<uint8_t>(245),
+                                    static_cast<uint8_t>(215),
+                                    static_cast<uint8_t>(80),
+                                    static_cast<uint8_t>(255),
+                                    1.0f,
+                                    true,
+                                    false);
+    return listing;
 }
 
 inline void buildBuildingUnits(Registry& registry,
@@ -510,6 +574,7 @@ inline std::vector<Entity> buildWorld(Registry& registry, const WorldConfig& con
                                                 component,
                                                 component.macro_id,
                                                 transit_link_id,
+                                                config.transit_signal_cycle_seconds,
                                                 x,
                                                 y));
         }
@@ -546,6 +611,13 @@ inline std::vector<Entity> buildWorld(Registry& registry, const WorldConfig& con
             const uint32_t district_id = districtIdForEntity(registry, building);
             registry.get<MarketLedgerComponent>(building).category = marketCategoryForDistrict(district_id);
         }
+    }
+
+    for (Entity macro : macros) {
+        const Entity housing = firstWorldBuilderBuildingByRoleInMacro(registry,
+                                                                      macro,
+                                                                      MicroZoneRole::HOUSING);
+        buildShelterListingSign(registry, housing);
     }
 
     return macros;
@@ -820,6 +892,102 @@ inline TransformComponent stationExitTransform(Registry& registry, Entity statio
     return destination;
 }
 
+inline float transitSignalCycleSeconds(const StationComponent& station) {
+    return std::max(4.0f, station.signal_cycle_seconds);
+}
+
+inline float transitSignalElapsedSeconds(const StationComponent& station) {
+    const float cycle = transitSignalCycleSeconds(station);
+    float elapsed = std::fmod(std::max(0.0f, station.signal_elapsed_seconds), cycle);
+    if (elapsed < 0.0f) {
+        elapsed += cycle;
+    }
+    return elapsed;
+}
+
+inline float transitSignalArrivingEnd(const StationComponent& station) {
+    return transitSignalCycleSeconds(station) * 0.25f;
+}
+
+inline float transitSignalBoardingEnd(const StationComponent& station) {
+    return transitSignalCycleSeconds(station) * 0.50f;
+}
+
+inline float transitSignalClosingEnd(const StationComponent& station) {
+    return transitSignalCycleSeconds(station) * 0.625f;
+}
+
+inline TransitSignalStatus transitSignalStatus(const StationComponent& station) {
+    const float elapsed = transitSignalElapsedSeconds(station);
+    if (elapsed < transitSignalArrivingEnd(station)) {
+        return TransitSignalStatus::ARRIVING;
+    }
+    if (elapsed < transitSignalBoardingEnd(station)) {
+        return TransitSignalStatus::BOARDING;
+    }
+    if (elapsed < transitSignalClosingEnd(station)) {
+        return TransitSignalStatus::DOORS_CLOSING;
+    }
+    return TransitSignalStatus::DEPARTED;
+}
+
+inline const char* transitSignalStatusName(TransitSignalStatus status) {
+    switch (status) {
+        case TransitSignalStatus::ARRIVING: return "ARRIVING";
+        case TransitSignalStatus::BOARDING: return "BOARDING";
+        case TransitSignalStatus::DOORS_CLOSING: return "DOORS CLOSING";
+        case TransitSignalStatus::DEPARTED: return "DEPARTED";
+    }
+    return "DEPARTED";
+}
+
+inline bool transitSignalBoardingNow(const StationComponent& station) {
+    return transitSignalStatus(station) == TransitSignalStatus::BOARDING;
+}
+
+inline int transitSignalSecondsUntilBoarding(const StationComponent& station) {
+    const float elapsed = transitSignalElapsedSeconds(station);
+    const float boarding_start = transitSignalArrivingEnd(station);
+    if (elapsed < boarding_start) {
+        return static_cast<int>(std::ceil(boarding_start - elapsed));
+    }
+    if (elapsed < transitSignalBoardingEnd(station)) {
+        return 0;
+    }
+    return static_cast<int>(std::ceil(transitSignalCycleSeconds(station) - elapsed + boarding_start));
+}
+
+inline int transitSignalSecondsUntilDeparture(const StationComponent& station) {
+    if (!transitSignalBoardingNow(station)) {
+        return 0;
+    }
+    return static_cast<int>(std::ceil(transitSignalBoardingEnd(station) -
+                                      transitSignalElapsedSeconds(station)));
+}
+
+inline std::string transitSignalTimingReadout(const StationComponent& station) {
+    if (transitSignalBoardingNow(station)) {
+        return "DEPARTS IN: " +
+               std::to_string(std::max(0, transitSignalSecondsUntilDeparture(station))) + "s";
+    }
+    return "BOARD IN: " +
+           std::to_string(std::max(0, transitSignalSecondsUntilBoarding(station))) + "s";
+}
+
+inline void advanceTransitStationSignals(Registry& registry, float dt_seconds) {
+    if (dt_seconds <= 0.0f) {
+        return;
+    }
+    auto stations = registry.view<StationComponent>();
+    for (Entity station_entity : stations) {
+        auto& station = registry.get<StationComponent>(station_entity);
+        const float cycle = transitSignalCycleSeconds(station);
+        station.signal_cycle_seconds = cycle;
+        station.signal_elapsed_seconds =
+            std::fmod(transitSignalElapsedSeconds(station) + dt_seconds, cycle);
+    }
+}
+
 inline std::string stationReadout(Registry& registry, Entity station) {
     if (!registry.alive(station) || !registry.has<StationComponent>(station)) {
         return "TRANSIT: NO PLATFORM";
@@ -831,7 +999,10 @@ inline std::string stationReadout(Registry& registry, Entity station) {
         const auto& linked = registry.get<StationComponent>(component.linked_station);
         readout += "; DESTINATION: DISTRICT " + districtLabel(linked.district_id);
     }
-    readout += "; E BOARD";
+    readout += "; TRAIN: ";
+    readout += transitSignalStatusName(transitSignalStatus(component));
+    readout += "; " + transitSignalTimingReadout(component);
+    readout += transitSignalBoardingNow(component) ? "; E BOARD" : "; E WAIT";
     return readout;
 }
 
@@ -865,6 +1036,20 @@ inline bool playerCanBoardTransit(Registry& registry, Entity player, float range
            registry.alive(registry.get<StationComponent>(station).linked_station);
 }
 
+inline void setTransitActionResult(Registry& registry,
+                                   Entity player,
+                                   Entity station,
+                                   const std::string& result) {
+    if (!registry.alive(player) || !registry.has<InheritedGadgetComponent>(player)) {
+        return;
+    }
+    auto& gadget = registry.get<InheritedGadgetComponent>(player);
+    gadget.last_result_kind = InheritedGadgetResultKind::ACTION;
+    gadget.last_result_target_entity = station;
+    gadget.last_result_target_type = InspectionTargetType::TRANSIT_STATION;
+    gadget.last_result = result;
+}
+
 inline bool enterTransitRide(Registry& registry,
                              Entity player,
                              float range_wu,
@@ -877,6 +1062,18 @@ inline bool enterTransitRide(Registry& registry,
                                                  range_wu);
     const auto& station_component = registry.get<StationComponent>(station);
     const Entity destination = station_component.linked_station;
+    if (!transitSignalBoardingNow(station_component)) {
+        setTransitActionResult(
+            registry,
+            player,
+            station,
+            std::string("TRAIN ") +
+                transitSignalStatusName(transitSignalStatus(station_component)) +
+                ": WAIT " +
+                std::to_string(std::max(0, transitSignalSecondsUntilBoarding(station_component))) +
+                "s TO BOARD");
+        return false;
+    }
     if (registry.has<BuildingInteractionComponent>(player) &&
         registry.get<BuildingInteractionComponent>(player).inside_building) {
         auto& interaction = registry.get<BuildingInteractionComponent>(player);
@@ -892,13 +1089,14 @@ inline bool enterTransitRide(Registry& registry,
     ride.exterior_position = registry.get<TransformComponent>(player);
     ride.interior_position = transitInteriorSpawnPosition();
     registry.assign<TransitRideComponent>(player, ride);
-    if (registry.has<InheritedGadgetComponent>(player)) {
-        auto& gadget = registry.get<InheritedGadgetComponent>(player);
-        gadget.last_result_kind = InheritedGadgetResultKind::ACTION;
-        gadget.last_result_target_entity = station;
-        gadget.last_result_target_type = InspectionTargetType::TRANSIT_STATION;
-        gadget.last_result = "RIDING TRANSIT...";
-    }
+    setTransitActionResult(
+        registry,
+        player,
+        station,
+        "BOARDING NOW: NEXT STOP DISTRICT " +
+            districtLabel(registry.get<StationComponent>(destination).district_id));
+    registry.get<StationComponent>(station).signal_elapsed_seconds =
+        transitSignalBoardingEnd(station_component);
     return true;
 }
 
@@ -2108,7 +2306,144 @@ inline std::string marketExchangeLedgerReadout(Registry& registry, Entity market
         registry.get<MarketLedgerComponent>(market).last_exchange_result.empty()) {
         return "";
     }
-    return "LAST EXCHANGE: " + registry.get<MarketLedgerComponent>(market).last_exchange_result;
+    return "LAST EXCHANGE: " +
+        registry.get<MarketLedgerComponent>(market).last_exchange_result +
+        " (VOLATILE)";
+}
+
+inline std::string shelterListingReadout(Registry& registry, Entity listing) {
+    if (!registry.alive(listing) || !registry.has<ShelterListingComponent>(listing)) {
+        return "SHELTER LISTING: UNKNOWN";
+    }
+
+    const auto& component = registry.get<ShelterListingComponent>(listing);
+    std::string readout = worldHasMultipleDistricts(registry)
+        ? districtLabel(component.district_id) + ":SHELTER LISTING"
+        : "SHELTER LISTING";
+    readout += std::string(": ") + component.shelter_type;
+    readout += "; PRESSURE: ";
+    readout += component.neighborhood_pressure;
+    readout += "; RISK: ";
+    readout += component.risk_reason;
+    readout += "; HOME BASE: UNCHANGED";
+    readout += component.interest_marked ?
+        "; INTEREST: MARKED (VOLATILE)" :
+        "; INTEREST: UNMARKED";
+    return readout;
+}
+
+inline std::string shelterListingDebuggerReadout(Registry& registry, Entity listing) {
+    if (!registry.alive(listing) || !registry.has<ShelterListingComponent>(listing)) {
+        return "SHELTER LISTING: NO RECORD";
+    }
+
+    const auto& component = registry.get<ShelterListingComponent>(listing);
+    std::string readout = worldHasMultipleDistricts(registry)
+        ? districtLabel(component.district_id) + ":SHELTER LISTING"
+        : "SHELTER LISTING";
+    readout += std::string("; TYPE: ") + component.shelter_type;
+    readout += "; PRICE PRESSURE: ";
+    readout += component.neighborhood_pressure;
+    readout += "; ACCESS RISK: ";
+    readout += component.risk_reason;
+    readout += component.interest_marked ?
+        "; RECORD: INQUIRY MARKED" :
+        "; RECORD: NO INQUIRY";
+    readout += "; TRANSFER: LOCKED";
+    return readout;
+}
+
+inline Entity nearestShelterListingInRange(Registry& registry,
+                                           const TransformComponent& player_transform,
+                                           float range_wu) {
+    Entity nearest = MAX_ENTITIES;
+    float nearest_distance = range_wu;
+    auto listings = registry.view<ShelterListingComponent, TransformComponent>();
+    for (Entity listing : listings) {
+        const float distance = aabbDistance(player_transform,
+                                            registry.get<TransformComponent>(listing));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            nearest = listing;
+        }
+    }
+    return nearest;
+}
+
+inline Entity firstShelterListingInDistrict(Registry& registry, uint32_t district_id) {
+    auto listings = registry.view<ShelterListingComponent>();
+    std::sort(listings.begin(), listings.end());
+    for (Entity listing : listings) {
+        if (registry.get<ShelterListingComponent>(listing).district_id == district_id) {
+            return listing;
+        }
+    }
+    return listings.empty() ? MAX_ENTITIES : listings.front();
+}
+
+inline bool playerCanToggleShelterListingInterest(Registry& registry,
+                                                  Entity player,
+                                                  float range_wu) {
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player)) {
+        return false;
+    }
+    if (playerInsideAnyBuilding(registry, player) || playerInsideTransitInterior(registry, player)) {
+        return false;
+    }
+    const auto& player_transform = registry.get<TransformComponent>(player);
+    Entity nearest_listing = MAX_ENTITIES;
+    float listing_distance = range_wu;
+    auto listings = registry.view<ShelterListingComponent, TransformComponent>();
+    for (Entity listing : listings) {
+        const float distance = aabbDistance(player_transform,
+                                            registry.get<TransformComponent>(listing));
+        if (distance <= listing_distance) {
+            listing_distance = distance;
+            nearest_listing = listing;
+        }
+    }
+    if (nearest_listing == MAX_ENTITIES) {
+        return false;
+    }
+
+    float building_distance = range_wu;
+    auto buildings = registry.view<BuildingComponent, TransformComponent>();
+    for (Entity building : buildings) {
+        building_distance = std::min(
+            building_distance,
+            aabbDistance(player_transform, registry.get<TransformComponent>(building)));
+    }
+    return listing_distance <= building_distance;
+}
+
+inline bool toggleShelterListingInterest(Registry& registry,
+                                         Entity player,
+                                         float range_wu) {
+    if (!registry.alive(player) || !registry.has<TransformComponent>(player)) {
+        return false;
+    }
+
+    const Entity listing = nearestShelterListingInRange(registry,
+                                                        registry.get<TransformComponent>(player),
+                                                        range_wu);
+    if (listing == MAX_ENTITIES || !registry.has<ShelterListingComponent>(listing)) {
+        return false;
+    }
+
+    auto& component = registry.get<ShelterListingComponent>(listing);
+    component.interest_marked = !component.interest_marked;
+
+    if (registry.has<InheritedGadgetComponent>(player)) {
+        auto& gadget = registry.get<InheritedGadgetComponent>(player);
+        gadget.last_result_kind = InheritedGadgetResultKind::ACTION;
+        gadget.last_result_target_entity = listing;
+        gadget.last_result_target_type = InspectionTargetType::SHELTER_LISTING;
+        gadget.last_result = component.interest_marked ?
+            "SHELTER INTEREST MARKED: RECORD INQUIRY OPENED" :
+            "SHELTER INTEREST CLEARED: RECORD INQUIRY REMOVED";
+    }
+
+    return true;
 }
 
 inline std::string localSuspicionHudReadout(Registry& registry) {
@@ -3636,6 +3971,17 @@ inline InspectionTarget nearestInspectionTargetInRange(Registry& registry,
         }
     }
 
+    auto listings = registry.view<ShelterListingComponent, TransformComponent>();
+    for (Entity listing : listings) {
+        const float distance = aabbDistance(player_transform,
+                                            registry.get<TransformComponent>(listing));
+        if (distance <= nearest_distance) {
+            nearest_distance = distance;
+            target.entity = listing;
+            target.type = InspectionTargetType::SHELTER_LISTING;
+        }
+    }
+
     auto carryables = registry.view<CarryableComponent, TransformComponent>();
     for (Entity obj : carryables) {
         const float distance = aabbDistance(player_transform, registry.get<TransformComponent>(obj));
@@ -3739,6 +4085,8 @@ inline const char* inheritedGadgetTargetLabel(InspectionTargetType type) {
             return "MARKET";
         case InspectionTargetType::CLINIC:
             return "CLINIC";
+        case InspectionTargetType::SHELTER_LISTING:
+            return "SHELTER LISTING";
         case InspectionTargetType::TRANSIT_STATION:
             return "TRANSIT STATION";
         case InspectionTargetType::PEDESTRIAN_PATH:
@@ -3788,6 +4136,7 @@ inline std::string localSuspicionDebuggerReadoutForTarget(Registry& registry,
         case InspectionTargetType::SUPPLY:
         case InspectionTargetType::MARKET:
         case InspectionTargetType::CLINIC:
+        case InspectionTargetType::SHELTER_LISTING:
         case InspectionTargetType::TRANSIT_STATION:
         case InspectionTargetType::SUPPLY_INTERIOR:
         case InspectionTargetType::TRANSIT_INTERIOR:
@@ -3820,6 +4169,7 @@ inline Entity localSuspicionWorkerForInstitutionalLogTarget(Registry& registry,
         case InspectionTargetType::SUPPLY:
         case InspectionTargetType::MARKET:
         case InspectionTargetType::CLINIC:
+        case InspectionTargetType::SHELTER_LISTING:
         case InspectionTargetType::TRANSIT_STATION:
         case InspectionTargetType::PEDESTRIAN_PATH:
         case InspectionTargetType::ROUTE_SIGNPOST:
@@ -3955,6 +4305,8 @@ inline std::string inheritedGadgetSiteMetadataScan(Registry& registry,
             return building_scan(MicroZoneRole::MARKET, target.entity);
         case InspectionTargetType::CLINIC:
             return building_scan(MicroZoneRole::CLINIC, target.entity);
+        case InspectionTargetType::SHELTER_LISTING:
+            return shelterListingDebuggerReadout(registry, target.entity);
         case InspectionTargetType::TRANSIT_STATION:
             return stationReadout(registry, target.entity);
         case InspectionTargetType::TRANSIT_INTERIOR:
@@ -4005,6 +4357,7 @@ inline bool inspectionTargetIsDependencyTarget(const InspectionTarget& target) {
         case InspectionTargetType::HOUSING:
         case InspectionTargetType::MARKET:
         case InspectionTargetType::CLINIC:
+        case InspectionTargetType::SHELTER_LISTING:
         case InspectionTargetType::TRANSIT_STATION:
         case InspectionTargetType::PEDESTRIAN_PATH:
         case InspectionTargetType::ROUTE_SIGNPOST:

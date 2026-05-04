@@ -2,111 +2,110 @@
 
 This file proposes future session groups for `todo/TODO.md`. It is directional context, not a rigid queue.
 
-Future agents should use this file to keep the end-game shape in mind while still implementing one small, visible session at a time. If an epoch or session jumps too far ahead, no longer fits the vision, or would push the game toward city-builder/player-management mechanics, push back and propose a smaller or different direction before writing it into `todo/TODO.md`.
+Future agents should use this file to keep the end-game shape in mind while still implementing one small, visible session at a time. If an epoch or session jumps too far ahead, no longer fits the vision, or would push the game toward player-management mechanics, push back and propose a smaller or different direction before writing it into `todo/TODO.md`.
 
 ## Session Design Directives
 
-- **No decision-only phases.** "Decide whether X needs Y" is a design question, not an implementation phase. Resolve it in the prior phase's acceptance criteria or a TODO note.
-- **Keep AI playtesting current.** Any new verb, target, prompt, map glyph, scenario, persistence state, or readout that an AI tester needs must be reflected in the terminal playtest harness as part of the same gameplay slice.
-- **Pace check: focus on action.** If the plan accumulates 3+ sessions of simulation building without a new gameplay mechanic, restructure before implementing.
+- **No decision-only phases.** Resolve design questions in the prior phase's acceptance criteria or a TODO note.
+- **Keep AI playtesting current.** Any new verb, target, NPC type, symbol, map glyph, scenario, or persistence state must be reflected in the terminal playtest harness as part of the same slice.
+- **Pace check: NPC first.** If the plan accumulates 3+ sessions of player verb work without a new NPC behavior, restructure before implementing.
 
 ## North Star Frame
 
-Neon Oubliette is about a young girl with inherited illicit tools moving through a massive sci-fi city made of complex systems: shelter, labor, supply, commerce, public works, scarcity, coercion, surveillance. The player should not become a manager, production planner, or commander.
+Neon Oubliette is about a young girl with inherited illicit tools moving through a massive sci-fi city made of complex, autonomous systems: shelter, labor, supply, commerce, public works, scarcity, coercion, surveillance. The player should not become a manager, production planner, or commander.
 
-The city should feel like a neon-lit oubliette: visible routes, clearance level access, institutional records, public surfaces with private control behind them, complex and independent NPC interactions, transit, vehicles, robots, drones, police guards, criminal gangs, construction crews, parks, colloseums, rich and poor. The player learns by exploring, eavesdropping, inspecting, hiding, spoofing, and choosing when to help, steal, expose, exploit, or disappear.
+The city should feel like a neon-lit oubliette: visible routes, clearance levels, institutional records, public surfaces with private control behind them, complex and independent NPC interactions, transit, vehicles, robots, drones, police guards, criminal gangs, construction crews, parks, coliseums, rich and poor. NPCs live their lives independently — workers clock in, guards patrol, traders negotiate, citizens eat and sleep and argue. The player learns by watching, eavesdropping, inspecting, hiding, carrying things, and choosing when to help, steal, expose, exploit, or disappear. NPC-to-NPC interactions are the primary entertainment; player verbs are tools for observation and limited intervention.
 
-The city is controlled by 5 independent factions, with an AGI at the head of each. Each AGI has a different personality, morality, and goals. The AGIs may be friendly or antagonistic with each other, creating a complex relationship web. The player's actions and wealth will have an impact on their reputation within each faction.
+The city is controlled by 5 independent factions, each headed by an AGI with a different personality, morality, and goals. The AGIs may be friendly or antagonistic with each other, creating a complex relationship web. The player's actions will affect their reputation within each faction over time.
 
 Implementation order should follow this ladder:
-
-- Visible local symptom.
-- One player verb or interference opportunity.
-- A readable consequence on the affected thing.
-- A tight persistence/playtest boundary if the state matters.
+- Autonomous NPC behavior loop, visible to the player without any input.
+- NPC-to-NPC interaction visible in real time (symbols first, speech text later).
+- One player observation verb that enriches what the player sees.
+- One player intervention that has a local, readable NPC consequence.
 - Wider simulation after local hooks prove the need.
+
+## Epoch: NPC Simulation Foundation
+
+Gameplay outcome: the city has multiple NPC types with visible, autonomous behavior loops. NPC-to-NPC interactions happen in real time and are the primary thing the player watches.
+
+Big Picture: Citizens, workers, guards, and traders each have a visible daily loop. A worker clocks in and out and shows distress when their supply is missing. A guard patrols and confronts a suspicious citizen — both showing emotion symbols. A trader stands at a market and approaches nearby citizens. All of this is visible without the player pressing anything. The player chooses when to step in, steal something, or observe from a distance. Emotion symbols are the first visual language; speech bubbles with short text come later.
+
+Example sessions:
+
+- Session: NPC Emotion Surface (symbols above glyphs — see active TODO)
+- Session: Production Loop As City System (worker output → depot, citizen $ interest)
+- Session: Second NPC Type — Guard (patrol, observes workers/citizens, real-time symbols)
+- Session: Citizen needs loop — citizen shows hunger ($), walks to market, satisfaction symbol
+- Session: NPC-to-NPC speech — guard stops a worker, both show symbols, one short text line above each
+
+## Epoch: Surveillance — The City Watches NPCs
+
+Gameplay outcome: surveillance systems observe NPC citizens, not just the player. The player watches surveillance watching others and can use carried items to interfere with what surveillance records.
+
+Big Picture: Guards, drones, and audit robots each have visible observation fields. A guard sees a worker near the depot at an odd hour and flags them. A drone logs a citizen's repeated market visit. An audit terminal produces a flag readout visible to the player. The player can observe all of this and optionally interfere — blocking a drone's sightline by standing in it, slipping a data chip into an audit terminal, or slipping a note to a watched citizen. Surveillance is about the city's internal systems watching each other; the player is a third party who can subvert or exploit those observations.
+
+Example sessions:
+
+- Session: One guard with a visible observation field and patrol coverage map
+- Session: Guard-to-NPC interaction: guard checks a worker, worker shows distress, guard shows aggression
+- Session: Drone observation field visible to player; SPACE reveals drone's current log target
+- Session: Player uses G (with carried item) to interfere with one surveillance record
 
 ## Epoch: Municipal Access And Public Control
 
-Gameplay outcome: public infrastructure stops being only scenery and becomes a layered local control surface the player can inspect and spoof.
+Gameplay outcome: public infrastructure has staff, autonomous routines, and access layers. The player can observe institutional life from the outside and use tools to navigate one restricted boundary.
 
-Big Picture Example: There is a clinic made up of doctors, nurses, robots, etc. The clinic has a large database of patient history. Supplies are regularly delivered to the hospital via a loading dock. Employees move the supplies to proper storage locations within the clinic. The clinic is organized like a modern day hospital: emergency room that holds injured citizens, vehicle bay for ambulances, surgery wing, labor delivery and nursery for births, etc. A janitor cleans up the rooms once vacated. A business org runs the hospital and attempts to extract profits. Injured citizens within the macro zone use the nearest hospital. The player must gain security clearance to access the back rooms. Entering without clearance raises suspicion and can lead to security measures against the player. Doctors clock in and clock out, returning home via public transit.
+Big Picture: A clinic has doctors, nurses, janitors, and robots all moving autonomously. Injured citizens arrive by ambulance, are triaged, treated, and discharged. The clinic has restricted records and a loading dock with supply deliveries. A business org skims profit. The player watches this machine operate, learns its rhythms, and finds one weak point they can exploit with a carried item or observed credential. No health system for the player — only observation of the city's healthcare as an institution.
 
 Example sessions:
 
-- Session: Clinic Architectural Layout
-- Session: Clinic NPC jobs and goals
-- Session: Local NPC injury => ambulance => emergency room => treatment => discharge loop
+- Session: Clinic NPC jobs and visible autonomous routines
+- Session: Injured citizen → ambulance → emergency room → discharge loop
+- Session: Player observes credential exchange and uses a carried item to pass one access layer
 
 ## Epoch: Commerce, Rations, And Exchange Pressure
 
-Gameplay outcome: the market is core to the lives of NPC citizens and a broader economy.
+Gameplay outcome: markets are at the core of NPC citizen lives. Citizens shop, consume, and show distress when supply is scarce. Markets must be supplied by trucks from outside the district.
 
-Big Picture: Citizens need to buy food, water, shelter, clothing, etc. in order to live their lives. A variety of markets cater to these needs. The markets must be supplied with wares to sell, often via truck or other large transport. Markets in poor neighborhoods will have lower quality wares. There are central "market districts" that sell luxury goods for a high price. We do not need to get as granular as raw material extraction. At least for now, it is ok for transport vehicles to enter from the player-inaccessible city limits and bring their goods to factories or refineries on the city outskirts.
-
-Example sessions:
-
-- Session: A variety of markets
-- Session: Buying / selling / trading system
-- Session: NPC commerce loop: buying clothes, buying food, taking home, using and consuming.
-
-## Epoch: Tool UI system
-
-Gameplay outcome: using the inherited debugger tool prints results to a Unix-terminal inspired windowed readout.
-
-Big Picture: Instead of the most recent tool-use printing in a debug line, a new window can open up with a terminal style print-out of the debugger results. The window should mimic a linux GUI window, with a button to close, and a mouse-draggable top bar so the player can move the window where they see fit on the screen.
+Big Picture: Citizens visit markets autonomously based on need. Market stock depletes and restocks via supply deliveries. Markets in poor districts have lower quality and more distress. Citizens in wealthy districts show commerce symbols near luxury stalls. The player observes the flow of goods through the city and can interrupt it — stealing a supply truck's cargo, hiding stock, or redirecting a delivery — to see the downstream effect on NPC citizens.
 
 Example sessions:
 
-- Session: Opening a GUI window over the gameplay window
-- Session: Terminal UI design
-- Session: GUI window mouse manipulation
-
+- Session: Citizen commerce loop (citizen shows $, walks to market, takes item, satisfaction)
+- Session: Market supply delivery — truck arrives at loading dock, stock is moved inside
+- Session: Market scarcity — empty market triggers citizen distress cascade
 
 ## Epoch: Shelter
 
-Gameplay outcome: Macro zones have real estate dealers that can offer housing based on market pricing. A slum unit is extremely cheap, whereas a penthouse downtown is extremely expensive.
+Gameplay outcome: housing has visible social pressure. Citizens live in specific buildings; some are overcrowded, some are vacant. The player can observe evictions and find alternate shelter through observation, not a purchase menu.
 
-Big Picture: The player has a home base that can be found on some sort of city map. The player can store goods in their home base. The player can buy a new shelter- part of the payment goes to movers who transfer player belongings (price based on quantity and value)
-
-Example sessions:
-
-- Session: Types of shelter
-- Session: Real estate agent
-- Session: Shelter transfer
-
-## Epoch: Surveillance
-
-Gameplay outcome: Depending on the AGI faction who controls a macro zone, there will be different types of surveillance. The player's standing within the faction determines the level and extent of surveillance and rule-breaking consequences.
-
-Big Picture: Laws per AGI, guards per AGI/faction, consequences for rule breaking, player reputation
+Big Picture: Citizens have home addresses. Overcrowded units produce visible distress. Evictions happen — a citizen is removed, their glyph appears outside with a distress symbol. The player can squat in a temporarily vacant unit, observe a landlord agent making rounds, or watch a family shelter in a transit station. No real estate menu, no prices — just the city's housing pressure made visible.
 
 Example sessions:
 
-- Session: Surveillance tools: drones and robots
-- Session: Laws per AGI
-- Session: Jail, repercussions, violence
-- Session: Faction Reputation
+- Session: Citizens assigned to residential buildings, visible home address on inspection
+- Session: Housing pressure — overcrowded units, distress symbols, eviction event
+- Session: Player finds a vacant unit by observation (no purchase verb; occupancy from carrying a key item or watching a handoff)
 
-## Epoch: Complex transit
+## Epoch: Complex Transit
 
-Gameplay outcome: Regardless of player action, the city is in constant motion. NPC citizens going to work, guard robots monitoring, drones taking dead bodies to the crematorium. Trains run on a real-time schedule between macro zones. Trucks pick up and deliver goods to markets, factories, refineries. 
+Gameplay outcome: the city moves continuously and visibly. Trains run on schedule. Citizens commute. Vehicles carry goods. The player can board and observe any of it.
 
-Big Picture: Transit moves in real time and is subject to traffic jams, delays, and obstructions. Independent vehicles are controlled by an NPC- for example, a hover craft being driven to work. Vehicles are not "set dressing"- they are simply tools used by citizens to accomplish their goals. Vehicles can break, be fixed, be purchased. Poor to mid-level citizens cannot purchase vehicles and must rely on transit.
+Big Picture: Transit moves in real time and is subject to delays and obstructions independent of the player. Citizens use transit to get to work; a late train cascades into worker tardiness and a delayed depot. The player can observe timetables, miss a train, board a vehicle bound for an unexplored district, or block a freight delivery to see what starves downstream.
 
 Example sessions:
 
-- Session: Train in motion
-- Session: NPC owns a car, stores it at home, takes it to work
-- Session: Road signs, traffic flows
-
+- Session: Citizen uses transit to commute to work, shows confusion if train is late
+- Session: Freight vehicle in motion with autonomous loading/unloading at a depot
+- Session: Road signs, pedestrian crossings, visible traffic flows tied to NPC schedules
 
 ## Idea List (upcoming):
 
-- Full building doors, multi-room interiors, furniture components, and pathfinding.
-- Multi-slot inventory, equipment, scanner tools, item provenance, market barter, and survival counters.
-- Biology, injury, pathogens, cognitive state, relationships, schedules, conversations, rumors, and eavesdropping.
-- Roads, traffic, vehicles, power grid simulation, conduits, and city-scale infrastructure.
-- Factions, wanted level, directive markets, law enforcement, crises, xenos, AGI cores, death cascade, sanctuary systems, and broad narrative simulation.
-- Sparse-set ECS replacement unless profiling proves the current registry is blocking active work.
-
+- Full building interiors: multiple rooms, doors, multi-floor pathfinding for NPCs.
+- Faction reputation: player actions affect standing with each AGI-led faction.
+- Laws per faction: different districts have different rules; guards enforce their faction's law.
+- Wanted level, consequences, jail: local only at first, then faction-wide.
+- Biology for NPCs: hunger, injury, sleep — drives their behavior, visible to the player.
+- Relationships between NPCs: friends, enemies, family; affects who helps whom in distress.
+- Sparse-set ECS replacement if profiling proves the current registry is blocking active work.

@@ -8,6 +8,35 @@
 // Phase 99: Market category labels
 // ---------------------------------------------------------------------------
 
+static WorldConfig makeMarketCategoryTestConfig(int macro_count_x) {
+    WorldConfig config = makeSandboxConfig();
+    config.macro_count_x = macro_count_x;
+    config.market_micro_zone_count = 1;
+    config.market_building_count = 1;
+    return config;
+}
+
+static void assertMarketCategoriesMatchDistricts(int macro_count_x) {
+    Registry registry;
+    WorldConfig config = makeMarketCategoryTestConfig(macro_count_x);
+    buildWorld(registry, config);
+    assert(validateWorld(registry, config));
+
+    int found_market_count = 0;
+    auto buildings = registry.view<BuildingUseComponent, MarketLedgerComponent>();
+    for (Entity e : buildings) {
+        if (registry.get<BuildingUseComponent>(e).role == MicroZoneRole::MARKET) {
+            const uint32_t district_id = districtIdForEntity(registry, e);
+            const std::string expected = marketCategoryForDistrict(district_id);
+            assert(std::string(registry.get<MarketLedgerComponent>(e).category) == expected &&
+                   "Market category must be derived from its district");
+            ++found_market_count;
+        }
+    }
+    assert(found_market_count == macro_count_x &&
+           "Each configured district must expose one authored market category");
+}
+
 static void testMarketBuildingHasMarketLedgerComponent() {
     AiPlaytestSession session;
     assert(buildAiPlaytestSession(session));
@@ -47,21 +76,11 @@ static void testMarketCategoryForDistrictCyclesThroughThreeLabels() {
 }
 
 static void testSingleDistrictConfigGivesRationDepotCategory() {
-    AiPlaytestSession session;
-    assert(buildAiPlaytestSession(session));
+    assertMarketCategoriesMatchDistricts(1);
+}
 
-    auto buildings = session.registry.view<BuildingUseComponent, MarketLedgerComponent>();
-    bool found_market = false;
-    for (Entity e : buildings) {
-        if (session.registry.get<BuildingUseComponent>(e).role == MicroZoneRole::MARKET) {
-            found_market = true;
-            const uint32_t district_id = districtIdForEntity(session.registry, e);
-            const std::string expected = marketCategoryForDistrict(district_id);
-            assert(std::string(session.registry.get<MarketLedgerComponent>(e).category) ==
-                   expected && "Market category must match district-derived category");
-        }
-    }
-    assert(found_market && "Default world must contain at least one market building");
+static void testTwoDistrictConfigGivesStableMarketCategories() {
+    assertMarketCategoriesMatchDistricts(2);
 }
 
 static void testMarketInspectionReadoutShowsCategory() {
@@ -209,6 +228,31 @@ static void testExchangeWithSupplyMarksRationClaimed() {
     assert(has_result && "Exchange with SUPPLY must record RATION CLAIMED");
 }
 
+static void testExchangeWithNonCarryableObjectReportsWrongItem() {
+    AiPlaytestSession session;
+    assert(buildAiPlaytestSession(session));
+
+    std::string result;
+
+    Entity object = session.registry.create();
+    session.registry.assign<TransformComponent>(object, 0.0f, 0.0f, 8.0f, 8.0f);
+    session.registry.get<PlayerComponent>(session.player).carried_object = object;
+
+    assert(warpAiPlaytestPlayer(session, "MARKET", &result));
+    assert(applyAiPlaytestKey(session, "E", &result));
+
+    auto buildings = session.registry.view<BuildingUseComponent, MarketLedgerComponent>();
+    bool has_result = false;
+    for (Entity e : buildings) {
+        if (session.registry.get<BuildingUseComponent>(e).role == MicroZoneRole::MARKET &&
+            session.registry.get<MarketLedgerComponent>(e).last_exchange_result ==
+                "WRONG ITEM: MARKET ACCEPTS PART OR SUPPLY") {
+            has_result = true;
+        }
+    }
+    assert(has_result && "Exchange with a non-carryable object must say why it failed");
+}
+
 static void testExchangeRecordsInspectionReadoutAfterExchange() {
     AiPlaytestSession session;
     assert(buildAiPlaytestSession(session));
@@ -222,6 +266,7 @@ static void testExchangeRecordsInspectionReadoutAfterExchange() {
     const std::string snapshot = aiPlaytestSnapshot(session);
 
     assert(snapshot.find("LAST EXCHANGE:") != std::string::npos);
+    assert(snapshot.find("(VOLATILE)") != std::string::npos);
 }
 
 static void testGadgetResultAfterExchange() {
@@ -288,12 +333,14 @@ int main() {
     testMarketCategoryAssignedFromDistrict();
     testMarketCategoryForDistrictCyclesThroughThreeLabels();
     testSingleDistrictConfigGivesRationDepotCategory();
+    testTwoDistrictConfigGivesStableMarketCategories();
     testMarketInspectionReadoutShowsCategory();
     testPlayerCanExchangeAtMarketWhenNearMarket();
     testActionLineShowsExchangeAtMarketPrompt();
     testExchangeNoItemRecordsDeferredClaim();
     testExchangeWithPartConvertsToSupply();
     testExchangeWithSupplyMarksRationClaimed();
+    testExchangeWithNonCarryableObjectReportsWrongItem();
     testExchangeRecordsInspectionReadoutAfterExchange();
     testGadgetResultAfterExchange();
     testExchangeResultIsNotPersistedAcrossSaveLoad();

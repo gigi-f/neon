@@ -21,7 +21,8 @@ static void testMinimalWorldValidation() {
     assert(registry.view<MacroZoneComponent>().size() == 1);
     assert(registry.view<MicroZoneComponent>().size() == 1);
     assert(registry.view<BuildingComponent>().size() == 1);
-    assert(registry.entity_count() == 3);
+    assert(registry.entity_count() == 4);
+    assert(registry.view<ShelterListingComponent>().size() == 1);
 }
 
 int main() {

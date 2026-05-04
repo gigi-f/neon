@@ -108,7 +108,7 @@ static void testBuildWorldCreatesOnlyHousingBaseline() {
 
     assert(macros.size() == 1);
     assert(validateWorld(registry, config));
-    assert(registry.entity_count() == 3);
+    assert(registry.entity_count() == 4);
 
     auto macro_view = registry.view<MacroZoneComponent>();
     auto micro_view = registry.view<MicroZoneComponent>();
@@ -128,6 +128,7 @@ static void testBuildWorldCreatesOnlyHousingBaseline() {
     assert(registry.get<BuildingUseComponent>(building).role == MicroZoneRole::HOUSING);
     assert(registry.has<SolidComponent>(building));
     assert(registry.has<GlyphComponent>(building));
+    assert(firstShelterListingInDistrict(registry, 0) != MAX_ENTITIES);
 }
 
 static void testConfiguredHousingCountCreatesNonOverlappingBuildings() {
@@ -144,7 +145,7 @@ static void testConfiguredHousingCountCreatesNonOverlappingBuildings() {
 
     auto buildings = registry.view<BuildingComponent, TransformComponent, BuildingUseComponent>();
     assert(buildings.size() == 3);
-    assert(registry.entity_count() == 5);
+    assert(registry.entity_count() == 6);
     assert(buildingsDoNotOverlap(registry));
 
     for (Entity building : buildings) {
@@ -283,6 +284,82 @@ static void testCommercialSiteRolePlacementAndInspection() {
     assert(readout.find("FUNCTION: EXCHANGE SITE") != std::string::npos);
     assert(readout.find("CATEGORY:") != std::string::npos);
     assert(readout.find("ACCESS PRESSURE: LOCAL ONLY") != std::string::npos);
+}
+
+static void testShelterListingSurfaceIsDistrictLocalAndInspectable() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.macro_count_x = 2;
+
+    buildWorld(registry, config);
+
+    assert(validateWorld(registry, config));
+    const Entity listing_a = firstShelterListingInDistrict(registry, 0);
+    const Entity listing_b = firstShelterListingInDistrict(registry, 1);
+    assert(listing_a != MAX_ENTITIES);
+    assert(listing_b != MAX_ENTITIES);
+    assert(listing_a != listing_b);
+    assert(registry.has<ShelterListingComponent>(listing_a));
+    assert(registry.has<ShelterListingComponent>(listing_b));
+    assert(registry.get<ShelterListingComponent>(listing_a).district_id == 0);
+    assert(registry.get<ShelterListingComponent>(listing_b).district_id == 1);
+
+    const std::string readout_a = shelterListingReadout(registry, listing_a);
+    assert(readout_a.find("A:SHELTER LISTING: STACK ROOM") != std::string::npos);
+    assert(readout_a.find("PRESSURE: WAITLISTED") != std::string::npos);
+    assert(readout_a.find("RISK: CLEARANCE REQUIRED") != std::string::npos);
+    assert(readout_a.find("HOME BASE: UNCHANGED") != std::string::npos);
+    assert(readout_a.find("INTEREST: UNMARKED") != std::string::npos);
+    assert(shelterListingDebuggerReadout(registry, listing_a).find("TRANSFER: LOCKED") !=
+           std::string::npos);
+
+    const TransformComponent player_at_listing = registry.get<TransformComponent>(listing_a);
+    const InspectionTarget target = nearestInspectionTargetInRange(registry,
+                                                                   player_at_listing,
+                                                                   22.0f);
+    assert(target.entity == listing_a);
+    assert(target.type == InspectionTargetType::SHELTER_LISTING);
+}
+
+static void testShelterListingInterestToggleDoesNotChangeHomeBase() {
+    Registry registry;
+    WorldConfig config = makeSandboxConfig();
+    config.macro_count_x = 2;
+
+    buildWorld(registry, config);
+
+    const Entity listing_a = firstShelterListingInDistrict(registry, 0);
+    const Entity listing_b = firstShelterListingInDistrict(registry, 1);
+    const Entity housing = firstBuildingByRole(registry, MicroZoneRole::HOUSING);
+    assert(listing_a != MAX_ENTITIES);
+    assert(listing_b != MAX_ENTITIES);
+    assert(housing != MAX_ENTITIES);
+
+    Entity player = registry.create();
+    registry.assign<TransformComponent>(player, registry.get<TransformComponent>(listing_a));
+    registry.assign<PlayerComponent>(player);
+    registry.assign<InheritedGadgetComponent>(player);
+    registry.assign<BuildingInteractionComponent>(player);
+
+    const bool home_improved_before =
+        registry.get<BuildingImprovementComponent>(housing).improved;
+    const int home_supply_before = registry.get<ShelterStockComponent>(housing).current_supply;
+
+    assert(playerCanToggleShelterListingInterest(registry, player, 18.0f));
+    assert(toggleShelterListingInterest(registry, player, 18.0f));
+    assert(registry.get<ShelterListingComponent>(listing_a).interest_marked);
+    assert(!registry.get<ShelterListingComponent>(listing_b).interest_marked);
+    assert(shelterListingReadout(registry, listing_a).find("INTEREST: MARKED (VOLATILE)") !=
+           std::string::npos);
+    assert(registry.get<InheritedGadgetComponent>(player).last_result ==
+           "SHELTER INTEREST MARKED: RECORD INQUIRY OPENED");
+    assert(registry.get<BuildingImprovementComponent>(housing).improved == home_improved_before);
+    assert(registry.get<ShelterStockComponent>(housing).current_supply == home_supply_before);
+
+    assert(toggleShelterListingInterest(registry, player, 18.0f));
+    assert(!registry.get<ShelterListingComponent>(listing_a).interest_marked);
+    assert(registry.get<InheritedGadgetComponent>(player).last_result ==
+           "SHELTER INTEREST CLEARED: RECORD INQUIRY REMOVED");
 }
 
 static void testFiveRoleLayoutKeepsWorkerPathsConnectedAndMarketClear() {
@@ -971,7 +1048,7 @@ static void testCarryableItemKindLabelsAndSaveRoundTrip() {
     assert(workerCarryReadout(registry, worker) == "WORKER ROUTINE: DELIVERING SUPPLY; REASON: WAGE ROUTE; CARRYING: SUPPLY");
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V12") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V13") != std::string::npos);
     assert(serialized.find("CARRYABLE 1 SUPPLY") != std::string::npos);
 
     TinySaveState parsed;
@@ -5695,7 +5772,7 @@ static void testTinySaveRoundTripRestoresWageRecordSpoofed() {
 
     registry.get<FixedActorComponent>(worker).wage_record_spoofed = true;
     const std::string save_text = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(save_text.find("NEON_TINY_SAVE_V12") != std::string::npos);
+    assert(save_text.find("NEON_TINY_SAVE_V13") != std::string::npos);
 
     TinySaveState state;
     assert(deserializeTinySaveState(save_text, state) == TinySaveStatus::OK);
@@ -6151,7 +6228,7 @@ static void testTinySaveRoundTripRestoresWorldPhaseAndTwoWorkers() {
     registry.get<FixedActorComponent>(workers[1]).acknowledged = true;
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V12") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V13") != std::string::npos);
     assert(serialized.find("WORLD_PHASE NIGHT 3") != std::string::npos);
     assert(serialized.find("WORKERS 2") != std::string::npos);
 
@@ -6295,6 +6372,17 @@ static std::vector<Entity> stationsInOrder(Registry& registry) {
     return ordered;
 }
 
+static void advanceStationToBoarding(Registry& registry, Entity station) {
+    assert(station != MAX_ENTITIES);
+    for (int i = 0; i < 64; ++i) {
+        if (transitSignalBoardingNow(registry.get<StationComponent>(station))) {
+            return;
+        }
+        advanceTransitStationSignals(registry, 0.25f);
+    }
+    assert(false && "station signal should reach boarding state");
+}
+
 static Entity firstBuildingByRoleInDistrict(Registry& registry,
                                             MicroZoneRole role,
                                             uint32_t district_id) {
@@ -6364,6 +6452,72 @@ static void testTransitStationsRequireTwoDistrictConfig() {
            std::string::npos);
 }
 
+static void testTransitStationSignalAdvancesWithElapsedTime() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    config.transit_signal_cycle_seconds = 4.0f;
+    buildTransitWorld(registry, config);
+    const auto stations = stationsInOrder(registry);
+    assert(stations.size() == 2);
+
+    auto& station = registry.get<StationComponent>(stations[0]);
+    assert(transitSignalStatus(station) == TransitSignalStatus::BOARDING);
+    assert(stationReadout(registry, stations[0]).find("TRAIN: BOARDING") !=
+           std::string::npos);
+
+    advanceTransitStationSignals(registry, 1.6f);
+    assert(transitSignalStatus(station) == TransitSignalStatus::DEPARTED);
+    assert(stationReadout(registry, stations[0]).find("BOARD IN:") !=
+           std::string::npos);
+
+    advanceStationToBoarding(registry, stations[0]);
+    assert(transitSignalStatus(station) == TransitSignalStatus::BOARDING);
+}
+
+static void testTransitBoardAttemptWaitsForBoardingSignal() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    config.transit_signal_cycle_seconds = 4.0f;
+    Entity player = buildTransitWorld(registry, config);
+    const auto stations = stationsInOrder(registry);
+    assert(stations.size() == 2);
+    registry.get<TransformComponent>(player) = stationExitTransform(registry, stations[1]);
+    const uint32_t start_district = playerCurrentDistrictId(registry, player);
+
+    assert(playerCanBoardTransit(registry, player, 18.0f));
+    assert(!transitSignalBoardingNow(registry.get<StationComponent>(stations[1])));
+    assert(!enterTransitRide(registry, player, 18.0f, config.transit_ride_seconds));
+    assert(!playerInsideTransitInterior(registry, player));
+    assert(playerCurrentDistrictId(registry, player) == start_district);
+    assert(inheritedGadgetResultReadout(registry, player).find("WAIT") != std::string::npos);
+
+    advanceStationToBoarding(registry, stations[1]);
+    assert(enterTransitRide(registry, player, 18.0f, config.transit_ride_seconds));
+    assert(playerInsideTransitInterior(registry, player));
+}
+
+static void testTransitCrossDistrictReturnWaitsForLocalSignal() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    config.transit_signal_cycle_seconds = 4.0f;
+    Entity player = buildTransitWorld(registry, config);
+    const auto stations = stationsInOrder(registry);
+    assert(stations.size() == 2);
+    registry.get<TransformComponent>(player) = stationExitTransform(registry, stations[0]);
+
+    assert(enterTransitRide(registry, player, 18.0f, config.transit_ride_seconds));
+    const uint32_t origin_district = registry.get<StationComponent>(stations[0]).district_id;
+    const uint32_t destination_district = registry.get<StationComponent>(stations[1]).district_id;
+    assert(finishTransitRide(registry, player, true));
+    assert(playerCurrentDistrictId(registry, player) == destination_district);
+
+    assert(!enterTransitRide(registry, player, 18.0f, config.transit_ride_seconds));
+    advanceStationToBoarding(registry, stations[1]);
+    assert(enterTransitRide(registry, player, 18.0f, config.transit_ride_seconds));
+    assert(finishTransitRide(registry, player, true));
+    assert(playerCurrentDistrictId(registry, player) == origin_district);
+}
+
 static void testTransitRideLookOutWindowCarriesObjectToDestination() {
     Registry registry;
     WorldConfig config = makeTransitTestConfig(2);
@@ -6428,7 +6582,7 @@ static void testTinySaveRoundTripRestoresTransitInterior() {
     registry.get<TransitRideComponent>(player).interior_position.x = 18.0f;
 
     const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
-    assert(serialized.find("NEON_TINY_SAVE_V12") != std::string::npos);
+    assert(serialized.find("NEON_TINY_SAVE_V13") != std::string::npos);
     assert(serialized.find("TRANSIT 1") != std::string::npos);
 
     TinySaveState state;
@@ -6440,6 +6594,31 @@ static void testTinySaveRoundTripRestoresTransitInterior() {
     assert(closeTo(ride.elapsed_seconds, 0.75f));
     assert(closeTo(ride.interior_position.x, 18.0f));
     assert(ride.destination_station == stations[1]);
+}
+
+static void testTinySaveRoundTripRestoresTransitStationSignals() {
+    Registry registry;
+    WorldConfig config = makeTransitTestConfig(2);
+    config.transit_signal_cycle_seconds = 4.0f;
+    Entity player = buildTransitWorld(registry, config);
+    const auto stations = stationsInOrder(registry);
+    assert(stations.size() == 2);
+
+    advanceTransitStationSignals(registry, 0.75f);
+    const float saved_elapsed = registry.get<StationComponent>(stations[0]).signal_elapsed_seconds;
+    const std::string serialized = serializeTinySaveState(captureTinySaveState(registry, player));
+    assert(serialized.find("NEON_TINY_SAVE_V13") != std::string::npos);
+    assert(serialized.find("TRANSIT_STATION_SIGNALS 2") != std::string::npos);
+
+    TinySaveState state;
+    assert(deserializeTinySaveState(serialized, state) == TinySaveStatus::OK);
+    registry.get<StationComponent>(stations[0]).signal_elapsed_seconds = 0.0f;
+    registry.get<StationComponent>(stations[1]).signal_elapsed_seconds = 0.0f;
+    assert(applyTinySaveState(registry, player, state) == TinySaveStatus::OK);
+    assert(closeTo(registry.get<StationComponent>(stations[0]).signal_elapsed_seconds,
+                   saved_elapsed));
+    assert(transitSignalStatus(registry.get<StationComponent>(stations[0])) ==
+           TransitSignalStatus::BOARDING);
 }
 
 static void testPerDistrictWorkersSpawnOnLocalLaborRoutes() {
@@ -6743,6 +6922,10 @@ static void testTinySaveRoundTripRestoresPerDistrictInterferenceBoundary() {
     assert(!loaded.has<LocalSuspicionComponent>(loaded_worker_b));
 
     assert(playerCanBoardTransit(loaded, loaded_player, 18.0f));
+    advanceStationToBoarding(loaded,
+                             nearestStationInRange(loaded,
+                                                   loaded.get<TransformComponent>(loaded_player),
+                                                   18.0f));
     assert(enterTransitRide(loaded, loaded_player, 18.0f, config.transit_ride_seconds));
     assert(finishTransitRide(loaded, loaded_player, true));
     assert(playerCurrentDistrictId(loaded, loaded_player) == 0);
@@ -6757,6 +6940,8 @@ int main() {
     testConfiguredSupplyCreatesThirdPurposeBuilding();
     testThreeRoleLayoutKeepsUsableBuildingFootprints();
     testCommercialSiteRolePlacementAndInspection();
+    testShelterListingSurfaceIsDistrictLocalAndInspectable();
+    testShelterListingInterestToggleDoesNotChangeHomeBase();
     testFiveRoleLayoutKeepsWorkerPathsConnectedAndMarketClear();
     testPedestrianPathRequiresHousingAndWorkplace();
     testSupplyPathRequiresConfiguredSupply();
@@ -6896,9 +7081,13 @@ int main() {
     testLayLowConsumesSupplyAndPreservesRecord();
     testLayLowFailureCasesAndNightPhase();
     testTransitStationsRequireTwoDistrictConfig();
+    testTransitStationSignalAdvancesWithElapsedTime();
+    testTransitBoardAttemptWaitsForBoardingSignal();
+    testTransitCrossDistrictReturnWaitsForLocalSignal();
     testTransitRideLookOutWindowCarriesObjectToDestination();
     testTransitRideCanWaitForDoorsThenExit();
     testTinySaveRoundTripRestoresTransitInterior();
+    testTinySaveRoundTripRestoresTransitStationSignals();
     testPerDistrictWorkersSpawnOnLocalLaborRoutes();
     testDistrictTagsAppearOnInspectionLabels();
     testDistrictSuspicionAndWageReadoutsDoNotLeak();

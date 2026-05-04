@@ -23,6 +23,7 @@ The system SHALL treat boarding transit as entering an interior ride space that 
 #### Scenario: Board station
 - **WHEN** the player is near a paired station
 - **AND** the player presses `E`
+- **AND** the station signal is in the boarding status
 - **THEN** the player SHALL enter a transit interior
 - **AND** the ride SHALL track origin station, destination station, elapsed time, door state, exterior position, and interior position
 
@@ -31,6 +32,25 @@ The system SHALL treat boarding transit as entering an interior ride space that 
 - **AND** the player uses movement input
 - **THEN** the player's transit interior position SHALL move within the transit car bounds
 - **AND** the trip timer SHALL continue advancing
+
+### Requirement: Scheduled train signal
+The system SHALL expose an elapsed-time station signal for each paired transit station.
+
+#### Scenario: Station status readout
+- **WHEN** the player inspects or targets a station
+- **THEN** the readout SHALL include the station's train status
+- **AND** the readout SHALL include either the time until boarding or the time until departure
+- **AND** the status SHALL advance from elapsed runtime rather than frame count
+
+#### Scenario: Wait to board
+- **WHEN** the player attempts to board outside the station's boarding status
+- **THEN** the player SHALL stay at the station
+- **AND** the action result SHALL explain how long to wait before boarding
+
+#### Scenario: Board during signal window
+- **WHEN** the player boards during the station's boarding status
+- **THEN** the ride SHALL begin toward the paired destination district
+- **AND** the action result SHALL name the next stop
 
 ### Requirement: Transit exit choices
 The system SHALL let the player choose between looking out the window immediately or waiting for the destination stop.
@@ -53,6 +73,11 @@ The system SHALL persist and expose transit state through existing save and AI p
 - **WHEN** the player saves while inside transit
 - **THEN** loading SHALL restore the active ride, origin, destination, elapsed time, door state, and interior position
 
+#### Scenario: Save station timing
+- **WHEN** the player saves while station signals are active
+- **THEN** loading SHALL restore each station's signal elapsed time and cycle interval
+
 #### Scenario: AI playtest snapshot
 - **WHEN** AI playtest observes the world
 - **THEN** station targets, transit prompts, current district, transit ride readout, and `T` map glyphs SHALL be visible in snapshots
+- **AND** station target details SHALL report the train signal status and wait/board timing

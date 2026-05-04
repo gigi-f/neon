@@ -307,7 +307,7 @@ inline bool exchangeAtMarket(Registry& registry,
         ledger.exchange_claimed = true;
         result_label = "SUPPLY: RATION CLAIMED";
     } else {
-        result_label = "WRONG ITEM";
+        result_label = "WRONG ITEM: MARKET ACCEPTS PART OR SUPPLY";
     }
 
     ledger.last_exchange_result = result_label;

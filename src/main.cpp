@@ -268,6 +268,7 @@ static const char* inspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::SUPPLY: return "SUPPLY";
         case InspectionTargetType::MARKET: return "MARKET";
         case InspectionTargetType::CLINIC: return "CLINIC";
+        case InspectionTargetType::SHELTER_LISTING: return "SHELTER LISTING";
         case InspectionTargetType::TRANSIT_STATION: return "TRANSIT STATION";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
         case InspectionTargetType::ROUTE_SIGNPOST: return "SIGNPOST";
@@ -295,6 +296,8 @@ static const char* inspectionDetail(InspectionTargetType type) {
             return "Commercial site. Observation only in this pass.";
         case InspectionTargetType::CLINIC:
             return "Public clinic. Municipal authority. Observation only.";
+        case InspectionTargetType::SHELTER_LISTING:
+            return "Real estate listing. Interest only. Home base unchanged.";
         case InspectionTargetType::TRANSIT_STATION:
             return "Transit platform. Board to ride between authored districts.";
         case InspectionTargetType::PEDESTRIAN_PATH:
@@ -334,6 +337,12 @@ static const char* inspectionDetail(Registry& registry, const InspectionComponen
         registry.alive(inspection.target_entity) &&
         registry.has<BuildingUseComponent>(inspection.target_entity)) {
         dynamic_detail = buildingInspectionReadout(registry, inspection.target_entity);
+        return dynamic_detail.c_str();
+    }
+    if (inspection.target_type == InspectionTargetType::SHELTER_LISTING &&
+        registry.alive(inspection.target_entity) &&
+        registry.has<ShelterListingComponent>(inspection.target_entity)) {
+        dynamic_detail = shelterListingReadout(registry, inspection.target_entity);
         return dynamic_detail.c_str();
     }
     if (inspection.target_type == InspectionTargetType::HOUSING_INTERIOR &&
@@ -955,6 +964,8 @@ int main(int, char**) {
                     workWorkplaceBench(registry, player);
                 } else if (playerCanBoardTransit(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
                     enterTransitRide(registry, player, BUILDING_INTERACTION_RANGE_WU, world_config.transit_ride_seconds);
+                } else if (playerCanToggleShelterListingInterest(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
+                    toggleShelterListingInterest(registry, player, BUILDING_INTERACTION_RANGE_WU);
                 } else if (playerCanExchangeAtMarket(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
                     exchangeAtMarket(registry, player, BUILDING_INTERACTION_RANGE_WU);
                 } else if (playerCanAttemptClinicRestrictedBoundary(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
@@ -1009,6 +1020,7 @@ int main(int, char**) {
 
         const uint8_t* keys = SDL_GetKeyboardState(nullptr);
         updatePlayer(registry, player, dt, keys);
+        advanceTransitStationSignals(registry, dt);
         advanceTransitRide(registry, player, dt);
         advanceWorldPhase(registry, dt);
         updateFixedActors(registry, dt);
@@ -1103,6 +1115,32 @@ int main(int, char**) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  E WORK BENCH  %s  [CARRIED: NONE]",
                               locationStateName(location_state),
                               workplaceBenchReadout(registry).c_str());
+            } else if (playerCanToggleShelterListingInterest(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
+                const Entity listing = nearestShelterListingInRange(registry,
+                                                                    registry.get<TransformComponent>(player),
+                                                                    BUILDING_INTERACTION_RANGE_WU);
+                const bool marked = listing != MAX_ENTITIES &&
+                                    registry.has<ShelterListingComponent>(listing) &&
+                                    registry.get<ShelterListingComponent>(listing).interest_marked;
+                std::snprintf(line, sizeof(line), "LOCATION:%s  E %s SHELTER INTEREST  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              marked ? "CLEAR" : "MARK",
+                              player_comp.carried_object != MAX_ENTITIES ?
+                                  carryableObjectLabel(registry, player_comp.carried_object) :
+                                  "NONE");
+            } else if (playerCanBoardTransit(registry, player, BUILDING_INTERACTION_RANGE_WU)) {
+                const Entity station = nearestStationInRange(registry,
+                                                             registry.get<TransformComponent>(player),
+                                                             BUILDING_INTERACTION_RANGE_WU);
+                const std::string status = station != MAX_ENTITIES ?
+                    stationReadout(registry, station) :
+                    std::string("TRANSIT STATION");
+                std::snprintf(line, sizeof(line), "LOCATION:%s  %s  [CARRIED: %s]",
+                              locationStateName(location_state),
+                              status.c_str(),
+                              player_comp.carried_object != MAX_ENTITIES ?
+                                  carryableObjectLabel(registry, player_comp.carried_object) :
+                                  "NONE");
             } else if (player_comp.carried_object != MAX_ENTITIES) {
                 std::snprintf(line, sizeof(line), "LOCATION:%s  %s  F DROP %s  [CARRIED: %s]",
                               locationStateName(location_state),

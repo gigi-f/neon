@@ -23,7 +23,8 @@ inline constexpr float kAiPlaytestStepDt = 0.10f;
 enum class AiPlaytestScenario {
     DEFAULT,
     SUSPICION,
-    MARKET
+    MARKET,
+    SHELTER
 };
 
 struct AiPlaytestSession {
@@ -99,6 +100,7 @@ inline const char* aiInspectionTargetName(InspectionTargetType type) {
         case InspectionTargetType::SUPPLY: return "SUPPLY";
         case InspectionTargetType::MARKET: return "MARKET";
         case InspectionTargetType::CLINIC: return "CLINIC";
+        case InspectionTargetType::SHELTER_LISTING: return "SHELTER LISTING";
         case InspectionTargetType::TRANSIT_STATION: return "TRANSIT STATION";
         case InspectionTargetType::PEDESTRIAN_PATH: return "PATH";
         case InspectionTargetType::ROUTE_SIGNPOST: return "SIGNPOST";
@@ -128,6 +130,11 @@ inline std::string aiInspectionDetail(Registry& registry, const InspectionTarget
         registry.alive(target.entity) &&
         registry.has<BuildingUseComponent>(target.entity)) {
         return buildingInspectionReadout(registry, target.entity);
+    }
+    if (target.type == InspectionTargetType::SHELTER_LISTING &&
+        registry.alive(target.entity) &&
+        registry.has<ShelterListingComponent>(target.entity)) {
+        return shelterListingReadout(registry, target.entity);
     }
     if (target.type == InspectionTargetType::TRANSIT_STATION &&
         registry.alive(target.entity) &&
@@ -284,6 +291,18 @@ inline bool buildAiPlaytestSession(AiPlaytestSession& session,
             session.registry.get<TransformComponent>(market);
     }
 
+    if (scenario == AiPlaytestScenario::SHELTER) {
+        const Entity listing =
+            firstShelterListingInDistrict(session.registry,
+                                          playerCurrentDistrictId(session.registry,
+                                                                  session.player));
+        if (listing == MAX_ENTITIES || !session.registry.has<ShelterListingComponent>(listing)) {
+            return false;
+        }
+        session.registry.get<TransformComponent>(session.player) =
+            session.registry.get<TransformComponent>(listing);
+    }
+
     return true;
 }
 
@@ -316,6 +335,7 @@ inline bool loadAiPlaytestSession(AiPlaytestSession& session,
 }
 
 inline void advanceAiPlaytestSimulation(Registry& registry, float dt) {
+    advanceTransitStationSignals(registry, dt);
     auto players = registry.view<PlayerComponent>();
     for (Entity player : players) {
         advanceTransitRide(registry, player, dt);
@@ -496,6 +516,12 @@ inline bool applyAiPlaytestKey(AiPlaytestSession& session,
                              session.player,
                              kAiPlaytestInteractionRangeWu,
                              session.config.transit_ride_seconds);
+        } else if (playerCanToggleShelterListingInterest(session.registry,
+                                                         session.player,
+                                                         kAiPlaytestInteractionRangeWu)) {
+            toggleShelterListingInterest(session.registry,
+                                         session.player,
+                                         kAiPlaytestInteractionRangeWu);
         } else if (playerCanExchangeAtMarket(session.registry,
                                              session.player,
                                              kAiPlaytestInteractionRangeWu)) {
@@ -621,6 +647,10 @@ inline bool warpAiPlaytestPlayer(AiPlaytestSession& session,
         entity = aiFirstBuildingByRoleInCurrentDistrict(session, MicroZoneRole::MARKET);
     } else if (target == "CLINIC") {
         entity = aiFirstBuildingByRoleInCurrentDistrict(session, MicroZoneRole::CLINIC);
+    } else if (target == "LISTING" || target == "SHELTER") {
+        entity = firstShelterListingInDistrict(session.registry,
+                                               playerCurrentDistrictId(session.registry,
+                                                                       session.player));
     } else if (target == "WORKER") {
         entity = aiFirstWorkerInCurrentDistrict(session);
     } else if (target == "CARRYABLE" || target == "OBJECT") {
@@ -816,6 +846,12 @@ inline std::vector<std::string> aiPlaytestPlayerView(Registry& registry, Entity 
         aiPlaceViewPoint(view, priority, t.x, t.y, origin_x, origin_y, cell_size, 'T', 55);
     }
 
+    auto listings = registry.view<ShelterListingComponent, TransformComponent>();
+    for (Entity listing : listings) {
+        const auto& t = registry.get<TransformComponent>(listing);
+        aiPlaceViewPoint(view, priority, t.x, t.y, origin_x, origin_y, cell_size, 'L', 56);
+    }
+
     auto carryables = registry.view<CarryableComponent, TransformComponent>();
     for (Entity object : carryables) {
         if (carryableObjectIsHeld(registry, object)) continue;
@@ -940,6 +976,11 @@ inline std::vector<std::string> aiPlaytestMap(Registry& registry, Entity player)
         const auto& t = registry.get<TransformComponent>(station);
         aiPlaceMarker(map, t.x, t.y, min_x, min_y, scale, 'T');
     }
+    auto listings = registry.view<ShelterListingComponent, TransformComponent>();
+    for (Entity listing : listings) {
+        const auto& t = registry.get<TransformComponent>(listing);
+        aiPlaceMarker(map, t.x, t.y, min_x, min_y, scale, 'L');
+    }
     auto carryables = registry.view<CarryableComponent, TransformComponent>();
     for (Entity object : carryables) {
         if (carryableObjectIsHeld(registry, object)) continue;
@@ -996,7 +1037,24 @@ inline std::string aiPlaytestActionLine(Registry& registry, Entity player) {
     } else if (playerCanWorkWorkplaceBench(registry, player)) {
         out << "E WORK BENCH " << workplaceBenchReadout(registry);
     } else if (playerCanBoardTransit(registry, player, kAiPlaytestInteractionRangeWu)) {
-        out << "E BOARD TRANSIT";
+        const Entity station = nearestStationInRange(registry,
+                                                     registry.get<TransformComponent>(player),
+                                                     kAiPlaytestInteractionRangeWu);
+        if (station != MAX_ENTITIES && registry.has<StationComponent>(station)) {
+            const auto& signal = registry.get<StationComponent>(station);
+            out << (transitSignalBoardingNow(signal) ? "E BOARD TRANSIT " : "E WAIT TRANSIT ")
+                << stationReadout(registry, station);
+        } else {
+            out << "E BOARD TRANSIT";
+        }
+    } else if (playerCanToggleShelterListingInterest(registry, player, kAiPlaytestInteractionRangeWu)) {
+        const Entity listing = nearestShelterListingInRange(registry,
+                                                            registry.get<TransformComponent>(player),
+                                                            kAiPlaytestInteractionRangeWu);
+        const bool marked = listing != MAX_ENTITIES &&
+                            registry.has<ShelterListingComponent>(listing) &&
+                            registry.get<ShelterListingComponent>(listing).interest_marked;
+        out << "E " << (marked ? "CLEAR" : "MARK") << " SHELTER INTEREST";
     } else if (playerCanExchangeAtMarket(registry, player, kAiPlaytestInteractionRangeWu)) {
         const Entity market = nearestMarketBuildingInRange(registry,
                                                            registry.get<TransformComponent>(player),
@@ -1081,8 +1139,8 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
         playerInspectionTarget(registry, player, kAiPlaytestInspectionRangeWu);
 
     out << "=== NEON AI PLAYTEST ===\n";
-    out << "COMMANDS: snapshot | key W/A/S/D/E/F/T/SPACE/G | step N | reset [default|suspicion] | warp TARGET\n";
-    out << "TARGETS: HOUSING WORKPLACE SUPPLY MARKET CLINIC STATION WORKER SIGNPOST CARRYABLE\n";
+    out << "COMMANDS: snapshot | key W/A/S/D/E/F/T/SPACE/G/WAIT | step N | reset [default|suspicion|market|shelter] | warp TARGET\n";
+    out << "TARGETS: HOUSING WORKPLACE SUPPLY MARKET CLINIC LISTING STATION WORKER SIGNPOST CARRYABLE\n";
     out << "PLAYER: x=" << player_transform.x
         << " y=" << player_transform.y
         << " facing=" << aiFacingName(player_component.facing)
@@ -1149,7 +1207,7 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
     out << "-- PLAYER VIEW 33x17 CELL=8WU CENTERED ON @ "
         << worldPhaseReadout(registry) << " --\n";
     out << "LEGEND: @ player ^v<> facing H housing W workplace S supply M market C clinic "
-        << "T transit # solid . path w worker + signpost ! spoofed o object\n";
+        << "L listing T transit # solid . path w worker + signpost ! spoofed o object\n";
     for (const std::string& row : aiPlaytestPlayerView(registry, player)) {
         out << row << "\n";
     }
@@ -1177,6 +1235,8 @@ inline std::string aiPlaytestSnapshot(Registry& registry, Entity player) {
             type = InspectionTargetType::ROUTE_SIGNPOST;
         } else if (registry.has<PathComponent>(entity)) {
             type = InspectionTargetType::PEDESTRIAN_PATH;
+        } else if (registry.has<ShelterListingComponent>(entity)) {
+            type = InspectionTargetType::SHELTER_LISTING;
         } else if (registry.has<CarryableComponent>(entity)) {
             type = InspectionTargetType::CARRYABLE_OBJECT;
         }
@@ -1204,6 +1264,10 @@ inline bool parseAiPlaytestScenario(const std::string& raw, AiPlaytestScenario& 
     }
     if (value == "MARKET") {
         scenario = AiPlaytestScenario::MARKET;
+        return true;
+    }
+    if (value == "SHELTER" || value == "LISTING") {
+        scenario = AiPlaytestScenario::SHELTER;
         return true;
     }
     return false;
